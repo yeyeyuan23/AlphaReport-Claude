@@ -1,0 +1,275 @@
+taxonomy:
+  market:
+    label: "Market"
+    label_zh: "市场"
+    values:
+      china:
+        label: "China A-share"
+        keywords:
+          - "A股"
+          - "沪深"
+          - "中证"
+          - "上证"
+          - "深证"
+          - "CSI"
+          - "SSE"
+          - "SZSE"
+          - "中国"
+          - "china a-share"
+          - "chinese market"
+          - "chinese stock"
+          - "shanghai"
+          - "shenzhen"
+      overseas:
+        label: "Overseas"
+        keywords:
+          - "S&P"
+          - "NYSE"
+          - "NASDAQ"
+          - "US market"
+          - "European"
+          - "美股"
+          - "美国"
+          - "海外"
+          - "US equity"
+          - "US stock"
+      global:
+        label: "Global / Cross-market"
+        keywords:
+          - "global"
+          - "cross-market"
+          - "international"
+          - "multi-market"
+          - "全球"
+          - "跨市场"
+          - "emerging market"
+
+  asset_class:
+    label: "Asset Class"
+    label_zh: "资产类别"
+    values:
+      stock:
+        label: "Equity / Stock"
+        keywords:
+          - "stock"
+          - "equity"
+          - "股票"
+          - "选股"
+          - "个股"
+          - "stock selection"
+          - "cross-sectional"
+          - "stock return"
+      futures:
+        label: "Futures / CTA"
+        keywords:
+          - "futures"
+          - "CTA"
+          - "commodity"
+          - "期货"
+          - "商品"
+          - "趋势跟踪"
+          - "managed futures"
+      options:
+        label: "Options / Derivatives"
+        keywords:
+          - "option"
+          - "derivative"
+          - "volatility surface"
+          - "期权"
+          - "衍生品"
+          - "Greeks"
+          - "implied volatility"
+      fixed_income:
+        label: "Fixed Income / Bonds"
+        keywords:
+          - "bond"
+          - "fixed income"
+          - "yield"
+          - "债券"
+          - "利率"
+          - "信用"
+          - "interest rate"
+          - "credit spread"
+      crypto:
+        label: "Cryptocurrency"
+        keywords:
+          - "crypto"
+          - "bitcoin"
+          - "blockchain"
+          - "defi"
+          - "加密货币"
+          - "比特币"
+          - "ethereum"
+      multi_asset:
+        label: "Multi-Asset"
+        keywords:
+          - "multi-asset"
+          - "asset allocation"
+          - "多资产"
+          - "资产配置"
+
+  frequency:
+    label: "Trading Frequency"
+    label_zh: "交易频率"
+    values:
+      hft:
+        label: "High Frequency"
+        keywords:
+          - "HFT"
+          - "high frequency"
+          - "high-frequency"
+          - "tick"
+          - "microsecond"
+          - "order book"
+          - "高频"
+          - "逐笔"
+          - "盘口"
+          - "LOB"
+          - "limit order book"
+          - "latency"
+          - "co-location"
+      mid_freq:
+        label: "Mid Frequency"
+        keywords:
+          - "intraday"
+          - "minute bar"
+          - "hourly"
+          - "日内"
+          - "分钟线"
+          - "中频"
+          - "5-minute"
+          - "15-minute"
+      low_freq:
+        label: "Low / Daily+ Frequency"
+        keywords:
+          - "daily"
+          - "weekly"
+          - "monthly"
+          - "factor investing"
+          - "日频"
+          - "周频"
+          - "月频"
+          - "因子投资"
+          - "rebalancing"
+      mixed:
+        label: "Mixed / Unspecified"
+        keywords: []
+
+  topic:
+    label: "Research Topic"
+    label_zh: "研究主题"
+    values:
+      risk_model:
+        label: "Risk Model"
+        keywords:
+          - "risk model"
+          - "VaR"
+          - "CVaR"
+          - "risk factor"
+          - "Barra"
+          - "风险模型"
+          - "风控"
+          - "risk management"
+          - "drawdown"
+          - "tail risk"
+      factor_model:
+        label: "Factor Model / Alpha"
+        keywords:
+          - "factor"
+          - "alpha"
+          - "因子"
+          - "alpha信号"
+          - "选股因子"
+          - "多因子"
+          - "Fama-French"
+          - "factor model"
+          - "anomaly"
+          - "cross-sectional return"
+      ai_ml_model:
+        label: "AI / Machine Learning"
+        keywords:
+          - "machine learning"
+          - "deep learning"
+          - "neural network"
+          - "transformer"
+          - "GNN"
+          - "LSTM"
+          - "reinforcement learning"
+          - "机器学习"
+          - "深度学习"
+          - "GPT"
+          - "LLM"
+          - "random forest"
+          - "XGBoost"
+      execution_algo:
+        label: "Execution Algorithm"
+        keywords:
+          - "TWAP"
+          - "VWAP"
+          - "execution"
+          - "optimal execution"
+          - "market impact"
+          - "算法交易"
+          - "执行算法"
+          - "冲击成本"
+          - "transaction cost"
+          - "slippage"
+      portfolio_optimization:
+        label: "Portfolio Optimization"
+        keywords:
+          - "portfolio optimization"
+          - "mean-variance"
+          - "Black-Litterman"
+          - "组合优化"
+          - "投资组合"
+          - "Markowitz"
+          - "efficient frontier"
+          - "minimum variance"
+      market_microstructure:
+        label: "Market Microstructure"
+        keywords:
+          - "microstructure"
+          - "market making"
+          - "bid-ask"
+          - "order flow"
+          - "做市"
+          - "微观结构"
+          - "price impact"
+          - "adverse selection"
+          - "Kyle"
+      alternative_data:
+        label: "Alternative Data"
+        keywords:
+          - "alternative data"
+          - "NLP"
+          - "sentiment"
+          - "satellite"
+          - "social media"
+          - "另类数据"
+          - "舆情"
+          - "文本"
+          - "news"
+          - "web scraping"
+      volatility:
+        label: "Volatility"
+        keywords:
+          - "volatility"
+          - "GARCH"
+          - "stochastic volatility"
+          - "implied vol"
+          - "波动率"
+          - "realized volatility"
+          - "variance swap"
+      statistical_arbitrage:
+        label: "Statistical Arbitrage"
+        keywords:
+          - "pairs trading"
+          - "statistical arbitrage"
+          - "cointegration"
+          - "mean reversion"
+          - "统计套利"
+          - "配对交易"
+          - "spread"
+      other:
+        label: "Other"
+        keywords: []

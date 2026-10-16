@@ -1,0 +1,92 @@
+# ── AlphaReport (Claude Code Edition) ──────────────────
+
+app:
+  name: "AlphaReport-Claude"
+  version: "2.0.0"
+
+database:
+  path: "data/report_library.db"
+
+# ── Data Sources ──────────────────────────────────────
+sources:
+  local_pdf:
+    enabled: true
+    library_path: "data/pdf_library"
+
+  arxiv:
+    enabled: true
+    rate_limit_seconds: 3
+    download_pdfs: true
+    default_categories:
+      - "q-fin.TR"
+      - "q-fin.PM"
+      - "q-fin.RM"
+      - "q-fin.ST"
+      - "q-fin.CP"
+      - "q-fin.MF"
+
+  eastmoney:
+    enabled: true
+    rate_limit_seconds: 1
+    default_lookback_days: 180
+
+  bigquant:
+    enabled: true
+    rate_limit_seconds: 2
+    max_pages: 10
+
+# ── Classification ────────────────────────────────────
+classification:
+  taxonomy_path: "configs/classification_taxonomy.yaml"
+  rule_confidence_threshold: 0.7
+
+# ── LLM ──────────────────────────────────────────────
+llm:
+  thinking: "disabled"  # 结构化分类/分析留足输出空间；Anthropic 兼容接口使用
+  provider: "anthropic"
+  model: "deepseek-v4-pro"
+  # 用 DEEPSEEK_* 专属变量名，不要复用 ANTHROPIC_*：
+  # Claude Code 自身会在 shell 里注入 ANTHROPIC_AUTH_TOKEN(OAuth 令牌) 和
+  # ANTHROPIC_BASE_URL(官方端点)，复用同名变量会被它们覆盖 -> 401 invalid x-api-key。
+  api_key_env: "DEEPSEEK_API_KEY"
+  base_url_env: "DEEPSEEK_BASE_URL"
+
+# ── Collection ────────────────────────────────────────
+collection:
+  max_concurrent_sources: 4
+
+# ── Vector Store ──────────────────────────────────────
+vector_store:
+  persist_dir: "data/chroma_db"
+  embedding_backend: "local"
+  local_model: "BAAI/bge-small-zh-v1.5"
+  local_dim: 512
+
+# ── Feishu Bot ────────────────────────────────────────
+feishu:
+  enabled: true
+  app_id_env: "FEISHU_APP_ID"
+  app_secret_env: "FEISHU_APP_SECRET"
+  verification_token_env: "FEISHU_VERIFICATION_TOKEN"
+
+# ── Daily Report Scheduler ─────────────────────────────
+daily_report:
+  enabled: true  # Web 运行时，工作日按设定时间采集、筛选并推送
+  mode: "feishu"
+  timezone: "Asia/Shanghai"
+  # arxiv collection schedule (UTC, Mon-Fri)
+  arxiv_collection:
+    enabled: true
+    schedule_cron: "00:00"   # 8:00 北京时间
+  # Feishu mode uses timezone above; standalone collection uses UTC.
+  schedule_cron: "08:00"
+
+# ── Server ────────────────────────────────────────────
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+# One skill library for every adapter.
+skills:
+  builtin_dir: "skills"
+  user_dir: "data/user_skills"

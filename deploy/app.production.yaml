@@ -1,0 +1,91 @@
+# 生产环境 app.yaml（覆盖开发环境配置）
+# 将此文件复制到服务器: /data1/alphareport/configs/app.yaml
+
+app:
+  name: "ResearchReportAgent"
+  version: "1.0.0"
+
+database:
+  path: "data/report_library.db"
+
+sources:
+  local_pdf:
+    enabled: true
+    library_path: "data/pdf_library"
+
+  arxiv:
+    enabled: true
+    rate_limit_seconds: 3
+    default_categories:
+      - "q-fin.TR"
+      - "q-fin.PM"
+      - "q-fin.RM"
+      - "q-fin.ST"
+      - "q-fin.CP"
+      - "q-fin.MF"
+    download_pdfs: true
+
+  ssrn:
+    enabled: true
+    rate_limit_seconds: 5
+
+  eastmoney:
+    enabled: true
+    rate_limit_seconds: 1
+    default_lookback_days: 180
+
+  bigquant:
+    enabled: true
+    rate_limit_seconds: 2
+    max_pages: 10
+
+  broker:
+    enabled: false
+    configs: []
+
+classification:
+  taxonomy_path: "configs/classification_taxonomy.yaml"
+  rule_confidence_threshold: 0.7
+  llm_prompt_path: "configs/prompts/classification.yaml"
+
+llm:
+  provider: "deepseek"
+  api_key_env: "OPENAI_API_KEY"
+  base_url_env: "OPENAI_BASE_URL"
+  model: "deepseek-reasoner"
+  timeout: 120
+  max_retries: 3
+
+chat:
+  agent_version: "v2"
+  system_prompt_path: "configs/prompts/chat_system.txt"
+  brainstorm_prompt_path: "skills/research-ideation/system.md"
+  skills_dir: "skills"
+  user_skills_dir: "data/user_skills"
+  max_history_messages: 50
+  max_tool_iterations: 10
+
+collection:
+  max_concurrent_sources: 4
+  query_expansion_enabled: true
+
+vector_store:
+  persist_dir: "data/chroma_db"
+  embedding_backend: "local"
+  local_model: "BAAI/bge-small-zh-v1.5"
+  local_dim: 512
+  openai_model: "text-embedding-3-small"
+  openai_dim: 1536
+  openai_base_url: ""
+  voyage_model: "voyage-3-lite"
+  voyage_dim: 1024
+
+daily_report:
+  enabled: true
+  mode: "feishu"
+  timezone: "Asia/Shanghai"
+  schedule_cron: "08:00"
+
+server:
+  host: "0.0.0.0"
+  port: 8000

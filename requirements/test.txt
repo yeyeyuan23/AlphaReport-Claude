@@ -1,0 +1,7 @@
+# Lightweight test environment; excludes optional PDF OCR and embedding runtimes.
+-r bot.txt
+fastapi>=0.104
+uvicorn[standard]>=0.24
+langgraph>=0.2
+langchain-openai>=0.2
+pytest>=8.0

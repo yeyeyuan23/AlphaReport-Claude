@@ -1,0 +1,199 @@
+# AnalysisAgent 深度分析模板配置
+# 四阶段流水线：元数据提取 → 方法论解析 → 公式解读 → 综合评估
+
+analysis:
+  depth: "standard"  # quick | standard | deep
+
+  # Inline formula → LaTeX conversion before phases run
+  latexify:
+    enabled: false
+    max_chars_per_chunk: 4000
+    temperature: 0.1
+    max_tokens: 3000
+
+  phases:
+    # Phase 1: 元数据提取
+    metadata:
+      enabled: true
+      model: default
+      max_input_chars: 30000
+      temperature: 0.1
+      max_tokens: 2000
+      system_prompt: |
+        你是严谨的量化研究阅读助手。提取原文明确说明的研究问题、贡献、数据和基准；缺失项写未报告，不凭摘要补造全文结论。用中文，引用可核对的章节或表号。
+
+      output_schema: |
+        {
+          "research_question": "一句话概括研究问题",
+          "core_contribution": "核心创新点（1-2句话）",
+          "method_category": "factor_model | ai_ml_model | statistical_method | theoretical | empirical | other",
+          "data_used": {
+            "market": "china_a | us | global | ...",
+            "instruments": ["stock", "futures", "..."],
+            "frequency": "daily | weekly | monthly | intraday | mixed",
+            "sample_period": "如 2010-2020",
+            "universe": "如 沪深300成分股"
+          },
+          "benchmark_models": ["Fama-French 3-factor", "..."]
+        }
+
+      user_prompt_template: |
+        ## 论文标题
+        {title}
+
+        ## 论文摘要
+        {abstract}
+
+        ## 论文内容（前 {max_chars} 字符）
+        {content}
+
+        请提取以上论文的结构化信息，严格按 JSON 格式返回。所有文本内容用中文输出。
+
+    # Phase 2: 方法论+公式深度解析
+    methodology:
+      enabled: true
+      model: default
+      max_input_chars: 60000
+      max_context_equations: 20
+      temperature: 0.2
+      max_tokens: 6000
+      system_prompt: |
+        用中文解释作者实际采用的方法、关键假设、训练与验证步骤及适用边界。区分实证、理论、方法研究；理论论文无需强行解释交易回测。只解读提取清楚的公式，不凑公式、不虚构推导，不为了批评而批评。每项判断说明原文依据；无法确定的细节写未报告。
+
+      output_schema: |
+        {
+          "analysis_points": [
+            {
+              "title": "评议条目标题（批判性问题，如：'离散化假设：便利背后的代价'）",
+              "analysis": "6-12句同行评议。每个论点必须有公式支撑。关键公式用 $$...$$ 独立成行，符号用 $...$。禁止全文无公式。",
+              "marginal_contribution": "相对基准模型的增量贡献分析（2-3句话，指定具体基准名称，引用对比数据）",
+              "practical_implication": "对量化从业者的实际含义（2-3句话，要具体到操作层面：改变什么决策、以什么频率、代价是什么）",
+              "related_formulas": [0, 1]
+            }
+          ],
+          "factor_list": [
+            {
+              "name": "因子名称",
+              "type": "technical | fundamental | sentiment | macro | alternative",
+              "construction": "因子构建的详细逻辑，包含具体公式（用$...$格式），说明原始数据到因子值的完整计算过程",
+              "raw_or_neutralized": "是否做了行业/市值中性化处理，以及具体的中性化方法",
+              "formula_index": 0
+            }
+          ],
+          "model_architecture": {
+            "type": "linear | tree | neural_network | ensemble | graph | transformer | other",
+            "layers_or_structure": "模型结构描述，包含具体层数、维度等数值",
+            "loss_function": "损失函数的LaTeX表达式",
+            "regularization": "正则化方法及具体参数",
+            "training_scheme": "expanding_window | rolling_window | random_split | other，及具体窗口长度"
+          },
+          "portfolio_construction": {
+            "weighting": "equal_weight | value_weight | optimization_based | rank_based，以及权重公式",
+            "rebalance_frequency": "daily | weekly | monthly | quarterly",
+            "constraints": "long_only | long_short | sector_neutral | ...",
+            "transaction_cost_model": "交易成本模型的具体公式或描述"
+          }
+        }
+
+      user_prompt_template: |
+        论文标题：{title}
+
+        论文内容：
+        {content}
+
+        按输出结构介绍研究方法，每项解释应有原文依据，不能编造公式或实验。原文提取到的公式：{equations}
+    equations:
+      enabled: true
+      model: default
+      max_formulas_per_batch: 3
+      max_equations: 10
+      max_context_chars: 8000
+      temperature: 0.1
+      max_tokens: 1500
+      system_prompt: |
+        仅解读给定原文中清晰可辨认的公式及符号。提取缺损时说明无法确认，不补造等式、不猜测符号。用中文说明含义、假设和在论文中的作用。
+
+      output_schema: |
+        {
+          "equations": [
+            {
+              "index": 0,
+              "latex": "原始LaTeX公式",
+              "meaning": "公式的整体含义（一句话）",
+              "symbols": {
+                "symbol_name": "含义说明",
+                "...": "..."
+              },
+              "role_in_paper": "该公式在论文中的作用（1-2句话）",
+              "is_key_formula": true
+            }
+          ]
+        }
+
+      user_prompt_template: |
+        以下是论文中的一些数学公式及其上下文。请逐一解读。
+
+        论文标题：{title}
+
+        公式上下文文本：
+        {context}
+
+        公式列表：
+        {equations}
+
+        请对这 {count} 个公式逐一解读，严格按 JSON 格式返回。所有文本内容用中文输出。
+
+    # Phase 4: 综合评估
+    assessment:
+      enabled: true
+      model: default
+      max_input_chars: 60000
+      temperature: 0.3
+      max_tokens: 2500
+      system_prompt: |
+        依据全文评价方法、证据和适用范围；相关性与研究质量分开。实证研究检查数据、样本外基准、泄漏风险、稳健性及适用时的成本；理论研究检查假设与推导范围；券商和社区材料关注来源、透明度与复现细节。优势与局限均需原文依据。未报告的信息不是已证实的偏差；没有证据时标为unknown。practical_implications只写复现与验证建议，不编造操作频率、交易代价或资金配置建议。overall_quality_score仅为模型阅读意见，不是实验复现或正确概率。
+
+      output_schema: |
+        {
+          "overall_quality_score": 0.85,
+          "strengths": ["优势1", "优势2"],
+          "weaknesses": ["不足1", "不足2"],
+          "bias_risks": {
+            "look_ahead_bias": "low | medium | high | none | unknown",
+            "survivorship_bias": "low | medium | high | none | unknown",
+            "data_snooping": "low | medium | high | none | unknown",
+            "overfitting_concern": "具体描述过拟合风险，如无明显风险填 'none'"
+          },
+          "reproducibility": {
+            "level": "high | medium | low | unknown",
+            "has_data_source": true,
+            "has_code_available": false,
+            "missing_details": ["缺失的细节1"]
+          },
+          "a_share_applicability": {
+            "directly_applicable": true,
+            "adaptations_needed": ["需要调整的内容"],
+            "key_constraints": ["在A股市场的关键限制"]
+          },
+          "marginal_contribution_summary": "相对现有文献的增量贡献总评（2-3句话）",
+          "practical_implications": [
+            "推论1：具体的操作变化、频率、潜在代价",
+            "推论2：..."
+          ],
+          "key_contributions": ["核心贡献1", "核心贡献2"]
+        }
+
+      user_prompt_template: |
+        论文标题：{title}
+
+        论文内容（前 {max_chars} 字符）：
+        {content}
+
+        前面阶段的分析结果：
+        - 研究问题：{research_question}
+        - 核心贡献：{core_contribution}
+        - 方法类别：{method_category}
+        - 基准模型：{benchmarks}
+
+        请对该论文进行综合评估，必须包含 marginal_contribution_summary 和
+        practical_implications 字段。严格按 JSON 格式返回。所有文本内容用中文输出。{extra_context}

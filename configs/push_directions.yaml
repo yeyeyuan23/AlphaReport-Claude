@@ -1,0 +1,225 @@
+# ═══════════════════════════════════════════════════════════
+# AlphaReport 每日推送方向定义
+# 可通过飞书对话随时修改补充
+# ═══════════════════════════════════════════════════════════
+
+directions:
+
+  # ── 方向 1: A股多因子选股 ─────────────────────────────────
+  - name: "A股多因子选股"
+    id: "a_share_factor"
+    enabled: true
+    topics:
+      - factor_model
+    market: "a_share"
+    assets:
+      - stock
+    keywords:
+      - 多因子
+      - alpha因子
+      - 因子挖掘
+      - 因子择时
+      - 风格因子
+      - 行业轮动
+      - 量价因子
+      - 基本面因子
+      - 另类数据
+      - 因子拥挤
+      - 因子衰减
+      - IC
+      - IR
+      - 因子正交
+      - 多因子组合
+    description: "A股市场多因子选股模型，涵盖因子挖掘、择时、组合优化全流程"
+
+  # ── 方向 2: 机器学习量化模型 ─────────────────────────────
+  - name: "机器学习量化模型"
+    id: "ml_quant"
+    enabled: true
+    topics:
+      - ai_ml_model
+    market:
+      - a_share
+      - global
+    assets:
+      - stock
+      - futures
+      - crypto
+      - multi_asset
+    keywords:
+      - 深度学习
+      - 强化学习
+      - Transformer
+      - LSTM
+      - 图神经网络
+      - NLP
+      - LLM
+      - 大语言模型
+      - 生成模型
+      - 时序预测
+      - 梯度提升
+      - XGBoost
+      - LightGBM
+      - CatBoost
+      - 监督学习
+      - 随机森林
+      - 支持向量机
+      - LASSO
+      - 弹性网络
+      - 集成学习
+      - 神经网络
+      - 注意力机制
+      - 对比学习
+      - 自监督学习
+      - 迁移学习
+    description: "ML/DL方法在量化金融中的应用，覆盖A股与海外多资产"
+
+  # ── 方向 3: 投资组合优化 ─────────────────────────────────
+  - name: "投资组合优化"
+    id: "portfolio_optimization"
+    enabled: true
+    topics:
+      - portfolio_optimization
+      - risk_model
+    market:
+      - a_share
+      - global
+    assets:
+      - stock
+      - futures
+      - options
+      - multi_asset
+    keywords:
+      - 均值方差
+      - 风险平价
+      - 贝叶斯优化
+      - 稳健优化
+      - 交易成本
+      - Black-Litterman
+      - CVaR
+      - 最大夏普
+      - 风险预算
+      - 再平衡
+      - ESG约束
+      - 多期优化
+      - 随机控制
+      - 因子投资组合
+      - 层次风险平价
+      - 在线学习
+      - Barra
+      - 多因子风险模型
+      - 协方差估计
+      - 风险分解
+      - 行业风险
+      - 风格风险
+      - 特质风险
+      - 风险归因
+      - 压力测试
+      - 情景分析
+      - 尾部风险
+      - VaR
+    description: "投资组合构建、风险建模与优化方法，覆盖多资产类别"
+
+  # ── 方向 4: 高频交易与市场微观结构 ─────────────────────
+  - name: "高频交易与市场微观结构"
+    id: "hft_microstructure"
+    enabled: true
+    topics:
+      - market_microstructure
+      - execution_algo
+    market:
+      - a_share
+      - global
+    assets:
+      - stock
+      - futures
+      - crypto
+    keywords:
+      - 高频交易
+      - 订单簿
+      - 买卖价差
+      - 流动性
+      - 市场冲击
+      - 最优执行
+      - 做市策略
+      - 套利
+      - 限价订单簿
+      - tick数据
+      - 波动率微结构
+      - 市场微观结构噪声
+    description: "高频交易策略、订单簿动力学与最优执行算法"
+
+  # ── 方向 5: 波动率与衍生品定价 ──────────────────────────
+  - name: "波动率与衍生品定价"
+    id: "volatility_derivatives"
+    enabled: true
+    topics:
+      - volatility
+    market:
+      - a_share
+      - global
+    assets:
+      - options
+      - futures
+      - stock
+    keywords:
+      - 波动率建模
+      - 随机波动率
+      - 隐含波动率
+      - 期权定价
+      - VIX
+      - 波动率曲面
+      - 跳跃扩散
+      - 粗糙波动率
+      - Heston模型
+      - GARCH
+      - 已实现波动率
+      - 波动率预测
+      - 方差互换
+    description: "波动率建模、期权定价理论与衍生品策略"
+
+  # ── 方向 6: 另类数据与量化策略 ──────────────────────────
+  - name: "另类数据与量化策略"
+    id: "alternative_data"
+    enabled: true
+    topics:
+      - alternative_data
+    market:
+      - a_share
+      - global
+    assets:
+      - stock
+      - multi_asset
+    keywords:
+      - 卫星图像
+      - 社交媒体
+      - 新闻情绪
+      - 供应链数据
+      - 文本挖掘
+      - 基本面量化
+      - ESG数据
+      - 宏观经济另类指标
+      - 网络爬虫
+    description: "另类数据源在量化投资中的应用与策略研究"
+
+# ── 推送设置 ────────────────────────────────────────────────
+push_settings:
+  max_reviews: 12
+  max_featured: 5
+  # 每次推送各方向最多展示论文数
+  max_papers_per_direction: 5
+  # 论文时间范围（天）
+  lookback_days: 2
+  # 推送语言
+  language: "zh"
+  # 是否包含 A 股适用性评论
+  include_a_share_commentary: true
+  # ── LLM 筛选设置 ──
+  # 全量拉取后 LLM 评分阈值（>= 此分数才推送）
+  llm_filter_threshold: 6.0
+  # LLM 每批处理论文数
+  llm_batch_size: 10
+  # 全量拉取模式（true=拉取所有q-fin论文，false=仅关键词搜索）
+  broad_collection: true
+  # collect.py 每个源最大拉取数（broad模式下建议调大）
+  max_per_source_broad: 50

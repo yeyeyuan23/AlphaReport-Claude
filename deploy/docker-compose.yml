@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    image: deploy_backend
+    container_name: alphareport-backend
+    restart: unless-stopped
+    security_opt:
+      - seccomp:unconfined
+    env_file:
+      - /data1/alphareport/.env
+    environment:
+      - PYTHONPATH=/app
+      - HF_ENDPOINT=https://hf-mirror.com
+      - OPENBLAS_NUM_THREADS=1
+      - OMP_NUM_THREADS=1
+      - MKL_NUM_THREADS=1
+      - NUMEXPR_NUM_THREADS=1
+    volumes:
+      - /data1/alphareport/data:/app/data
+      - /data1/alphareport/model_cache:/root/.cache/huggingface
+      - /data1/alphareport/configs/app.yaml:/app/configs/app.yaml:ro
+    command: python -c "import uvicorn; from reportagent.main import app; uvicorn.run(app, host='0.0.0.0', port=8000)"
+    networks:
+      - alphareport-net
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.frontend
+    image: deploy_frontend
+    container_name: alphareport-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - alphareport-net
+
+networks:
+  alphareport-net:
+    driver: bridge

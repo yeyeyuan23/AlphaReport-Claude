@@ -1,0 +1,351 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import datetime, timedelta
+from typing import Optional
+
+import httpx
+
+from reportagent.models.schemas import UserCriteria, SearchResult, SourceType
+from reportagent.sources.base import BaseSource, SourceParseError, deduplicate_results
+from reportagent.utils.topic_expansion import expand_topics
+
+logger = logging.getLogger(__name__)
+
+REPORT_TYPES = {
+    "stock": 0,
+    "industry": 1,
+    "deep": 2,
+}
+
+REPORT_TYPE_LABELS = {
+    0: "个股研报",
+    1: "行业研报",
+    2: "深度研报",
+}
+
+TOPIC_TO_QTYPES = {
+    "risk model": [2],
+    "风险模型": [2],
+    "风控": [2],
+    "factor": [2, 1],
+    "因子": [2, 1],
+    "多因子": [2, 1],
+    "alpha": [2],
+    "选股": [2],
+    "execution": [2],
+    "执行算法": [2],
+    "算法交易": [2],
+    "portfolio": [2],
+    "组合优化": [2],
+    "资产配置": [2],
+    "strategy": [2],
+    "策略": [2],
+    "高频": [2],
+    "high frequency": [2],
+    "量化": [2, 1],
+    "quantitative": [2, 1],
+    "machine learning": [2],
+    "机器学习": [2],
+    "深度学习": [2],
+    "金融工程": [2, 1],
+    "金工": [2, 1],
+    "CTA": [2],
+    "波动率": [2],
+    "套利": [2],
+    "对冲": [2],
+    "回测": [2],
+    "微观结构": [2],
+    "指数增强": [2],
+    "市场中性": [2],
+}
+
+QUANT_KEYWORDS = [kw.lower() for kw in [
+    "量化策略", "量化选股", "量化投资", "量化模型", "量化配置",
+    "量化对冲", "主动量化", "宏观量化", "量化经济", "量化周报",
+    "金工", "金融工程",
+    "因子模型", "多因子", "因子选股", "因子投资", "因子配置",
+    "因子周报", "因子策略", "因子表现", "因子收益",
+    "选股模型", "选股策略",
+    "统计套利", "算法交易", "程序化交易",
+    "CTA", "管理期货",
+    "组合优化", "波动率模型", "期权定价", "期权策略",
+    "风险平价", "风险预算", "Smart Beta", "smartbeta",
+    "配对交易", "市场微观结构", "高频交易", "高频策略",
+    "指数增强", "市场中性", "绝对收益",
+    "Black-Litterman", "均值方差",
+    "机器学习选股", "深度学习策略",
+    "factor model", "arbitrage",
+    "HFT", "backtest", "risk parity", "mean-variance",
+]]
+
+EXCLUDE_PATTERNS = ["量化宽松", "轻量化", "减量化"]
+
+AMBIGUOUS_TERMS = {"量化", "quant", "alpha", "因子"}
+
+LIST_API = "https://reportapi.eastmoney.com/report/list"
+DETAIL_BASE = "https://data.eastmoney.com/report/info/{info_code}.html"
+
+FETCH_PAGES_PER_QTYPE = 8
+FETCH_PAGE_SIZE = 100
+
+
+class EastMoneySource(BaseSource):
+    def __init__(self, rate_limit_seconds: float = 1.0):
+        self.rate_limit_seconds = rate_limit_seconds
+
+    @property
+    def source_type(self) -> SourceType:
+        return SourceType.EASTMONEY
+
+    def is_available(self) -> bool:
+        return True
+
+    async def search(self, criteria: UserCriteria) -> list[SearchResult]:
+        self._start_search()
+        q_types = self._resolve_qtypes(criteria)
+        date_from, date_to = self._resolve_dates(criteria)
+
+        all_results: list[SearchResult] = []
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            for qt in q_types:
+                try:
+                    results = await self._fetch_reports(
+                        client, qt, date_from, date_to,
+                        FETCH_PAGE_SIZE * FETCH_PAGES_PER_QTYPE,
+                    )
+                    all_results.extend(results)
+                    await asyncio.sleep(self.rate_limit_seconds)
+                except Exception as e:
+                    logger.warning("EastMoney %s", self.last_search.record_error(e, f"qType {qt}"))
+
+        filtered = self._filter_by_keywords(deduplicate_results(all_results), criteria)
+        logger.info(
+            "EastMoney: fetched %d, filtered to %d quant-related",
+            len(all_results), len(filtered),
+        )
+        return filtered[: criteria.max_results_per_source]
+
+    def _filter_by_keywords(
+        self, results: list[SearchResult], criteria: UserCriteria
+    ) -> list[SearchResult]:
+        expanded = expand_topics(criteria.topics, criteria.keywords, lang="zh")
+        user_terms = [t.lower() for t in expanded]
+        all_terms = list(set(user_terms + QUANT_KEYWORDS))
+
+        scored: list[tuple[int, SearchResult]] = []
+        for r in results:
+            search_text = (
+                (r.title or "") + " " +
+                (r.abstract or "") + " " +
+                r.raw_metadata.get("industry_name", "") + " " +
+                r.raw_metadata.get("stock_name", "")
+            ).lower()
+
+            if any(ep in search_text for ep in EXCLUDE_PATTERNS):
+                continue
+
+            precise_score = sum(
+                1 for t in all_terms
+                if t in search_text and t not in AMBIGUOUS_TERMS
+            )
+            ambig_score = sum(
+                1 for t in all_terms
+                if t in search_text and t in AMBIGUOUS_TERMS
+            )
+            user_precise = sum(
+                1 for t in user_terms
+                if t in search_text and t not in AMBIGUOUS_TERMS
+            ) if user_terms else 0
+
+            if precise_score == 0 and ambig_score > 0:
+                continue
+
+            total_score = precise_score + ambig_score + user_precise * 3
+
+            if total_score > 0:
+                scored.append((total_score, r))
+
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return [r for _, r in scored]
+
+    async def _fetch_reports(
+        self,
+        client: httpx.AsyncClient,
+        q_type: int,
+        date_from: str,
+        date_to: str,
+        max_results: int,
+    ) -> list[SearchResult]:
+        results: list[SearchResult] = []
+        page_size = min(max_results, FETCH_PAGE_SIZE)
+        total_pages = min(
+            (max_results + page_size - 1) // page_size,
+            FETCH_PAGES_PER_QTYPE,
+        )
+
+        for page_no in range(1, total_pages + 1):
+            params = {
+                "industryCode": "*",
+                "pageSize": page_size,
+                "industry": "*",
+                "rating": "*",
+                "ratingChange": "*",
+                "beginTime": date_from,
+                "endTime": date_to,
+                "pageNo": page_no,
+                "fields": "",
+                "qType": q_type,
+                "orgCode": "",
+                "rcode": "",
+                "_": "1",
+            }
+
+            try:
+                resp = await client.get(LIST_API, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+                    raise SourceParseError("invalid JSON report-list schema")
+                items = data["data"]
+                pages = data.get("TotalPage", 1)
+                if not isinstance(pages, int) or isinstance(pages, bool) or pages < 0:
+                    raise SourceParseError("invalid JSON pagination")
+            except Exception as error:
+                logger.warning("EastMoney %s", self.last_search.record_error(
+                    error, f"qType {q_type} page {page_no}"))
+                break  # Keep earlier pages, then continue with other qTypes.
+
+            self.last_search.fetched += len(items)
+            parsed_count = 0
+            for item in items:
+                try:
+                    if not isinstance(item, dict):
+                        raise SourceParseError("invalid report item")
+                    sr = self._parse_item(item, q_type)
+                    if not sr or not sr.title.strip() or not sr.source_url:
+                        raise SourceParseError("report item missing title or identifier")
+                    results.append(sr)
+                    parsed_count += 1
+                except Exception as error:
+                    self.last_search.record_error(error, f"qType {q_type} page {page_no} item")
+            if parsed_count or not items:
+                self.last_search.successful_requests += 1
+            if len(results) >= max_results:
+                return results[:max_results]
+            if not items or page_no >= pages:
+                break
+
+            await asyncio.sleep(self.rate_limit_seconds)
+
+        return results
+
+    def _parse_item(self, item: dict, q_type: int) -> Optional[SearchResult]:
+        title = item.get("title", "")
+        if not title:
+            return None
+
+        info_code = item.get("infoCode", "")
+        org_name = item.get("orgSName") or item.get("orgName", "")
+        researcher = item.get("researcher", "")
+        authors = [a.strip() for a in researcher.split(",") if a.strip()] if researcher else []
+
+        pub_date_str = item.get("publishDate", "")
+        pub_date = None
+        if pub_date_str:
+            try:
+                pub_date = datetime.strptime(pub_date_str[:10], "%Y-%m-%d")
+            except ValueError:
+                pass
+
+        stock_name = item.get("stockName", "")
+        stock_code = item.get("stockCode", "")
+        industry_name = item.get("indvInduName", "")
+        rating = item.get("emRatingName", "")
+        report_type_label = REPORT_TYPE_LABELS.get(q_type, "研报")
+
+        abstract_parts = []
+        if org_name:
+            abstract_parts.append(f"来源: {org_name}")
+        if stock_name and stock_code:
+            abstract_parts.append(f"标的: {stock_name}({stock_code})")
+        if industry_name:
+            abstract_parts.append(f"行业: {industry_name}")
+        if rating:
+            abstract_parts.append(f"评级: {rating}")
+        abstract_parts.append(f"类型: {report_type_label}")
+        if item.get("attachPages"):
+            abstract_parts.append(f"页数: {item['attachPages']}")
+
+        eps_parts = []
+        for label, key in [
+            ("今年EPS预测", "predictThisYearEps"),
+            ("明年EPS预测", "predictNextYearEps"),
+            ("后年EPS预测", "predictNextTwoYearEps"),
+        ]:
+            val = item.get(key)
+            if val:
+                eps_parts.append(f"{label}: {val}")
+        if eps_parts:
+            abstract_parts.append(" | ".join(eps_parts))
+
+        abstract = "\n".join(abstract_parts)
+
+        source_url = DETAIL_BASE.format(info_code=info_code) if info_code else None
+
+        return SearchResult(
+            title=title,
+            authors=authors,
+            abstract=abstract,
+            full_text=None,
+            abstract_only=True,
+            source=SourceType.EASTMONEY,
+            source_url=source_url,
+            published_date=pub_date,
+            raw_metadata={
+                "info_code": info_code,
+                "org_name": org_name,
+                "org_code": item.get("orgCode", ""),
+                "stock_name": stock_name,
+                "stock_code": stock_code,
+                "industry_name": industry_name,
+                "rating": rating,
+                "rating_change": item.get("ratingChange", ""),
+                "report_type": q_type,
+                "report_type_label": report_type_label,
+                "attach_pages": item.get("attachPages"),
+                "attach_size": item.get("attachSize"),
+                "encode_url": item.get("encodeUrl", ""),
+                "market": item.get("market", ""),
+            },
+        )
+
+    def _resolve_qtypes(self, criteria: UserCriteria) -> list[int]:
+        q_types: set[int] = set()
+        expanded = expand_topics(criteria.topics, criteria.keywords, lang="zh")
+
+        for term in expanded:
+            term_lower = term.lower()
+            for key, types in TOPIC_TO_QTYPES.items():
+                if key in term_lower or term_lower in key:
+                    q_types.update(types)
+
+        if not q_types:
+            q_types = {2}
+
+        return sorted(q_types)
+
+    def _resolve_dates(self, criteria: UserCriteria) -> tuple[str, str]:
+        if criteria.date_to:
+            date_to = criteria.date_to.strftime("%Y-%m-%d")
+        else:
+            date_to = datetime.now().strftime("%Y-%m-%d")
+
+        if criteria.date_from:
+            date_from = criteria.date_from.strftime("%Y-%m-%d")
+        else:
+            date_from = (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d")
+
+        return date_from, date_to

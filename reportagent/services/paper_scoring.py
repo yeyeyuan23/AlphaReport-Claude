@@ -1,0 +1,369 @@
+"""Screen abstracts for relevance, retaining invalid or stale assessments for retry."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone, timedelta
+import hashlib
+import json
+import logging
+import math
+
+import yaml
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from reportagent.db.engine import init_db, get_session_factory
+from reportagent.db.repository import ReportRepository
+from reportagent.llm.client import LLMClient
+from reportagent.skills.registry import skill_resource
+from reportagent.utils.config import PROJECT_ROOT
+
+logger = logging.getLogger("llm_filter")
+
+
+@dataclass(frozen=True)
+class ScoringOptions:
+    days: int = 1
+    all_unjudged: bool = False
+    published_days: int | None = None
+    threshold: float | None = None
+    batch_size: int = 10
+    max_papers: int = 200
+    dry_run: bool = False
+
+
+def _load_scoring_config() -> dict:
+    path = PROJECT_ROOT / "configs" / "push_directions.yaml"
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(config, dict) or not isinstance(config.get("directions"), list):
+        raise ValueError("push_directions.yaml must define a directions list")
+    return config
+
+
+def load_enabled_directions() -> dict[str, dict]:
+    """Read current YAML; return enabled direction definitions keyed by their IDs."""
+    return _enabled_directions(_load_scoring_config())
+
+
+def _enabled_directions(config: dict) -> dict[str, dict]:
+    directions = {}
+    for item in config["directions"]:
+        if not isinstance(item, dict):
+            raise ValueError("Each research direction must be an object")
+        if not item.get("enabled", True):
+            continue
+        direction_id = item.get("id")
+        if not isinstance(direction_id, str) or not direction_id.strip():
+            raise ValueError("Enabled research directions need non-empty IDs")
+        if direction_id in directions:
+            raise ValueError(f"Duplicate research direction: {direction_id}")
+        directions[direction_id] = item
+    return directions
+
+
+def _valid_score(value, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a number from 0 to 10")
+    if not math.isfinite(value) or not 0 <= value <= 10:
+        raise ValueError(f"{name} must be finite and between 0 and 10")
+    return float(value)
+
+
+def _configured_threshold(config: dict) -> float:
+    return _valid_score(config.get("push_settings", {}).get("llm_filter_threshold", 6.0),
+                        "llm_filter_threshold")
+
+
+def _scoring_context() -> tuple[dict[str, dict], str, str, str]:
+    config = _load_scoring_config()
+    directions = _enabled_directions(config)
+    system = skill_resource("paper-selection", "scoring-system.md").read_text(encoding="utf-8")
+    user = skill_resource("paper-selection", "scoring-user.md").read_text(encoding="utf-8")
+    payload = {"schema_version": 1, "directions": directions, "system_prompt": system,
+               "user_prompt": user, "threshold": _configured_threshold(config)}
+    fingerprint = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                                            separators=(",", ":")).encode()).hexdigest()
+    return directions, system, user, fingerprint
+
+
+def scoring_fingerprint() -> str:
+    """Identify the current relevance rubric, enabled directions and configured cutoff."""
+    return _scoring_context()[3]
+
+
+def _build_directions_desc(directions: dict[str, dict] | None = None) -> str:
+    if directions is None:
+        directions = load_enabled_directions()
+    lines = []
+    for direction_id, info in directions.items():
+        keywords = ", ".join(info.get("keywords") or [])
+        lines.append(f"**{info.get('name', direction_id)}** ({direction_id})\n"
+                     f"  关注：{info.get('description', '')}\n  关键词：{keywords}\n"
+                     f"  市场：{info.get('market', '')}；资产：{info.get('assets', [])}；"
+                     f"主题：{info.get('topics', [])}")
+    return "\n".join(lines)
+
+
+def _paper_value(paper, field: str, default=""):
+    return paper.get(field, default) if isinstance(paper, dict) else getattr(paper, field, default)
+
+
+def _format_papers_for_llm(papers: list) -> str:
+    """Send complete abstracts; full text is reserved for the subsequent review."""
+    return "\n".join(
+        f"### 论文 #{index}\n"
+        f"标题：{_paper_value(paper, 'title')}\n"
+        f"来源：{_paper_value(paper, 'source')}\n"
+        f"分类标签：{_paper_value(paper, 'topics')}\n"
+        f"摘要：{_paper_value(paper, 'abstract') or ''}\n"
+        for index, paper in enumerate(papers)
+    )
+
+
+def _normalize_assessment(item: dict, directions: dict[str, dict]) -> dict:
+    if not isinstance(item, dict):
+        raise ValueError("Each assessment must be an object")
+    # Legacy callers supply only score. A present but invalid relevance never falls back.
+    relevance = _valid_score(item.get("relevance", item.get("score")), "relevance")
+    if "score" in item:
+        _valid_score(item["score"], "score")
+    direction = item.get("best_direction")
+    if direction == "":
+        direction = None
+    if direction is not None and (not isinstance(direction, str) or direction not in directions):
+        raise ValueError("best_direction must be an enabled direction ID or null")
+    reason = item.get("reason")
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError("reason must explain abstract-only relevance")
+    return {**item, "score": relevance, "relevance": relevance,
+            "best_direction": direction, "reason": reason.strip()}
+
+
+async def score_papers_batch(
+    llm_client: LLMClient,
+    papers: list,
+    batch_size: int = 10,
+) -> tuple[list[dict], list[tuple]]:
+    """Return valid relevance assessments and (batch offset, retryable count, error).
+
+    A duplicate index invalidates all its assessments. Missing or invalid papers are
+    never returned as scored; valid siblings remain usable. No database writes occur.
+    """
+    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
+        raise ValueError("batch_size must be a positive integer")
+    if not papers:
+        return [], []
+    directions, system_template, user_template, fingerprint = _scoring_context()
+    if not directions:
+        raise ValueError("No enabled research directions; nothing can be screened")
+    system_prompt = system_template.format(directions_desc=_build_directions_desc(directions))
+    provenance = {"schema_version": 1, "fingerprint": fingerprint, "evidence_scope": "title_abstract"}
+    all_results = []
+    failed_batches = []
+
+    for batch_start in range(0, len(papers), batch_size):
+        batch = papers[batch_start:batch_start + batch_size]
+        user_prompt = user_template.format(papers_text=_format_papers_for_llm(batch),
+                                           direction_ids=", ".join(directions))
+        try:
+            response = await llm_client.chat_json(
+                [{"role": "system", "content": system_prompt},
+                 {"role": "user", "content": user_prompt}],
+                temperature=0.2, max_tokens=4000,
+            )
+            if isinstance(response, dict):
+                response = response.get("papers", response.get("results"))
+            if not isinstance(response, list):
+                raise ValueError("Expected an assessment list or a papers/results list")
+
+            indexed = {}
+            errors = []
+            for item in response:
+                index = item.get("index") if isinstance(item, dict) else None
+                if type(index) is not int or not 0 <= index < len(batch):
+                    errors.append("Invalid or out-of-range paper index")
+                    continue
+                indexed.setdefault(index, []).append(item)
+
+            valid = []
+            for index in range(len(batch)):
+                items = indexed.get(index, [])
+                if len(items) != 1:
+                    errors.append(f"Paper {index}: {'duplicate' if items else 'missing'} index")
+                    continue
+                try:
+                    item = _normalize_assessment(items[0], directions)
+                except ValueError as error:
+                    errors.append(f"Paper {index}: {error}")
+                    continue
+                item.update(_paper=batch[index], _batch_offset=batch_start,
+                            _provenance=provenance.copy())
+                valid.append(item)
+            all_results.extend(valid)
+            pending = len(batch) - len(valid)
+            if pending:
+                failed_batches.append((batch_start, pending, "; ".join(errors)[:200]))
+            elif errors:
+                logger.warning("Ignored invalid extra assessments: %s", "; ".join(errors))
+            logger.info("Scored %s/%s papers in batch at %s", len(valid), len(batch), batch_start)
+        except Exception as error:
+            logger.error("Batch scoring failed; papers remain retryable: %s", error)
+            failed_batches.append((batch_start, len(batch), str(error)[:200]))
+    return all_results, failed_batches
+
+
+def apply_scores(
+    results: list[dict],
+    threshold: float | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Persist relevance, using only the configured/explicit threshold for eligibility."""
+    config = _load_scoring_config()
+    directions = _enabled_directions(config)
+    threshold = _configured_threshold(config) if threshold is None else _valid_score(threshold, "threshold")
+    stats = {"total_scored": len(results), "selected": 0, "rejected": 0,
+             "by_direction": {}, "errors": 0}
+    session = None
+    try:
+        if not dry_run:
+            init_db()
+            session = get_session_factory()()
+        repo = ReportRepository(session) if session is not None else None
+        for raw_item in results:
+            try:
+                item = _normalize_assessment(raw_item, directions)
+                paper = item.get("_paper")
+                if paper is None or _paper_value(paper, "id", None) is None:
+                    raise ValueError("Assessment has no persisted paper ID")
+                paper_id = _paper_value(paper, "id")
+                relevance = item["relevance"]
+                # Keep full precision; rounding must not promote 5.99 through a 6.0 cutoff.
+                is_selected = relevance >= threshold
+                direction = item["best_direction"]
+                reason = f"[仅摘要相关性；全文质量待评审] {item['reason']}"
+                if direction:
+                    reason = f"[{direction}] {reason}"
+                if dry_run:
+                    logger.info("[%.1f] %s | %s | %s", relevance,
+                                "SELECTED" if is_selected else "Skipped", direction,
+                                str(_paper_value(paper, "title"))[:60])
+                else:
+                    provenance = item.get("_provenance") or {
+                        "schema_version": 1, "fingerprint": scoring_fingerprint(),
+                        "evidence_scope": "title_abstract",
+                    }
+                    if not repo.update_selection(
+                        paper_id, relevance, reason, is_selected, direction=direction,
+                        relevance=relevance, provenance_json=json.dumps(provenance, ensure_ascii=False),
+                    ):
+                        raise ValueError(f"Paper {paper_id} no longer exists")
+                if is_selected:
+                    stats["selected"] += 1
+                    if direction is not None:
+                        stats["by_direction"][direction] = stats["by_direction"].get(direction, 0) + 1
+                else:
+                    stats["rejected"] += 1
+            except (ValueError, TypeError, KeyError) as error:
+                logger.warning("Assessment left unjudged: %s", error)
+                stats["errors"] += 1
+            except Exception as error:
+                if session is not None:
+                    session.rollback()
+                logger.error("Failed to persist assessment: %s", error)
+                stats["errors"] += 1
+    finally:
+        if session is not None:
+            session.close()
+    return stats
+
+
+async def score_reports(options: ScoringOptions) -> None:
+    init_db()
+    factory = get_session_factory()
+    session = factory()
+
+    # ── Load papers ──
+    since = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    if options.days > 1:
+        since = since - timedelta(days=options.days - 1)
+
+    try:
+        repo = ReportRepository(session)
+        fingerprint = scoring_fingerprint()
+        directions = load_enabled_directions()
+        threshold = (_configured_threshold(_load_scoring_config()) if options.threshold is None
+                     else _valid_score(options.threshold, "threshold"))
+
+        if getattr(options, "published_days", None):
+            published_since = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=options.published_days - 1)
+            papers = repo.get_unjudged_reports(published_since=published_since, limit=options.max_papers, scoring_fingerprint=fingerprint)
+        elif options.all_unjudged:
+            papers = repo.get_unjudged_reports(limit=options.max_papers, scoring_fingerprint=fingerprint)
+        else:
+            papers = repo.get_unjudged_reports(since=since, limit=options.max_papers, scoring_fingerprint=fingerprint)
+
+        logger.info(f"Found {len(papers)} unjudged or stale papers"
+                    f"{' since ' + since.strftime('%Y-%m-%d') if not options.all_unjudged else ' (all)'}")
+
+        if not papers:
+            logger.info("No papers to score. Done.")
+            return
+
+        # ── Init LLM ──
+        try:
+            llm_client = LLMClient()
+            logger.info(f"LLM client ready: provider={llm_client.provider}, model={llm_client.model}")
+        except Exception as e:
+            logger.error(f"LLM client init failed: {e}")
+            raise
+
+        # ── Score ──
+        logger.info(f"Scoring {len(papers)} papers in batches of {options.batch_size}...")
+        results, failed_batches = await score_papers_batch(
+            llm_client, papers, batch_size=options.batch_size
+        )
+
+        # ── Apply ──
+        if options.dry_run:
+            logger.info(f"\n{'='*50}")
+            logger.info(f"DRY RUN — Preview of LLM scoring results:")
+            logger.info(f"{'='*50}")
+
+        stats = apply_scores(results, threshold=threshold, dry_run=options.dry_run)
+
+        # ── Summary ──
+        logger.info(f"\n{'='*50}")
+        logger.info(f"LLM Filter Summary:")
+        logger.info(f"  Total scored : {stats['total_scored']}")
+        logger.info(f"  ⭐ Selected  : {stats['selected']} (score >= {threshold})")
+        logger.info(f"  ✗ Rejected   : {stats['rejected']}")
+        if stats['errors']:
+            logger.info(f"  ⚠ Errors    : {stats['errors']}")
+        if stats['by_direction']:
+            logger.info(f"  By direction:")
+            for d_id, count in sorted(stats['by_direction'].items(), key=lambda x: -x[1]):
+                d_name = directions.get(d_id, {}).get("name", d_id)
+                logger.info(f"    {d_name}: {count} 篇")
+        logger.info(f"{'='*50}")
+
+        if options.dry_run:
+            logger.info("[DRY RUN] No changes written to database.")
+
+        # Persist valid siblings, but make partial failure visible to callers.
+        if stats["errors"]:
+            raise RuntimeError(
+                f"Failed to persist {stats['errors']} relevance assessment(s); "
+                "affected papers remain retryable."
+            )
+        if failed_batches:
+            total_failed = sum(n for _, n, _ in failed_batches)
+            raise RuntimeError(
+                f"LLM scoring failed for {total_failed} paper(s) in "
+                f"{len(failed_batches)} batch(es); they remain retryable. "
+                f"First error: {failed_batches[0][2]}"
+            )
+
+    finally:
+        session.close()
