@@ -60,3 +60,15 @@ def test_hybrid_cannot_restore_rule_labels_rejected_by_model():
     assert result.topics == [Topic.AI_ML_MODEL]
     assert result.custom_tags == ["graph learning"]
     assert result.provenance == model.provenance
+
+
+def test_agent_hybrid_cannot_restore_unverified_rule_labels():
+    from reportagent.agents.classification_agent import ClassificationAgent
+    from reportagent.models.schemas import SearchResult, SourceType
+    rules = SimpleNamespace(classify=lambda title, text: ClassificationResult(topics=[Topic.STATISTICAL_ARB]))
+    model = SimpleNamespace(classify=AsyncMock(return_value=classify(response())))
+    agent = ClassificationAgent(rules, model)
+    state = {"raw_results": [SearchResult(title="Stock prediction", source=SourceType.LOCAL_PDF)], "messages": []}
+    final = asyncio.run(agent.run(state))["classified_reports"][0].classification
+    assert final.topics == [Topic.AI_ML_MODEL]
+    assert final.provenance["labels"]["topics.ai_ml_model"]["quote"] == "graph learning"
