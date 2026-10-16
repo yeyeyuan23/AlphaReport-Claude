@@ -4,7 +4,7 @@ import logging
 
 from reportagent.agents.state import AgentState
 from reportagent.classifiers.rule_classifier import RuleClassifier
-from reportagent.classifiers.llm_classifier import LLMClassifier
+from reportagent.classifiers.llm_classifier import LLMClassifier, ClassificationEvidenceError
 from reportagent.models.schemas import ClassifiedReport, ClassificationResult
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,7 @@ class ClassificationAgent:
 
         classified = []
         llm_used = 0
+        unverified = 0
         for i, sr in enumerate(state["raw_results"]):
             if self.cancel_check and self.cancel_check():
                 state["classification_status"] = "cancelled"
@@ -49,6 +50,10 @@ class ClassificationAgent:
                     llm_result = await self.llm_classifier.classify(title, text)
                     final = self._merge_results(rule_result, llm_result)
                     llm_used += 1
+                except ClassificationEvidenceError:
+                    final = ClassificationResult(method="unverified", provenance={"status": "unverified"})
+                    unverified += 1
+                    state["messages"].append(f"Classification evidence invalid: {title[:40]}; stored without labels")
                 except Exception as e:
                     logger.warning("LLM classification for '%s': %s", title[:50], e)
                     final = rule_result
@@ -66,7 +71,7 @@ class ClassificationAgent:
                 self.progress_cb("classifying", msg)
 
         state["classified_reports"] = classified
-        state["classification_status"] = "done"
+        state["classification_status"] = "partial" if unverified else "done"
         method = f"hybrid (LLM: {llm_used}/{total})" if llm_used else "rule-only"
         state["messages"].append(
             f"Classification complete: {len(classified)} reports, method: {method}"

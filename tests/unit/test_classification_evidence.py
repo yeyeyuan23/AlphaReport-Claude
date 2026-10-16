@@ -72,3 +72,54 @@ def test_agent_hybrid_cannot_restore_unverified_rule_labels():
     final = asyncio.run(agent.run(state))["classified_reports"][0].classification
     assert final.topics == [Topic.AI_ML_MODEL]
     assert final.provenance["labels"]["topics.ai_ml_model"]["quote"] == "graph learning"
+
+
+@pytest.mark.parametrize("quote", [".", "e", " "])
+def test_non_substantive_quotes_do_not_support_a_label(quote):
+    data = response()
+    data["evidence"]["topics.statistical_arbitrage"] = {
+        "source": "material", "quote": quote, "reason": "Pairs strategy"}
+    result = classify(data)
+    assert Topic.STATISTICAL_ARB not in result.topics
+
+
+def test_repair_asks_for_exact_pdf_quote_once_and_preserves_raw_evidence():
+    first = response()
+    first.update(topics=["ai_ml_model"], custom_tags=[])
+    first["evidence"]["topics.ai_ml_model"]["quote"] = "MLP-based architecture"
+    second = {**first, "evidence": {**first["evidence"], "topics.ai_ml_model": {
+        "source": "material", "quote": "MLP-\nbased architecture", "reason": "Neural architecture"}}}
+    client = SimpleNamespace(chat_json=AsyncMock(side_effect=[first, second]))
+    result = asyncio.run(LLMClassifier(client).classify("Stock prediction", "We propose an MLP-\nbased architecture."))
+    assert result.topics == [Topic.AI_ML_MODEL]
+    assert result.provenance["labels"]["topics.ai_ml_model"]["quote"] == "MLP-\nbased architecture"
+    assert result.provenance["repair_attempted"] is True
+
+
+def test_failed_quote_repair_retains_only_previously_verified_subset():
+    client = SimpleNamespace(chat_json=AsyncMock(side_effect=[response(), RuntimeError("timeout")]))
+    result = asyncio.run(LLMClassifier(client).classify("Stock prediction", "We use graph learning."))
+    assert result.topics == [Topic.AI_ML_MODEL]
+    assert result.custom_tags == ["graph learning"]
+    assert result.provenance["repair_status"] == "failed"
+
+
+@pytest.mark.parametrize("entrypoint", ["agent", "collection"])
+def test_all_invalid_model_evidence_cannot_restore_rule_guesses(entrypoint):
+    from reportagent.agents.classification_agent import ClassificationAgent
+    from reportagent.models.schemas import SearchResult, SourceType
+    from reportagent.services.collection import classify_for_storage
+    data = response()
+    data.update(evidence={})
+    model = LLMClassifier(SimpleNamespace(chat_json=AsyncMock(return_value=data)))
+    rules = SimpleNamespace(classify=lambda title, text: ClassificationResult(topics=[Topic.STATISTICAL_ARB]))
+    sr = SearchResult(title="Quantitative stock prediction model", abstract="We use neural networks to predict stock returns.", source=SourceType.LOCAL_PDF)
+    if entrypoint == "agent":
+        state = {"raw_results": [sr], "messages": []}
+        result = asyncio.run(ClassificationAgent(rules, model).run(state))["classified_reports"][0]
+    else:
+        errors = []
+        result = asyncio.run(classify_for_storage(sr, rules, model, errors))
+        assert errors
+    assert result.classification.topics == []
+    assert result.classification.method == "unverified"

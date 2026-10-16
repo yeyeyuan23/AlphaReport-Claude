@@ -163,13 +163,15 @@ bash scripts/ops/run_bot.sh           # 只启动飞书机器人
 .venv/bin/python -m reportagent.cli.collect --topics '因子模型' --sources local_pdf --no-analysis
 ```
 
-`--max` 是每个来源的上限。`--keywords` 可补充关键词，`--date-from/--date-to` 指定日期范围，`--output` 保存采集统计 JSON。`--no-analysis` 只跳过深度分析，**仍会尝试模型分类**，失败再退回规则分类。
+`--max` 是每个来源的上限。`--keywords` 可补充关键词，`--date-from/--date-to` 指定日期范围，`--output` 保存采集统计 JSON。`--no-analysis` 只跳过深度分析，**仍会尝试模型分类**；模型服务不可用时可退回规则分类，模型结果全部缺乏可核验依据时保留论文但不补规则标签。
 
 采集结果含整体 `status` 和逐源 `source_statuses`：逐源状态区分正常、空结果、部分成功、错误与不可用，并记录抓取数、有效数、全文数和安全错误摘要。分页、解析或 PDF 失败会保留已经取得的有效资料。
 
 ### 分类、评分、知识卡片与数据库工具
 
 模型分类共用 `skills/daily-quant-scan/classification.md` 的提示词与 `configs/classification_taxonomy.yaml` 的类别定义。只根据本次标题、摘要（缺失时为注明来源的引言）分类；未说明的市场、频率留空，不要求每篇达到某个标签数量。每个标签须附原文引文与理由，程序核对引文来源后保存到 `classification_provenance`（`cli.db_query --get ID` 可查看）。引文匹配并不保证语义判断一定正确，仍需抽样核查。`--hybrid` 以模型证据判断为准，不再把规则猜测直接并入结果；重分类会同时替换分类字段和标签关联，移除不再成立的旧标签。
+
+部分引文无法定位时，最多让模型修正一次；仍不匹配的标签丢弃。模型结果全部缺少可核验依据时，采集保留论文并标记 `unverified`，不把规则猜测补回去；启动导入留待下次重试。批量重分类失败则保留原记录并报告失败。模型服务不可用时的规则分类仍单独标记 `rule`，不冒充模型分类。
 
 下面的研报 ID 应替换为自己库中的 ID；所有模块都支持 `--help`。
 

@@ -246,6 +246,7 @@ taxonomy:
           - "Kyle"
       alternative_data:
         label: "Alternative Data"
+        description: "实际使用新闻、财报文本、业绩电话会、情绪、社交媒体、卫星等非常规结构化行情数据；仅提及背景不算。"
         keywords:
           - "alternative data"
           - "NLP"

@@ -10,7 +10,7 @@ from pathlib import Path
 from time import monotonic
 
 
-from reportagent.models.schemas import UserCriteria, SourceType, ClassifiedReport
+from reportagent.models.schemas import UserCriteria, SourceType, ClassifiedReport, ClassificationResult
 from reportagent.sources.arxiv_source import ArxivSource
 from reportagent.sources.eastmoney_source import EastMoneySource
 from reportagent.sources.bigquant_source import BigQuantSource
@@ -19,7 +19,7 @@ from reportagent.sources.base import (
     SearchDiagnostics, SourceParseError, deduplicate_results, safe_source_error, usable_full_text,
 )
 from reportagent.classifiers.rule_classifier import RuleClassifier
-from reportagent.classifiers.llm_classifier import LLMClassifier
+from reportagent.classifiers.llm_classifier import LLMClassifier, ClassificationEvidenceError
 from reportagent.classifiers.quant_filter import is_quant_finance
 from reportagent.llm.client import LLMClient
 from reportagent.db.engine import init_db, get_session_factory
@@ -55,6 +55,9 @@ async def classify_for_storage(sr, classifier, llm_classifier, errors):
     if llm_classifier:
         try:
             classification = await llm_classifier.classify(title, abstract)
+        except ClassificationEvidenceError:
+            errors.append("classification evidence invalid; stored unclassified for retry")
+            classification = ClassificationResult(method="unverified", provenance={"status": "unverified"})
         except Exception as error:
             logger.warning("Classification fallback: %s", type(error).__name__)
             errors.append(safe_source_error(error, "classification; rule fallback used"))
