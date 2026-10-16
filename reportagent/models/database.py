@@ -61,15 +61,10 @@ class Report(Base):
     evaluation_json = Column(Text)
     is_selected = Column(Boolean, default=False)
 
-    # ISO-8601 timestamp of when this report was actually pushed to Feishu.
-    # NULL = never pushed yet (eligible for the daily push).
-    pushed_at = Column(Text, default=None)
-
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     tags = relationship("Tag", secondary=report_tags, back_populates="reports")
-    deliveries = relationship("ReportDelivery", cascade="all, delete-orphan")
 
 
 class LocalPDFImport(Base):
@@ -93,16 +88,6 @@ class Tag(Base):
     reports = relationship("Report", secondary=report_tags, back_populates="tags")
 
     __table_args__ = (UniqueConstraint("dimension", "value"),)
-
-
-class ReportDelivery(Base):
-    """One successful daily delivery per paper and destination."""
-    __tablename__ = "report_deliveries"
-
-    report_id = Column(Integer, ForeignKey("reports.id", ondelete="CASCADE"), primary_key=True)
-    receive_type = Column(String(20), primary_key=True)
-    receive_id = Column(String(255), primary_key=True)
-    delivered_at = Column(DateTime, nullable=False, server_default=func.now())
 
 
 class SearchHistory(Base):

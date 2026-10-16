@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from reportagent.models.database import Base, Report, ReportDelivery
+from reportagent.models.database import Base, Report
 from reportagent.services import daily_push as daily
 from tests.support.report_fixtures import Model, paper, response, module
 
@@ -144,22 +144,7 @@ def test_daily_reviews_before_render_and_dry_run_never_records_delivery(tmp_path
     assert events == ["review", "render"]
     assert result["status"] == "preview"
     send.assert_not_called()
-    with factory() as s:
-        assert s.query(ReportDelivery).count() == 0
     engine.dispose()
-
-
-def test_all_source_failure_does_not_generate_a_successful_empty_digest(tmp_path):
-    (tmp_path / "configs").mkdir()
-    (tmp_path / "configs/push_directions.yaml").write_text("push_settings: {}")
-    with patch.object(daily, "PROJECT_ROOT", tmp_path), patch.object(daily, "collect_papers", return_value={
-        "status": "failed", "source_statuses": [{"source": "arxiv", "status": "error"}]
-    }), patch.object(daily, "sync_public_url"), patch.object(daily, "get_todays_papers") as query, patch.object(
-        daily, "save_run_record"
-    ):
-        with pytest.raises(RuntimeError, match="来源"):
-            daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
-    query.assert_not_called()
 
 
 def test_duplicate_daily_job_is_rejected_before_work_starts(tmp_path):

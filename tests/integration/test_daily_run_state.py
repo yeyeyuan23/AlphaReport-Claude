@@ -116,7 +116,7 @@ def test_failed_relevance_with_valid_candidates_is_explicit_partial(offline_dail
 
 
 @pytest.mark.parametrize("dry_run", [False, True])
-def test_completed_run_json_contains_final_status_and_delivery_receipts(offline_daily, dry_run):
+def test_completed_run_json_contains_final_status_and_send_results(offline_daily, dry_run):
     factory, _ = offline_daily
     insert_paper(factory)
     result = daily.run_daily_push(daily.DailyPushOptions(
@@ -127,7 +127,42 @@ def test_completed_run_json_contains_final_status_and_delivery_receipts(offline_
     assert saved["papers"][0]["id"] == 1
 
 
-def test_failed_delivery_json_preserves_successful_receipts(offline_daily, monkeypatch):
+def test_empty_daily_sends_a_completion_card_to_each_recipient(offline_daily, monkeypatch):
+    factory, _ = offline_daily
+    sent = []
+    def send(recipient, briefing, papers, *args):
+        sent.append((recipient, briefing, papers))
+        return True
+    monkeypatch.setattr(daily, 'send_feishu_card', send)
+    result = daily.run_daily_push(daily.DailyPushOptions(no_collect=True, receive_ids='A,B,A'))
+    assert [item[0] for item in sent] == ['A', 'B']
+    assert all(not item[2] and '暂无符合日期范围与筛选条件' in item[1] for item in sent)
+    assert result['status'] == 'empty'
+    assert result['deliveries'] == {'A': True, 'B': True}
+    assert_final_artifact(result)
+
+
+def test_empty_daily_delivery_failure_is_not_silently_successful(offline_daily, monkeypatch):
+    factory, _ = offline_daily
+    monkeypatch.setattr(daily, 'send_feishu_card', lambda recipient, *args: recipient == 'A')
+    with pytest.raises(RuntimeError, match='投递'):
+        daily.run_daily_push(daily.DailyPushOptions(no_collect=True, receive_ids='A,B'))
+    saved = read_saved_run(factory)
+    assert saved['status'] == 'failed'
+    assert saved['deliveries'] == {'A': True, 'B': False}
+    assert_final_artifact(saved)
+
+
+def test_empty_preview_has_an_explicit_result_without_sending(offline_daily, monkeypatch):
+    sent = []
+    monkeypatch.setattr(daily, 'send_feishu_card', lambda *args: sent.append(args))
+    result = daily.run_daily_push(daily.DailyPushOptions(no_collect=True, dry_run=True))
+    assert result['status'] == 'preview'
+    assert '暂无符合日期范围与筛选条件' in result['briefing']
+    assert sent == [] and result['deliveries'] == {}
+
+
+def test_failed_delivery_json_preserves_each_recipient_send_result(offline_daily, monkeypatch):
     factory, _ = offline_daily
     insert_paper(factory)
     monkeypatch.setattr(daily, "send_feishu_card", lambda recipient, *args: recipient == "A")
@@ -139,17 +174,58 @@ def test_failed_delivery_json_preserves_successful_receipts(offline_daily, monke
     assert saved["deliveries"] == {"A": True, "B": False}
 
 
-def test_early_collection_failure_still_saves_final_json(offline_daily, monkeypatch):
+@pytest.mark.parametrize("explicit_ids", [False, True])
+def test_repeated_daily_runs_send_same_period_without_writing_legacy_markers(offline_daily, monkeypatch, explicit_ids):
     factory, _ = offline_daily
-    monkeypatch.setattr(daily, "collect_papers", lambda *args, **kwargs: {
-        "status": "failed", "source_statuses": [{"source": "arxiv", "status": "error"}]})
-    with pytest.raises(RuntimeError, match="来源"):
-        daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
-    result = read_saved_run(factory)
-    saved = assert_final_artifact(result)
-    assert saved["status"] == "failed"
-    assert saved["stages"]["collection"]["status"] == "failed"
-    assert saved["deliveries"] == {}
+    insert_paper(factory)
+    with factory().get_bind().begin() as conn:
+        conn.exec_driver_sql("ALTER TABLE reports ADD COLUMN pushed_at TEXT")
+        conn.exec_driver_sql("CREATE TABLE report_deliveries (report_id INTEGER, receive_type TEXT, receive_id TEXT, delivered_at TEXT)")
+    sent = []
+    monkeypatch.setattr(daily, "send_feishu_card", lambda recipient, brief, papers, *args:
+                        sent.append((recipient, [p["id"] for p in papers])) or True)
+    options = daily.DailyPushOptions(no_collect=True, receive_ids="A,B,A",
+                                     report_ids="1" if explicit_ids else "")
+    for _ in range(2):
+        result = daily.run_daily_push(options)
+        assert result["report_ids"] == [1] and result["status"] == "delivered"
+    assert sent == [("A", [1]), ("B", [1]), ("A", [1]), ("B", [1])]
+    with factory().get_bind().connect() as conn:
+        assert conn.exec_driver_sql("SELECT pushed_at FROM reports WHERE id=1").scalar() is None
+        assert conn.exec_driver_sql("SELECT COUNT(*) FROM report_deliveries").scalar() == 0
+
+
+def test_default_daily_generates_from_library_without_triggering_collection(offline_daily, monkeypatch):
+    from reportagent.services import collection
+    factory, _ = offline_daily
+    insert_paper(factory)
+    def collection_forbidden(*args, **kwargs):
+        pytest.fail("Generating a daily report must never fetch source data")
+    monkeypatch.setattr(collection, "collect_reports", collection_forbidden)
+    def run(command, **kwargs):
+        assert "reportagent.cli.collect" not in command
+        return subprocess.CompletedProcess(command, 0, "", "")
+    monkeypatch.setattr(daily.subprocess, "run", run)
+    result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
+    assert result["report_ids"] == [1] and result["status"] == "preview"
+    assert result["stages"]["collection"]["status"] == "not_run"
+
+
+def test_failed_scheduled_collection_is_disclosed_without_blocking_library_report(offline_daily):
+    factory, root = offline_daily
+    insert_paper(factory)
+    directory = root / "data/collections"
+    directory.mkdir(parents=True)
+    (directory / "latest.json").write_text(json.dumps({"run_id": "previous", "status": "failed",
+        "completed_at": "2026-10-17T00:15:00+00:00", "source_statuses": [
+            {"source": "arxiv", "status": "error", "valid": 0, "errors": ["ReadTimeout"]}]}))
+    result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
+    assert result["status"] == "partial" and result["report_ids"] == [1]
+    assert result["stages"]["collection"]["status"] == "not_run"
+    assert result["collection_run"]["run_id"] == "previous"
+    assert "最近定时采集" in result["briefing"] and "ReadTimeout" in result["briefing"]
+    assert "本次在线采集" not in result["briefing"]
+    assert_final_artifact(result)
 
 
 def test_render_refreshes_candidate_metadata_without_refiltering_explicit_ids(offline_daily, monkeypatch):
@@ -230,7 +306,7 @@ def test_recipient_brief_uses_same_configured_featured_limit(offline_daily, monk
         return original_render(papers, date_label, **kwargs)
     monkeypatch.setattr(daily, "render_briefing", render)
     daily.run_daily_push(daily.DailyPushOptions(no_collect=True, report_ids="1", receive_ids="A,B"))
-    assert rendered_limits == [2, 2, 2]
+    assert rendered_limits == [2]  # One complete brief is shared by all recipients.
 
 
 @pytest.mark.parametrize("change", ["cleared", "changed", "invalid_json", "revision_changed"])

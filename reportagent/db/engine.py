@@ -49,7 +49,6 @@ def init_db():
         ("selection_score", "FLOAT DEFAULT 0.0"),
         ("selection_reason", "TEXT"),
         ("is_selected", "BOOLEAN DEFAULT 0"),
-        ("pushed_at", "TEXT DEFAULT NULL"),
         ("selection_direction", "VARCHAR(100)"),
         ("selection_relevance", "FLOAT"),
         ("selection_provenance_json", "TEXT"),

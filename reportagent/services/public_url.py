@@ -1,9 +1,14 @@
-"""Synchronize the local reading URL from the most recent tunnel log entry."""
+"""Shared reading-site address and optional local tunnel synchronization."""
 import os
 import re
 from pathlib import Path
 
 from reportagent.utils.config import PROJECT_ROOT
+
+
+def get_web_base_url() -> str:
+    configured = os.environ.get('ALPHAREPORT_BASE_URL', '').strip()
+    return (configured or f"http://{os.environ.get('ALPHAREPORT_HOST', 'localhost')}:{os.environ.get('ALPHAREPORT_PORT', '8000')}").rstrip('/')
 
 
 def sync_public_url(root: Path = PROJECT_ROOT) -> bool:

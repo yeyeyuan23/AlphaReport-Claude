@@ -17,6 +17,7 @@ load_dotenv()
 from reportagent.db.engine import init_db, get_session_factory
 from reportagent.utils.config import get_config, get_llm_model
 from reportagent.services.report_briefing import render_briefing
+from reportagent.services.public_url import get_web_base_url
 from reportagent.services.report_quality import pending_review, review_fingerprint
 from reportagent.services.feishu_markdown import card_sections
 
@@ -27,9 +28,7 @@ cfg = get_config("feishu", default={})
 APP_ID = os.environ.get(cfg.get("app_id_env", "FEISHU_APP_ID"), "")
 APP_SECRET = os.environ.get(cfg.get("app_secret_env", "FEISHU_APP_SECRET"), "")
 
-SERVER_HOST = os.environ.get("ALPHAREPORT_HOST", "localhost")
-SERVER_PORT = os.environ.get("ALPHAREPORT_PORT", "8000")
-UI_BASE_URL = os.environ.get("ALPHAREPORT_BASE_URL", f"http://{SERVER_HOST}:{SERVER_PORT}")
+UI_BASE_URL = get_web_base_url()
 
 # ═══════════════════════════════════════════════════
 # Date helpers — all based on published_date

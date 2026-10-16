@@ -12,6 +12,7 @@ import time
 from lark_oapi.ws import Client as WSClient
 from lark_oapi.event import dispatcher_handler as dh
 from reportagent.utils.config import PROJECT_ROOT
+from reportagent.services.public_url import get_web_base_url
 from reportagent.db.engine import init_db
 from reportagent.services.feishu_security import http_callback_enabled, sender_allowed
 from reportagent.bot.client import send_text, send_chat, reply_msg, react
@@ -91,8 +92,7 @@ def run_weekly_job(chat_id):
 
 
 def _report_list(reports, total, title):
-    base = (os.environ.get("ALPHAREPORT_BASE_URL") or
-            f"http://{os.environ.get('ALPHAREPORT_HOST', 'localhost')}:{os.environ.get('ALPHAREPORT_PORT', '8000')}").rstrip('/')
+    base = get_web_base_url()
     sources = {"arxiv": "arXiv", "eastmoney": "东方财富", "bigquant": "BigQuant", "local_pdf": "本地 PDF"}
     entries = [f"{title}\n共 {total} 篇，本次展示 {len(reports)} 篇"]
     for i, report in enumerate(reports, 1):
@@ -111,7 +111,7 @@ def handle_cmd(text, chat_id, chat_type):
     if text in ("/help", "/start"):
         return ("📊 AlphaReport 指令\n\n"
                 "/report <arXiv编号或链接>：分析单篇论文并推送到当前私聊\n"
-                "/daily：采集、评估并生成日报\n"
+                "/daily：从论文库评估并生成日报\n"
                 "/weekly：汇总上一完整 UTC 周的库中资料\n\n"
                 "/stats：查看研报库统计\n"
                 "/search <关键词>：搜索研报，最多显示 5 篇\n"
@@ -145,7 +145,7 @@ def handle_cmd(text, chat_id, chat_type):
         except Exception:
             _report_lock.release()
             raise
-        return "开始生成日报：先检查来源和相关性，再评估最多12篇全文，完成后推送到当前私聊。"
+        return "开始生成日报：使用库中近期资料，刷新相关性与最多12篇全文评估，完成后推送到当前私聊。"
 
     if text == "/report" or text.startswith("/report "):
         if chat_type != "p2p":

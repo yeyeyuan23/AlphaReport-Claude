@@ -139,7 +139,7 @@ def test_recursive_import_only_classifies_new_or_changed_files(importer):
         report = session.query(Report).filter_by(title="Portfolio risk model").one()
         assert report.has_full_text and "portfolio risk" in report.full_text
         assert report.classification_method == "llm"
-        assert report.analysis_json is None and report.pushed_at is None
+        assert report.analysis_json is None
         report.analysis_json = '{"saved": true}'
         session.commit()
     second = asyncio.run(importer.module.import_pdf_library())

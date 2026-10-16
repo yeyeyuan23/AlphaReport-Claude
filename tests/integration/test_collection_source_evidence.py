@@ -187,12 +187,12 @@ def test_bigquant_real_html_body_is_full_text_and_placeholder_meta_is_ignored():
     assert not diagnostics.errors
 
 
-@pytest.mark.parametrize("fixture", [7, 10])
+@pytest.mark.parametrize("fixture", ["placeholder-factor.html", "placeholder-risk-budget.html"])
 def test_bigquant_placeholder_uses_public_attachment_and_saves_valid_pdf(tmp_path, monkeypatch, fixture):
     from reportagent.sources import content_fetch
     monkeypatch.setattr(content_fetch, "PDF_DIRECTORY", tmp_path)
     text = "Portfolio risk methodology. We estimate financial factors from observed returns and compare risk budgets. " * 6
-    html = Path(f'data/validation/bigquant-dates-20261016/page-{fixture}.html').read_text()
+    html = (Path(__file__).resolve().parents[1] / "fixtures/bigquant" / fixture).read_text(encoding="utf-8")
     row, diagnostics = fetch_bigquant(html, pdf_bytes(text))
     assert row.full_text and "compare risk budgets" in row.full_text
     assert row.abstract_only is False

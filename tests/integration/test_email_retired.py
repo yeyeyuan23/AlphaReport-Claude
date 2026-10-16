@@ -45,20 +45,17 @@ assert 'subscriptions' not in status
     assert result.returncode == 0, result.stderr
 
 
-def test_legacy_collection_schedule_keeps_arxiv_without_mail_fallback(monkeypatch):
+def test_collection_schedule_runs_independently_without_report_or_mail_fallback(monkeypatch):
     from reportagent.services import scheduler
 
     monkeypatch.setattr(scheduler, "_scheduler", None)
-    monkeypatch.setattr(scheduler, "get_config", lambda *args, **kwargs: {
-        "enabled": True,
-        "schedule_cron": "23:59",
-        "arxiv_collection": {"enabled": True, "schedule_cron": "23:59"},
-    })
+    monkeypatch.setattr(scheduler, "get_config", lambda key, **kwargs: {
+        "enabled": key == "daily_collection", "schedule_cron": "23:59", "timezone": "Asia/Shanghai"})
 
     async def check():
         scheduler.start_scheduler()
         try:
-            assert {job.id for job in scheduler._scheduler.get_jobs()} == {"arxiv_daily_collect"}
+            assert {job.id for job in scheduler._scheduler.get_jobs()} == {"daily_collection"}
         finally:
             scheduler.stop_scheduler()
 

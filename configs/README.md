@@ -18,4 +18,4 @@
 
 `llm.thinking` 控制 Python Anthropic 兼容请求的思考模式；当前 DeepSeek 结构化流程设为
 `disabled`，避免分类预算被思考内容耗尽。单次调用可显式覆盖；OpenAI 路径不传此参数。
-`daily_report.enabled` 默认开启，调度器由 Web 后端进程承载；单独启动飞书机器人不会启动调度器。
+`daily_collection.enabled` 和 `daily_report.enabled` 默认分别开启，调度器由 Web 后端承载；单独启动飞书机器人不会启动调度器。默认每天北京时间 08:00 多来源采集入库，09:00 从论文库生成日报，周末也执行。两项开关独立，`schedule_cron` 为 `HH:MM`；`daily_collection.lookback_days: 3` 从 UTC 当天往前 3 天零点起采集，覆盖日报最近四个 UTC 日期窗口。原 `daily_report.mode` 和嵌套 `arxiv_collection` 分支已移除。日/周报不调用采集，不记录逐篇已推送标记。

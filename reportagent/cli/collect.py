@@ -45,9 +45,7 @@ def main():
         Path(args.output).write_text(json.dumps(result, ensure_ascii=False, indent=2))
         print(f"Results saved to {args.output}")
     else:
-        # Single-line JSON: daily_feishu_push.py parses stdout line-by-line looking
-        # for a line starting with '{"topics"'. Pretty-printed (indent=2) output
-        # broke that match and produced a false "Collection done: {}" alarm.
+        # A single JSON line is convenient for external collection scripts.
         print(json.dumps(result, ensure_ascii=False))
 
 

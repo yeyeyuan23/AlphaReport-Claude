@@ -50,7 +50,9 @@ def create_app():
             running = subprocess.run(["pgrep", "-f", "reportagent.bot.feishu"], capture_output=True).returncode == 0
         except OSError:
             running = False
-        return {"success": True, "data": {"server": "ok", "feishu_ws": running}}
+        from reportagent.services.scheduler import get_schedule_status
+        return {"success": True, "data": {"server": "ok", "feishu_ws": running,
+                                          "schedule": get_schedule_status()}}
 
     @app.get("/api/v1/skills")
     def skills():

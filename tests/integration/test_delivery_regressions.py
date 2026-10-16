@@ -69,7 +69,7 @@ class DeliveryTests(unittest.TestCase):
         ), patch.object(daily, "deep_analyze_selected"):
             daily.run_daily_push(daily.DailyPushOptions(no_collect=True, receive_ids="A,B"))
 
-    def test_failed_recipient_retries_without_resending_to_successful_recipient(self):
+    def test_each_daily_run_sends_the_period_to_all_requested_recipients(self):
         deliveries = []
         def first(rid, briefing, papers, *args):
             deliveries.append((rid, len(papers)))
@@ -82,10 +82,10 @@ class DeliveryTests(unittest.TestCase):
             deliveries.append((rid, len(papers)))
             return True
         self.run_daily(second)
-        self.assertEqual(deliveries, [("B", 12)])
+        self.assertEqual(deliveries, [("A", 12), ("B", 12)])
         deliveries.clear()
         self.run_daily(second)
-        self.assertEqual(deliveries, [])
+        self.assertEqual(deliveries, [("A", 12), ("B", 12)])
 
     def test_fallback_includes_all_paper_links(self):
         papers = [{"id": i, "title": f"Paper {i}", "ui_url": f"https://fixture.test/library/{i}"} for i in range(1, 21)]
@@ -125,23 +125,6 @@ class DeliveryTests(unittest.TestCase):
 
 
 class RepositoryRecoveryTests(unittest.TestCase):
-    def test_deleting_paper_removes_delivery_before_sqlite_reuses_id(self):
-        from reportagent.models.database import ReportDelivery
-        engine = create_engine("sqlite:///:memory:")
-        Base.metadata.create_all(engine)
-        with sessionmaker(bind=engine)() as session:
-            first = Report(title="old", source="arxiv", content_hash="old")
-            session.add(first)
-            session.commit()
-            old_id = first.id
-            session.add(ReportDelivery(report_id=old_id, receive_type="open_id", receive_id="A"))
-            session.commit()
-            self.assertTrue(ReportRepository(session).delete_report(old_id))
-            session.add(Report(title="new", source="arxiv", content_hash="new"))
-            session.commit()
-            self.assertEqual(session.query(ReportDelivery).count(), 0)
-        engine.dispose()
-
     def test_unjudged_retry_uses_publication_window_instead_of_creation_date(self):
         engine = create_engine("sqlite:///:memory:")
         Base.metadata.create_all(engine)

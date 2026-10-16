@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from reportagent.db.repository import ReportRepository
-from reportagent.models.database import Base, Report, ReportDelivery
+from reportagent.models.database import Base, Report
 from reportagent.models.schemas import ClassifiedReport, ClassificationResult, SearchResult, SourceType
 from reportagent.services import weekly_report
 from reportagent.sources.bigquant_source import BigQuantSource
@@ -83,7 +83,7 @@ def test_update_sample_and_invalid_dates_never_become_publication_dates(content,
     assert fetch(page(content=content, head=head, time=time)).published_date is None
 
 
-def test_reimport_backfills_date_without_clearing_analysis_or_delivery(library):
+def test_reimport_backfills_date_without_clearing_analysis_or_relevance(library):
     with library() as session:
         repo = ReportRepository(session)
         _, rid = repo.upsert_report(report())
@@ -92,8 +92,6 @@ def test_reimport_backfills_date_without_clearing_analysis_or_delivery(library):
         row.evaluation_json = 'saved evaluation'
         row.knowledge_card_json = 'saved card'
         row.selection_relevance = 8
-        row.pushed_at = '2026-10-16T00:00:00Z'
-        session.add(ReportDelivery(report_id=rid, receive_type='chat_id', receive_id='fixture'))
         session.commit()
         action, same_id = repo.upsert_report(report(datetime(2022, 8, 4)))
         session.expire_all()
@@ -102,8 +100,7 @@ def test_reimport_backfills_date_without_clearing_analysis_or_delivery(library):
         assert row.published_date == datetime(2022, 8, 4)
         assert (row.analysis_json, row.evaluation_json, row.knowledge_card_json) == (
             'saved analysis', 'saved evaluation', 'saved card')
-        assert row.selection_relevance == 8 and row.pushed_at
-        assert session.query(ReportDelivery).count() == 1
+        assert row.selection_relevance == 8
         assert session.query(Report).count() == 1
 
 

@@ -44,7 +44,7 @@ Plan-Execute 都通过 registry 加载完整技能说明；CLI 和 `/api/v1/skil
 用户自定义 YAML 位于 `data/user_skills/`，原中文技能名称保留为别名。
 资源解析必须限制在对应技能目录内，用户提供的名称不能直接成为文件路径。
 
-技能说明指导模型工作；权限校验、分析完整性检查和发送回执由 Python 代码执行。
+技能说明指导模型工作；权限校验、分析完整性检查和发送结果记录由 Python 代码执行。
 网页可以直接读取已有结果，无需让每个 HTTP 请求经过模型。
 
 ## 主要业务流程
@@ -55,7 +55,8 @@ Plan-Execute 都通过 registry 加载完整技能说明；CLI 和 `/api/v1/skil
   评分来源指纹。方向、提示词或阈值变化后重新评分；相关性不充当质量结论。
 - **飞书日报**：检查来源 → 查询最近四个 UTC 日期中评分指纹有效的候选 →
   按方向轮流选取最多 12 篇 → 全文证据评估 → 最多 5 篇学术重点及其他分栏 →
-  模板渲染 → 按收件人发送并保存回执。全部来源失败时中止；部分来源失败显示覆盖状态。
+  模板渲染 → 按收件人发送并记录本次结果。生成报告不采集新论文、不记录逐篇已推送标记。
+  最近一次独立采集失败时可使用库中已有资料，明确展示采集时间和覆盖限制。
   私聊 `/daily`、CLI 与启用后的 Feishu 调度复用
   [daily_push.py](../reportagent/services/daily_push.py)，进程锁阻止重叠运行，运行结果写入数据库。
 - **共享全文评估**：[report_quality.py](../reportagent/services/report_quality.py)
@@ -68,12 +69,12 @@ Plan-Execute 都通过 registry 加载完整技能说明；CLI 和 `/api/v1/skil
   强制刷新不清除已有回执。待核验评估可重试，并复用仍有效的阶段分析。
 - **网页与排版**：日报通过 [report_briefing.py](../reportagent/services/report_briefing.py)
   将保存的评估填入 `skills/daily-report/briefing.md`；网页读取同一份评估，显示引文和局限。
-  排版不再调用模型改写研究结论。`--dry-run` 可更新评估和运行记录，但不投递、不写发送回执。
+  排版不再调用模型改写研究结论。`--dry-run` 可更新评估和运行记录，但不采集新论文、不投递。
 - **飞书周报**：仍使用独立的 [weekly_report.py](../reportagent/services/weekly_report.py)，
   查询上一个完整 UTC 周的全部库中资料，以配置的 Python API 刷新过期相关性和最多
   12 篇尚未核验的全文评估；已有有效评估不消耗这次预算。再复用同一评估和
   `skills/weekly-report/briefing.md` 模板分层排版，不调用 Claude 重写结论。
-  缺失/失效材料单列，相关性不能充当质量；尚无日报的按目标去重回执。
+  缺失/失效材料单列，相关性不能充当质量。日/周报均不按发送历史筛选，重复执行会再次发送。
 
 分析技能中的 `grounding.md` 约束原文证据与推断，`quality-review.md` 定义质量评估；
 `daily-report/briefing.md` 和 `weekly-report/briefing.md` 是格式模板。
@@ -90,8 +91,12 @@ PDF连字、安全英文断行和空白规范化保留原始字符位置，不�
 研究创意使用 `services/research_ideation.py`；检索由程序执行，模型仅生成有范围声明的候选假设，
 不再声称具备生成阶段未接入的工具能力。
 
-内置 Feishu 日报调度默认开启。Web 运行时按 `Asia/Shanghai` 工作日设定时刻
-调用同一日报服务；独立采集模式仅负责入库。手动 `/daily` 不依赖调度开关。
+Web 中的两项调度独立开启，时区均为 `Asia/Shanghai`，每天含周末执行：
+08:00 的 `daily_collection` 经 `scheduled_collection` 调用共享 `collection.collect_reports`，
+只做多来源采集、分类和入库，来源诊断保存到 `data/collections/`；
+09:00 的 `daily_report` 调用与手动 `/daily` 相同的报告服务，仅读库、评估和发送。
+`cli.collect` 是手动指定条件采集的入口；`cli.scheduled_collect` 可按调度配置补跑采集。
+原来的 Feishu/独立 arXiv 模式分叉已移除。手动 `/daily`、`/weekly` 不依赖调度开关。
 
 ## 内部处理与维护工具
 
@@ -150,11 +155,12 @@ arXiv 下载流程使用 PyMuPDF 提取全文，`cli.parse_pdf` 调用 MinerU �
 
 新增业务逻辑放共享服务，入口只负责适配；应用代码不反向导入 `scripts/`。
 旧业务脚本入口已移除，统一使用模块 CLI；迁移映射见 [scripts/README.md](../scripts/README.md)。
-日报通过模块 CLI 隔离采集与摘要初筛的超时，全文评估由共享服务在渲染和发送前完成。
+日报通过模块 CLI 隔离摘要初筛的超时，全文评估由共享服务在渲染和发送前完成；新论文采集由独立任务负责。
 数据库查询和 PDF 命令复用 repository 与解析服务；历史固定 ID 补丁仅作维护用途。
 
 修改入口或文件位置时，同时检查 Shell、Docker、导入、技能说明与测试中的路径。
-保留 API URL、数据库、模型选择、中文别名、用户自定义技能和已有发送回执的兼容性。
+保留 API URL、数据库、模型选择、中文别名、用户自定义技能和单篇阅读发送回执的兼容性。
+新库不创建日报逐篇发送标记；旧库的历史表/列不主动删除，但已不再读取或写入。
 干净 checkout 缺少 `frontend/dist` 时仍应能导入应用和运行后端测试。
 依赖研报 ID 的工具遇到缺失或多个候选时应停止，不能默认选择第一篇。
 批量入库中单条记录的事务失败后先回滚，再处理后续记录。

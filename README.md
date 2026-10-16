@@ -102,7 +102,7 @@ bash scripts/ops/run_bot.sh           # 只启动飞书机器人
 
 默认网页是 `http://127.0.0.1:8000`。`start.sh` 在前台运行，Ctrl+C 会停止它启动的子进程；端口被其他进程占用时退出，不会主动杀掉占用者。
 
-仅启动 Web 不会接收飞书 WebSocket 消息。内置调度器遵循 `daily_report.enabled`，默认是 `true`；代码或配置更新后需重启对应服务。
+仅启动 Web 不会接收飞书 WebSocket 消息。Web 承载独立的 `daily_collection` 采集任务和 `daily_report` 发送任务，默认都开启；代码或配置更新后需重启对应服务。
 
 ## 飞书聊天与快捷命令
 
@@ -218,28 +218,30 @@ ALPHAREPORT_BASE_URL=https://your-report-site.example
 
 ### 日报
 
-流程：来源诊断与采集 → 按当前启用方向进行摘要相关性初筛 → 从最近四天、评分指纹有效且待送达的论文中轮流选取各方向候选 → 最多 12 篇全文质量评估 → 最多 5 篇重点阅读推荐 → 模板排版与按目标投递。
+流程：读取论文库最近四个 UTC 日期的资料 → 按当前启用方向刷新摘要相关性初筛 → 从评分指纹有效的论文中轮流选取各方向候选 → 最多 12 篇全文质量评估 → 最多 5 篇重点阅读推荐 → 模板排版与按目标投递。`/daily`、日报 CLI 和 09:00 自动日报都不触发采集。
 
 “重点推荐”表示值得优先阅读：当前方向相关性至少 6 分，研究质量为“基本扎实”或“较强”、评估把握为“中”或“高”，且没有明确影响核心结论的关键疑虑，即可进入候选。不再要求最高档质量和置信度，也不要求单独列出优势。普通局限与推荐一同展示；学术论文、券商研报和社区研究均可入选，并明确标注材料类型。材料不足、质量未知或评估把握低的内容保留在其他栏目，不靠放宽规则凑满 5 篇。
 
-券商研报、社区材料、其他论文和待核验内容分栏展示。缺少全文、文本截断或阅读评估未完成的论文不能进入重点推荐；原文引证供查阅，逐字匹配不作为筛查、推荐或展示条件。全部来源失败时中止，部分失败时保留可用资料并在简报中显示来源状态。飞书日报和网页展示同一份保存的 `evaluation`，不再由另一个模型重写结论。
+券商研报、社区材料、其他论文和待核验内容分栏展示。缺少全文、文本截断或阅读评估未完成的论文不能进入重点推荐；原文引证供查阅，逐字匹配不作为筛查、推荐或展示条件。报告展示最近定时采集的完成时间和来源状态；采集失败不阻止使用库中已有资料，但会提示覆盖可能不完整，不将历史状态说成本次在线检查。飞书日报和网页展示同一份保存的 `evaluation`，不再由另一个模型重写结论。
 
-日报分别展示本次在线采集返回的有效资料条数和从研报库选入的候选篇数。候选可包含此前已收录、尚待送达的论文，因此本次采集为 0 也可能有推荐；来源失败时仍会提示最新资料覆盖可能不完整。推荐理由保留方向匹配与全文阅读判断，不展示内部方向编号或摘要初筛阶段的过期评估状态。
+日报分别展示最近定时采集的有效资料条数和从研报库选入的候选篇数。候选可包含此前已收录、符合本期日期范围的论文，发送历史不参与筛选。推荐理由保留方向匹配与全文阅读判断，不展示内部方向编号或摘要初筛阶段的过期评估状态。
+
+没有符合条件的候选时，机器人仍会回复空结果，不会只发送“开始生成”后静默退出。日报和周报都不记录逐篇已推送标记；重复执行同一期报告会再次发送相同范围内符合条件的论文，仍有效的阅读评估可以复用。
 
 ```bash
 # 使用库中论文预览；仍会刷新过期相关性评分和全文评估，可能调用模型
-.venv/bin/python -m reportagent.cli.daily_feishu_push --no-collect --dry-run --output data/daily-preview.md
-# 完整流程预览：仍会采集、入库、评分、全文评估
-.venv/bin/python -m reportagent.cli.daily_feishu_push --dry-run --max-per-source 15
+.venv/bin/python -m reportagent.cli.daily_feishu_push --dry-run --output data/daily-preview.md
+# 更新评分和全文评估后预览；始终只使用库中论文
+.venv/bin/python -m reportagent.cli.daily_feishu_push --dry-run
 # 检查指定论文并强制刷新全文评估；跳过自动采集与摘要初筛
-.venv/bin/python -m reportagent.cli.daily_feishu_push --no-collect --report-ids 12,18 --force-review --dry-run
+.venv/bin/python -m reportagent.cli.daily_feishu_push --report-ids 12,18 --force-review --dry-run
 # 确认配置与目标后实际发送
 .venv/bin/python -m reportagent.cli.daily_feishu_push --receive-ids oc_your_chat_id --receive-type chat_id
 ```
 
-`--max-reviews` 控制本期评估数量，默认读取 `push_settings.max_reviews`（当前 12），允许 1–12；`--force-review` 刷新全文评估缓存。`--dry-run` 不投递、不写发送回执，但会保存评分、评估和运行记录；产物保存在 `data/daily_reports/`，JSON 包含最终状态、阶段错误和投递结果。重复运行由进程锁防护，发送失败可按收件人补发。
+`--max-reviews` 控制本期评估数量，默认读取 `push_settings.max_reviews`（当前 12），允许 1–12；`--force-review` 刷新全文评估缓存。`--dry-run` 不投递，但会保存评分、评估和运行记录；产物保存在 `data/daily_reports/`，JSON 包含最终状态、阶段错误和逐收件人发送结果。进程锁阻止同时运行两个日报；顺序重跑会重新发送，不做跨运行去重。旧 `--no-collect` 参数仍可接受，但已无需指定。
 
-研究方向读取 `configs/push_directions.yaml` 中启用的定义；修改方向、筛选提示词或阈值后，旧相关性评分须重新计算。`lookback_days` 控制采集回溯，`llm_filter_threshold` 控制初筛门槛，`llm_batch_size` 控制评分批量；投递窗口仍为最近四个 UTC 日期。部分历史展示参数尚未接通，评估数量使用上述 CLI 参数。
+研究方向读取 `configs/push_directions.yaml` 中启用的定义；修改方向、筛选提示词或阈值后，旧相关性评分须重新计算。`llm_filter_threshold` 控制初筛门槛，`llm_batch_size` 控制评分批量；日报窗口仍为最近四个 UTC 日期。采集回溯配置属于 `configs/app.yaml` 的 `daily_collection.lookback_days`，与日报命令分离。部分历史展示参数尚未接通，评估数量使用上述 CLI 参数。
 
 ### 周报
 
@@ -255,7 +257,7 @@ ALPHAREPORT_BASE_URL=https://your-report-site.example
 .venv/bin/python -m reportagent.cli.weekly_report --receive-ids oc_your_chat_id --receive-type chat_id
 ```
 
-日报有按目标的发送回执与补发机制；**周报目前没有同样的去重回执，重复执行可能重复发送**。所有 `--dry-run` 都应按具体流程理解，不代表无网络、无模型费用或完全不写库。
+日报与周报都只根据本期范围、资料与评估生成内容，不按发送历史排除论文；重复执行会再次发送。报告的 `--dry-run` 不采集新论文、不发送，但可能更新评估、写运行记录并消耗模型额度。
 
 ## 部署与定时任务
 
@@ -274,27 +276,28 @@ bash scripts/ops/keepalive.sh    # 检查整套服务的 PID；需要时后台�
 | 任务 | 如何启动 | 调度来源 |
 |---|---|---|
 | 飞书聊天与快捷命令 | 启动 `reportagent.bot.feishu` | WebSocket 常驻，无需定时 |
-| 飞书日报 | 私聊 `/daily`、`cli.daily_feishu_push` 或 Web 内置调度 | 内置 Feishu 模式默认开启；也可改用外部调度 |
+| 多来源采集 | Web 内置调度；可手动调用 `cli.scheduled_collect` | `daily_collection` 默认每天北京时间 08:00；采集、分类和入库，不发报告 |
+| 飞书日报 | 私聊 `/daily`、`cli.daily_feishu_push` 或 Web 内置调度 | `daily_report` 默认每天北京时间 09:00；只读取论文库生成并发送 |
 | 飞书周报 | 私聊 `/weekly` 或调用 `cli.weekly_report` | 手动按需运行；自动运行需外部调度 |
 | 服务进程守护 | 调用 `scripts/ops/keepalive.sh` | 需自己配置外部调度 |
-| arXiv 独立采集 | 选择独立采集模式并启用调度后注册 | `daily_report.arxiv_collection`，Feishu 模式不单独注册 |
 
-`configs/app.yaml` 默认是 `daily_report.enabled: true`、`mode: feishu`、`timezone: Asia/Shanghai`。Web 按工作日 `schedule_cron: "08:00"` 调用与手动入口相同的 Feishu 日报流程，包含采集、筛选、全文评估和发送；该字段填写 `HH:MM`。需配置推送目标并只保留一个调度 Web 进程。开关开启不代表 Web 已在运行；修改配置后需重启 Web。
+`configs/app.yaml` 的 `daily_collection` 和 `daily_report` 是两项独立任务，默认都开启，时区都是 `Asia/Shanghai`，周末也执行。每天 08:00 从 arXiv、东方财富、BigQuant 采集、分类入库；09:00 从库中生成并发送日报。`schedule_cron` 填写 `HH:MM`。原来的 Feishu/独立 arXiv 模式分叉已经移除。自动日报需配置推送目标，并只保留一个承载调度的 Web 进程；修改配置后需重启 Web。
 
-如需暂停自动任务，可设 `enabled: false`；仍可手动使用 `/daily` 和 CLI，也可自行配置外部调度。独立采集模式只采集入库。
+两项任务可分别设置 `enabled: false`：关闭日报不会停止采集，关闭采集也不阻止报告读取已有论文。手动 `/daily`、`/weekly` 不依赖定时开关。采集结果和来源诊断保存到 `data/collections/`，`latest.json` 是最近一次完成的采集记录。`cli.collect` 仍用于手动指定来源、时间范围等；内置定时采集直接调用与它相同的共享 `collect_reports` 服务，不再由日报启动采集子进程。`cli.scheduled_collect` 可按当前配置手动补跑同一采集任务。
 
 ### 外部 cron 示例
 
-下面仅是手动安装时的示例，**不会随仓库自动生效**。时间假设调度主机使用 `Asia/Shanghai`：每天 09:00 日报、周一 08:00 周报、每五分钟检查服务。先把工作目录与 `PATH` 替换成实际值；`PATH` 必须包含本机 `claude`，不要把占位路径直接装入 crontab。
+下面仅是手动安装时的示例，**不会随仓库自动生效**。时间假设调度主机使用 `Asia/Shanghai`：每天 08:00 采集、09:00 日报、周一 09:30 周报、每五分钟检查服务。先把工作目录与 `PATH` 替换成实际值；`PATH` 必须包含本机 `claude`，不要把占位路径直接装入 crontab。
 
 ```cron
 PATH=/home/your-user/.local/bin:/usr/local/bin:/usr/bin:/bin
 */5 * * * * cd /absolute/path/to/AlphaReport-Claude && /bin/bash scripts/ops/keepalive.sh
-0 9 * * * cd /absolute/path/to/AlphaReport-Claude && .venv/bin/python -m reportagent.cli.daily_feishu_push --max-per-source 15 >> data/cron-daily.log 2>&1
-0 8 * * 1 cd /absolute/path/to/AlphaReport-Claude && .venv/bin/python -m reportagent.cli.weekly_report >> data/cron-weekly.log 2>&1
+0 8 * * * cd /absolute/path/to/AlphaReport-Claude && .venv/bin/python -m reportagent.cli.scheduled_collect >> data/cron-collect.log 2>&1
+0 9 * * * cd /absolute/path/to/AlphaReport-Claude && .venv/bin/python -m reportagent.cli.daily_feishu_push >> data/cron-daily.log 2>&1
+30 9 * * 1 cd /absolute/path/to/AlphaReport-Claude && .venv/bin/python -m reportagent.cli.weekly_report >> data/cron-weekly.log 2>&1
 ```
 
-安装前先手工生成预览并确认收件人。若用外部 cron 取代内置日报调度，先设置 `daily_report.enabled: false` 并重启 Web，避免两个调度器重复执行；只安装周报任务不要求关闭内置日报。机器上已有旧路径 `scripts/daily_feishu_push.py`、`scripts/weekly_report.py` 或 `scripts/bot_keepalive.sh` 的任务，需要按上例迁移；旧兼容入口已移除。本次目录整理没有修改本机系统调度。
+安装前先手工生成预览并确认收件人。用外部 cron 替代哪项任务，就关闭对应的 `daily_collection.enabled` 或 `daily_report.enabled` 并重启 Web，避免重复执行；只安装周报任务不要求关闭内置任务。机器上已有旧路径 `scripts/daily_feishu_push.py`、`scripts/weekly_report.py` 或 `scripts/bot_keepalive.sh` 的任务，需要按上例迁移；旧兼容入口已移除。本次调整没有修改本机系统调度。
 
 ### 监听地址、隧道与 Docker
 
@@ -430,8 +433,7 @@ PY
 
 - 飞书单篇任务：`data/report-jobs.log`；守护启动的输出：`data/bot.log`；隧道：`data/cloudflared.log`；外部定时任务使用上面指定的 cron 日志。
 - 飞书无响应：先检查进程、应用订阅与权限、允许名单、运行账户的 `claude` 路径和模型凭据。`start.sh --check` 不验证外部接口联通。
-- 有论文但没有日报：检查来源状态、四天日期窗口、当前相关性评分指纹与门槛、全文评估状态，以及目标回执。`data/daily_reports/` 保存本次产物，数据库保存运行结果；周报没有同样的去重回执。
-- 旧 `pushed_at` 没有收件人信息，无法转换成新回执；首次使用新逻辑时，窗口内旧论文可能重新发送一次。
+- 有论文但没有日报：检查四天日期窗口、当前相关性评分指纹与门槛、全文评估状态及收件人配置。`data/daily_reports/` 保存报告产物和逐收件人发送结果；`data/collections/` 保存独立采集的时间、状态与错误。日/周报不按发送历史排除论文。
 - 迁移机器时另行保存所需的 `.env`、`data/`、`.claude-bot/`，并核对模型配置与系统调度；重装依赖不会恢复历史数据。它们都不提交 Git。
 - PDF 文本可能丢失公式或图表，长论文按完整提取文本组织输入，超过限额时停止或保持待核验；模型分析没有复现论文实验，重要结论需对照原文。
 

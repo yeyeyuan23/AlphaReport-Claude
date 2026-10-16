@@ -58,7 +58,8 @@ def render_single_brief(paper: dict, sections: dict[str, str], model: str) -> st
 
 
 def render_briefing(papers: list[dict], date_label: str, *, source_statuses: list[dict] | None = None,
-                    max_featured: int = 5, template_skill: str = "daily-report") -> str:
+                    max_featured: int = 5, template_skill: str = "daily-report",
+                    source_checked_at: str | None = None) -> str:
     ordered = sorted(papers, key=lambda p: (
         {"focus": 0, "browse": 1, "pending": 2, "exclude": 3}.get((p.get("evaluation") or {}).get("tier"), 2),
         -(p.get("selection_relevance") or p.get("selection_score") or 0)))
@@ -122,10 +123,13 @@ def render_briefing(papers: list[dict], date_label: str, *, source_statuses: lis
                 "按阅读价值与相关性优先选读，局限随文列出。")
     if source_statuses:
         valid = sum(s.get('valid', 0) for s in source_statuses)
-        overview = (f"本次在线采集有效资料 {valid} 条（按来源合计）；"
-                    "本期候选可包含此前已收录、尚待送达的库中论文。\n\n" + overview)
+        label = f"最近定时采集（{source_checked_at}）" if source_checked_at else "本次在线采集"
+        overview = (f"{label}有效资料 {valid} 条（按来源合计）；"
+                    "本期候选可包含此前已收录、符合本期日期范围的库中论文。\n\n" + overview)
+        if source_checked_at:
+            coverage = f"以下为最近一次定时采集记录（{source_checked_at}）；本次报告仅读取论文库。\n\n" + coverage
         if any(s['status'] in {'error', 'partial', 'unavailable'} for s in source_statuses):
-            overview += " 本次部分来源采集失败或不完整，最新资料覆盖可能不完整。"
+            overview += " 部分来源采集失败或不完整，最新资料覆盖可能不完整。"
     return skill_resource(template_skill, "briefing.md").read_text(encoding="utf-8").format(
         date_label=date_label,
         overview=overview,

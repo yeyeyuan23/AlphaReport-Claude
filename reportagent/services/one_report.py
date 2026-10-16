@@ -24,6 +24,7 @@ from reportagent.models.database import Report
 from reportagent.sources.arxiv_source import ArxivSource
 from reportagent.utils.config import PROJECT_ROOT, get_db_path, get_llm_model, get_llm_base_url
 from reportagent.skills.registry import skill_resource
+from reportagent.services.public_url import get_web_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -135,9 +136,7 @@ def make_brief(paper: SearchResult, result: AnalysisResult, model: str,
             "reading_advice": "参照历史分析并核对原文；新版全文评估暂无记录。",
             "verification": "历史分析尚未按新标准核验原文引证。",
         }
-    base_url = os.environ.get("ALPHAREPORT_BASE_URL") or (
-        f"http://{os.environ.get('ALPHAREPORT_HOST', 'localhost')}:{os.environ.get('ALPHAREPORT_PORT', '8000')}"
-    )
+    base_url = get_web_base_url()
     brief = render_single_brief({
         "title": paper.title, "authors": paper.authors, "source_url": paper.source_url,
         "pdf_url": paper.raw_metadata.get("pdf_url"),

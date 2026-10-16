@@ -22,7 +22,8 @@ from reportagent.models.schemas import SearchResult, SourceType
     ("collect", "--no-analysis"), ("analyze", "--unanalyzed"),
     ("classify", "--hybrid"), ("llm_filter", "--published-days"),
     ("llm_direction_filter", "--report-ids"), ("narrative_brief", "--force"),
-    ("daily_feishu_push", "--no-collect"), ("weekly_report", "--no-llm"),
+    ("daily_feishu_push", "--max-reviews"), ("weekly_report", "--no-llm"),
+    ("scheduled_collect", "--help"),
     ("reproduction", "--dry-run"), ("ideation", "--verify-external"),
     ("parse_pdf", "--save"), ("db_query", "--update-knowledge-card"),
 ])
