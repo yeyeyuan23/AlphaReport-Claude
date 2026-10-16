@@ -76,20 +76,5 @@ class ClassificationAgent:
     def _merge_results(
         self, rule: ClassificationResult, llm: ClassificationResult
     ) -> ClassificationResult:
-        markets = list(set(rule.markets) | set(llm.markets))
-        asset_classes = list(set(rule.asset_classes) | set(llm.asset_classes))
-        frequencies = list(set(rule.frequencies) | set(llm.frequencies))
-        topics = list(set(rule.topics) | set(llm.topics))
-        custom_tags = list(set(rule.custom_tags) | set(llm.custom_tags))
-
-        confidence = max(rule.confidence, llm.confidence)
-
-        return ClassificationResult(
-            markets=markets,
-            asset_classes=asset_classes,
-            frequencies=frequencies,
-            topics=topics,
-            custom_tags=custom_tags,
-            confidence=confidence,
-            method="hybrid",
-        )
+        # Only labels accepted by the evidence-aware model survive a hybrid run.
+        return llm.model_copy(update={"method": "hybrid"})

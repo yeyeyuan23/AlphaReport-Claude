@@ -13,7 +13,7 @@ def main():
 
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--llm", action="store_true", help="Use LLM semantic classification")
-    mode.add_argument("--hybrid", action="store_true", help="Use rule + LLM merged (best of both)")
+    mode.add_argument("--hybrid", action="store_true", help="Run rules and LLM; retain only evidence-supported model labels")
 
     parser.add_argument("--dry-run", action="store_true", help="Preview only, don't save")
 
