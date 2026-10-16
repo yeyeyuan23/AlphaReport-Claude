@@ -16,6 +16,7 @@ export default function ReproductionCard({ reportId }: { reportId: number }) {
   const [data, setData] = useState<Preparation | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [feedback, setFeedback] = useState("");
   const requestId = useRef<object | null>(null);
 
   useEffect(() => {
@@ -30,10 +31,19 @@ export default function ReproductionCard({ reportId }: { reportId: number }) {
   async function prepare() {
     const id = {};
     requestId.current = id;
-    setLoading(true); setError("");
+    setLoading(true); setError(""); setFeedback("");
     try {
       const res = await prepareReproductionCard(reportId, data?.status === "ready");
-      if (id === requestId.current) setData(res.data);
+      if (id !== requestId.current) return;
+      if (!res.success || !res.data) throw new Error("Missing preparation result");
+      if (res.data.status === "ready") {
+        setData(res.data);
+        setFeedback(`准备卡已生成，共 ${Object.keys(res.data.fields ?? {}).length} 项设置，${res.data.open_questions?.length ?? 0} 项待核查。`);
+      } else {
+        // A rejected generation must visibly explain why it did not produce a card.
+        setError(res.data.notice || "本次未能生成，请稍后重试。");
+        if (data?.status !== "ready") setData(res.data);
+      }
     } catch {
       if (id === requestId.current) setError("生成失败，请重试。已有准备卡仍保留。");
     } finally {
@@ -44,9 +54,11 @@ export default function ReproductionCard({ reportId }: { reportId: number }) {
   return <ScrollArea className="h-full"><div className="p-4 space-y-4 text-sm">
     <p className="text-muted-foreground">整理原文设置与待核查项，帮助你开始动手复现。</p>
     <Button onClick={prepare} disabled={loading}>{loading ? "正在核对原文…" : data?.status === "ready" ? "重新核对" : "生成复现准备卡"}</Button>
-    <p className="text-xs text-muted-foreground">生成会调用模型；不会下载数据或运行实验。</p>
-    {error && <p role="alert">{error}</p>}
-    {data?.notice && <p className="text-muted-foreground">{data.notice}</p>}
+    <p className="text-xs text-muted-foreground">直接从已有全文提取设置，无需先完成论文质量评估。生成会调用模型；不会下载数据或运行实验。</p>
+    {loading && <p role="status" aria-live="polite" className="rounded-lg border bg-secondary/50 p-3">正在读取全文并核对原文引证，通常需要几分钟，请稍候。完成后将在下方显示准备卡。</p>}
+    {error && <p role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900">{error}</p>}
+    {feedback && <p role="status" aria-live="polite" className="rounded-lg border bg-secondary/50 p-3">{feedback}</p>}
+    {data?.notice && !error && <p className="text-muted-foreground">{data.notice}</p>}
     {Object.entries(data?.fields ?? {}).map(([name, fact]) => <Card key={name}>
       <CardHeader className="pb-2"><CardTitle className="text-sm">{labels[name] ?? name} · {statusLabels[fact.status]}</CardTitle></CardHeader>
       <CardContent className="space-y-2"><p className="whitespace-pre-wrap">{fact.value}</p>

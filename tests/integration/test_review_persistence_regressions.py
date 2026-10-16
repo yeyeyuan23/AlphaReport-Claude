@@ -161,3 +161,27 @@ def test_fetching_same_revision_full_text_preserves_current_abstract_relevance(l
         assert screening_is_current(vars(row))
         assert quality.review_fingerprint(vars(row), "fixture-model") != before_review_fingerprint
         assert json.loads(row.evaluation_json)['tier'] == 'focus'
+
+
+def test_old_quote_screening_cache_is_refreshed_without_requiring_force(library):
+    insert(library)
+    llm = PersistentModel()
+    llm.model = quality.get_llm_model()
+    llm.data['findings'] = [{'claim': '作者报告的结论及适用条件',
+                             'quote': 'An excerpt with different PDF typesetting.', 'chunk_id': 'C002'}]
+    with library() as session:
+        row = session.get(Report, 1)
+        with patch.object(quality, 'SCHEMA_VERSION', 3):
+            old_fingerprint = quality.review_fingerprint(vars(row), llm.model)
+        row.evaluation_json = json.dumps({**response(), 'schema_version': 3,
+            'fingerprint': old_fingerprint, 'status': 'reviewed', 'tier': 'browse'})
+        session.commit()
+    with patch.object(database, 'get_session_factory', return_value=library), patch(
+        'reportagent.llm.client.LLMClient', return_value=llm
+    ):
+        result = asyncio.run(quality.review_report_ids([1]))[1]
+    assert result['tier'] == 'focus'
+    assert result['findings'][0]['claim'] == '作者报告的结论及适用条件'
+    assert not result['validation_issues']
+    with library() as session:
+        assert json.loads(session.get(Report, 1).evaluation_json) == result

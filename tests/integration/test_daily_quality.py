@@ -39,6 +39,20 @@ def test_pending_papers_never_fill_empty_focus_section():
     assert "全文获取失败" in brief
 
 
+@pytest.mark.parametrize(('source', 'label'), [('arxiv', '学术论文'), ('eastmoney', '券商研报'), ('bigquant', '社区研究')])
+def test_reading_priority_features_sound_work_across_sources_and_discloses_limits(source, label):
+    from reportagent.services.report_briefing import render_briefing
+    data = response()
+    data.update(quality='sound', confidence='medium', strengths=[], limitations=['原文明示：仅覆盖一个市场。'])
+    p = paper(id=1, source=source, title='值得优先读的研究', selection_relevance=8)
+    p['evaluation'] = asyncio.run(module().evaluate_paper(p, Model(data)))
+    brief = render_briefing([p], 'fixture')
+    assert '重点推荐 1 篇' in brief
+    assert '**研究问题**' in brief
+    assert '仅覆盖一个市场' in brief
+    assert label in brief
+
+
 def test_daily_does_not_select_old_score_after_abstract_changes():
     from reportagent.services.paper_scoring import evidence_fingerprint, scoring_fingerprint
     engine = create_engine("sqlite:///:memory:")

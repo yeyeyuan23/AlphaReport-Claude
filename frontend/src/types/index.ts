@@ -56,10 +56,9 @@ export interface ReportDetail extends ReportSummary {
 
 export interface ResearchEvidence {
   claim: string;
-  quote: string;
-  chunk_id: string;
-  verified: true;
-  locator: string;
+  quote?: string | null;
+  chunk_id?: string | null;
+  locator?: string;
 }
 
 export interface ResearchEvaluation {

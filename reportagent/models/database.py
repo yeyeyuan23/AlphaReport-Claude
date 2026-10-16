@@ -33,6 +33,7 @@ class Report(Base):
     doi = Column(String(200), index=True)
     arxiv_id = Column(String(50), index=True)
     published_date = Column(DateTime)
+    publication_date_info_json = Column(Text)
     pdf_path = Column(String(500))
     content_hash = Column(String(64), unique=True, nullable=False, index=True)
 
@@ -46,6 +47,7 @@ class Report(Base):
     topics = Column(String(200))
     classification_confidence = Column(Float, default=0.0)
     classification_method = Column(String(20))
+    classification_provenance_json = Column(Text)
 
     analysis_json = Column(Text)
     knowledge_card_json = Column(Text)
@@ -68,6 +70,17 @@ class Report(Base):
 
     tags = relationship("Tag", secondary=report_tags, back_populates="reports")
     deliveries = relationship("ReportDelivery", cascade="all, delete-orphan")
+
+
+class LocalPDFImport(Base):
+    """Successful local file imports; failed work remains eligible for retry."""
+    __tablename__ = "local_pdf_imports"
+
+    file_path = Column(String(1000), primary_key=True)
+    file_sha256 = Column(String(64), nullable=False)
+    report_id = Column(Integer, ForeignKey("reports.id", ondelete="SET NULL"))
+    report_content_hash = Column(String(64))
+    status = Column(String(20), nullable=False)
 
 
 class Tag(Base):

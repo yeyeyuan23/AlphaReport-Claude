@@ -12,6 +12,7 @@ sources:
   local_pdf:
     enabled: true
     library_path: "data/pdf_library"
+    import_on_startup: true  # 服务启动后，后台导入新增/内容变化的 PDF；只分类，不做深度分析
 
   arxiv:
     enabled: true

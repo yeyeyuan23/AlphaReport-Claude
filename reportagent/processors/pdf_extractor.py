@@ -13,6 +13,7 @@ class PDFContent:
     metadata: dict = field(default_factory=dict)
     file_path: str = ""
     file_size_bytes: int = 0
+    first_page_text: str = ""
 
 
 class PDFExtractor:
@@ -38,6 +39,7 @@ class PDFExtractor:
                 },
                 file_path=str(pdf_path),
                 file_size_bytes=pdf_path.stat().st_size,
+                first_page_text=text_parts[0] if text_parts else "",
             )
         finally:
             doc.close()

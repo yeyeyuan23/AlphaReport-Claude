@@ -13,7 +13,9 @@ from reportagent.models.database import Base, Report
 from reportagent.services import batch_classification as classification
 
 VALID = {'markets': [], 'asset_classes': [], 'frequencies': [],
-         'topics': ['factor_model'], 'custom_tags': [], 'confidence': .8}
+         'topics': ['factor_model'], 'custom_tags': [], 'confidence': .8,
+         'evidence': {'topics.factor_model': {'source': 'material', 'quote': 'factor model',
+                                            'reason': 'Explicit factor model research'}}}
 
 
 @pytest.mark.parametrize('result', [{}, [], {'topics': 'factor_model'},
@@ -49,7 +51,7 @@ def test_one_model_failure_preserves_existing_tags_and_successful_siblings(monke
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
     with factory() as session:
-        session.add_all([Report(title=title, source='arxiv', content_hash=title, topics='risk_model')
+        session.add_all([Report(title=title, abstract='We study a factor model.', source='arxiv', content_hash=title, topics='risk_model')
                          for title in ['fail', 'succeed']])
         session.commit()
     monkeypatch.setattr(classification, 'init_db', lambda: None)

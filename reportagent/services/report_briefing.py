@@ -23,7 +23,7 @@ def _verification_reason(evaluation: dict) -> str:
     readable = []
     for reason in reasons:
         if reason.startswith("引文未能定位："):
-            reason = "部分原文引证尚未准确核对，需人工核验"
+            reason = "旧版引文匹配筛查已停用，请重新生成全文阅读评估"
         if reason not in readable:
             readable.append(reason)
     return "；".join(readable[:3])
@@ -39,14 +39,14 @@ def evaluation_sections(evaluation: dict) -> dict[str, str]:
         "research_question": evaluation.get("research_question") or "待补充",
         "method_findings": "待核验，暂不引用方法或研究发现。" if pending else
             f"{(evaluation.get('method') or {}).get('claim', '')} {findings}".strip(),
-        "strengths": "待完成证据核验。" if pending else strengths or "未记录独立优势。",
-        "why_read": "待完成证据核验。" if pending else
+        "strengths": "待完成全文阅读评估。" if pending else strengths or "未记录独立优势。",
+        "why_read": "待完成全文阅读评估。" if pending else
             f"{evaluation.get('relevance_reason', '')} {strengths}".strip(),
         "limitations": "；".join(evaluation.get("limitations", [])[:3]) or "未记录，需进一步核查。",
         "critical_concerns": "；".join(evaluation.get("critical_concerns", [])) or "未记录明确的关键疑虑。",
         "reading_advice": evaluation.get("reading_advice") or "核对原文后再判断。",
         "verification": _verification_reason(evaluation) if pending else
-            "引文已与提取文本匹配；这不等于独立复现论文实验。",
+            "模型已完成全文阅读评估；引文供查阅，未独立验证研究结论或复现实验。",
     }
 
 
@@ -62,15 +62,18 @@ def render_briefing(papers: list[dict], date_label: str, *, source_statuses: lis
     ordered = sorted(papers, key=lambda p: (
         {"focus": 0, "browse": 1, "pending": 2, "exclude": 3}.get((p.get("evaluation") or {}).get("tier"), 2),
         -(p.get("selection_relevance") or p.get("selection_score") or 0)))
-    academic = [p for p in ordered if source_category(p.get("source", "")) == "academic"]
-    focus = [p for p in academic if (p.get("evaluation") or {}).get("tier") == "focus"
+    focus = [p for p in ordered if (p.get("evaluation") or {}).get("tier") == "focus"
              and not _needs_verification(p["evaluation"])][:max_featured]
     focus_ids = {p["id"] for p in focus}
     details = []
     for i, p in enumerate(focus, 1):
         e = p["evaluation"]
         sections = evaluation_sections(e)
+        category = source_category(p.get("source", ""))
+        source_label = {"academic": "学术论文", "broker": "券商研报",
+                        "community": "社区研究", "other": "其他材料"}[category]
         details.append(f"### {i}. {p['title']}\n"
+                       f"**材料类型**：{source_label}\n\n"
                        f"**研究问题**：{sections['research_question']}\n\n"
                        f"**方法与发现**：{sections['method_findings']}\n\n"
                        f"**为什么值得读**：{sections['why_read']}\n\n"
@@ -117,7 +120,7 @@ def render_briefing(papers: list[dict], date_label: str, *, source_statuses: lis
                          + (f"；{'；'.join(s.get('errors', [])[:2])}" if s.get('errors') else "") for s in (source_statuses or []))
     return skill_resource(template_skill, "briefing.md").read_text(encoding="utf-8").format(
         date_label=date_label,
-        overview=f"本期检查 {len(papers)} 篇候选，重点推荐 {len(focus)} 篇。按研究证据与相关性分层，不为凑数推荐。",
+        overview=f"本期检查 {len(papers)} 篇候选，重点推荐 {len(focus)} 篇。按阅读价值与相关性优先选读，局限随文列出。",
         focus="\n\n".join(details) or "暂无达到重点推荐标准的论文。",
         other_papers=others,
         source_status=coverage or "本次使用库中已有论文，未重新检查在线来源。",

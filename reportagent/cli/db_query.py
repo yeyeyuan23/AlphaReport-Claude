@@ -38,6 +38,7 @@ def _report_to_dict(r) -> dict:
         "doi": r.doi,
         "arxiv_id": r.arxiv_id,
         "published_date": r.published_date.isoformat() if r.published_date else None,
+        "publication_date_info": json.loads(r.publication_date_info_json) if r.publication_date_info_json else {},
         "has_full_text": r.has_full_text,
         "markets": r.markets.split(",") if r.markets else [],
         "asset_classes": r.asset_classes.split(",") if r.asset_classes else [],
@@ -47,6 +48,7 @@ def _report_to_dict(r) -> dict:
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "classification_confidence": r.classification_confidence,
         "classification_method": r.classification_method,
+        "classification_provenance": json.loads(r.classification_provenance_json) if r.classification_provenance_json else {},
     }
 
 

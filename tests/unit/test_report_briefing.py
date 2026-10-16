@@ -50,7 +50,7 @@ def test_single_pending_brief_discloses_validation_issue_without_presenting_find
                          validation_issues=["引文未能定位：C001"])
     brief = one_report.make_brief(paper, analysis, "fixture-model", pending)
     assert "待核验" in brief
-    assert "部分原文引证尚未准确核对，需人工核验" in brief
+    assert "旧版引文匹配筛查已停用" in brief
     assert pending["validation_issues"] == ["引文未能定位：C001"]
     assert "已保存的研究发现" not in brief
     assert "已保存的方法" not in brief
@@ -110,6 +110,6 @@ def test_daily_unverified_status_is_pending_regardless_of_saved_tier(tier, label
         tier=tier, label=label, status="needs_verification", validation_issues=["引文未能定位：C001"])}
     brief = report_briefing.render_briefing([paper], "fixture")
     assert "重点推荐 0 篇" in brief
-    assert "部分原文引证尚未准确核对，需人工核验" in brief
+    assert "旧版引文匹配筛查已停用" in brief
     assert paper["evaluation"]["validation_issues"] == ["引文未能定位：C001"]
     assert "已保存的研究发现" not in brief

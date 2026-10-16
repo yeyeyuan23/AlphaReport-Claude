@@ -43,6 +43,27 @@ class CollectionOptions:
     broad: bool = False
 
 
+async def classify_for_storage(sr, classifier, llm_classifier, errors):
+    """Apply the shared domain gate and classification fallback before persistence."""
+    title = sr.title or ""
+    introduction = sr.raw_metadata.get("introduction")
+    abstract = sr.abstract or (f"【原文引言；未提取到论文摘要】\n{introduction}" if introduction else "")
+    if not title.strip():
+        raise SourceParseError("report missing title")
+    if not is_quant_finance(title, abstract):
+        return None
+    if llm_classifier:
+        try:
+            classification = await llm_classifier.classify(title, abstract)
+        except Exception as error:
+            logger.warning("Classification fallback: %s", type(error).__name__)
+            errors.append(safe_source_error(error, "classification; rule fallback used"))
+            classification = classifier.classify(title, abstract)
+    else:
+        classification = classifier.classify(title, abstract)
+    return ClassifiedReport(search_result=sr, classification=classification)
+
+
 def build_sources(source_names: list[str]) -> list:
     sources = []
     for name in source_names:
@@ -140,24 +161,10 @@ async def collect_reports(options: CollectionOptions) -> dict:
 
                 for sr in deduplicate_results(results):
                     try:
-                        title = sr.title or ""
-                        abstract = sr.abstract or ""
-                        if not title.strip():
-                            raise SourceParseError("report missing title")
-                        if not is_quant_finance(title, abstract):
+                        classified = await classify_for_storage(sr, classifier, llm_classifier, errors)
+                        if classified is None:
                             continue
-
-                        if llm_classifier:
-                            try:
-                                classification = await llm_classifier.classify(title, abstract)
-                            except Exception as error:
-                                logger.warning("Classification fallback: %s", type(error).__name__)
-                                errors.append(safe_source_error(error, "classification; rule fallback used"))
-                                classification = classifier.classify(title, abstract)
-                        else:
-                            classification = classifier.classify(title, abstract)
-
-                        all_results.append(ClassifiedReport(search_result=sr, classification=classification))
+                        all_results.append(classified)
                         valid += 1
                         full_text_count += int(not sr.abstract_only and usable_full_text(sr.full_text))
                     except Exception as error:

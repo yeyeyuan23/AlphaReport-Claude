@@ -1,5 +1,6 @@
 """Feishu event loop and user commands. Run with python -m reportagent.bot.feishu."""
 import json
+import asyncio
 import logging
 import os
 import re
@@ -274,6 +275,9 @@ def main():
         logger.error("FEISHU_APP_ID/APP_SECRET not set"); sys.exit(1)
     init_db()
     logger.info(f"Bot starting, project={PROJECT_ROOT}")
+    from reportagent.services.local_pdf_import import import_pdf_library
+    threading.Thread(target=lambda: asyncio.run(import_pdf_library()),
+                     name="local-pdf-import", daemon=True).start()
 
     # ── Webhook poller: reliable fallback when WebSocket drops ──
     import urllib.request as ur

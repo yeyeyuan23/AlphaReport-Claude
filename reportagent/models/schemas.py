@@ -91,6 +91,7 @@ class ClassificationResult(BaseModel):
     custom_tags: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     method: str = "rule"
+    provenance: dict = Field(default_factory=dict)
 
 
 class ClassifiedReport(BaseModel):

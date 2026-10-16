@@ -15,6 +15,8 @@ metadata:
 
 Use the shared Python tools/services for execution. The task template above is a workflow, not permission to send messages.
 
+采集入库和批量重分类共用 `classification.md` 中的分类提示词与 `configs/classification_taxonomy.yaml` 中的类别定义。模型须逐标签附原文引文与理由，程序核对引文后保存分类证据；材料未说明的维度留空，不为凑数量增加主题。
+
 Run from the project root:
 ```bash
 .venv/bin/python -m reportagent.cli.collect --topics '量化策略,因子模型' --sources arxiv,bigquant --max 15 --no-analysis

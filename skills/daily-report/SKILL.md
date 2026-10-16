@@ -9,9 +9,11 @@ metadata:
 按 `configs/push_directions.yaml` 的有效方向工作：
 1. 执行真实采集并记录来源状态；失败不能称为“没有新内容”。
 2. 对完整摘要做相关性初筛，不以摘要宣称研究质量高。
-3. 各方向轮流选择最多12篇候选，取得全文并完成有原文引证的质量评估。
+3. 各方向轮流选择最多12篇候选，取得全文并完成阅读质量评估；保留可提供的原文引证供查阅，不以逐字匹配作为筛查条件。
 4. 根据已保存评估生成简报：概览、最多5篇重点解读、其他论文、券商/社区材料、待核验与来源覆盖。不凑数量。
 5. 在明确授权的会话发送并记录回执；不在推送之后才补做用于推荐的分析。
+
+重点推荐表示阅读优先级：相关性至少6分、质量为 sound/strong、评估把握为 medium/high 且无明确关键疑虑即可候选，不要求最高质量/置信度或单独列出优势。普通局限随文说明；学术、券商和社区材料均可入选，必须标明材料类型。
 
 Use the shared Python tools/services for execution. The task template above is a workflow, not permission to send messages.
 Default to preparing a preview; send only when the user explicitly requests delivery and provides or has configured a destination. Feishu daily delivery uses `reportagent.services.daily_push`. The Feishu briefing format is the deterministic template [briefing.md](briefing.md), rendered from saved evaluations; it does not ask another model to change findings or scores. To change research judgments edit `analyze-report/quality-review.md` and `paper-selection` resources. To change field layout edit the renderer and keep saved evidence intact.

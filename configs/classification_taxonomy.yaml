@@ -5,6 +5,7 @@ taxonomy:
     values:
       china:
         label: "China A-share"
+        description: "明确使用中国股票市场、A股或相应指数样本；不能由作者国籍推断。"
         keywords:
           - "A股"
           - "沪深"
@@ -22,6 +23,7 @@ taxonomy:
           - "shenzhen"
       overseas:
         label: "Overseas"
+        description: "明确使用中国以外市场，例如美国、欧洲；不能由论文语言推断。"
         keywords:
           - "S&P"
           - "NYSE"
@@ -35,6 +37,7 @@ taxonomy:
           - "US stock"
       global:
         label: "Global / Cross-market"
+        description: "明确开展跨国家/地区市场研究；市场未说明时留空。"
         keywords:
           - "global"
           - "cross-market"
@@ -152,7 +155,8 @@ taxonomy:
           - "因子投资"
           - "rebalancing"
       mixed:
-        label: "Mixed / Unspecified"
+        label: "Mixed Frequency"
+        description: "明确研究多种交易频率；未说明频率不是 mixed，应留空。"
         keywords: []
 
   topic:
@@ -173,7 +177,8 @@ taxonomy:
           - "drawdown"
           - "tail risk"
       factor_model:
-        label: "Factor Model / Alpha"
+        label: "Factor Construction / Pricing Model"
+        description: "实际研究具体因子构建、因子收益/溢价、因子定价/暴露模型；普通预测特征、股票排序或笼统 Alpha 目标不算。"
         keywords:
           - "factor"
           - "alpha"
@@ -187,6 +192,7 @@ taxonomy:
           - "cross-sectional return"
       ai_ml_model:
         label: "AI / Machine Learning"
+        description: "实际提出、使用或检验机器学习/深度学习模型。"
         keywords:
           - "machine learning"
           - "deep learning"
@@ -216,6 +222,7 @@ taxonomy:
           - "slippage"
       portfolio_optimization:
         label: "Portfolio Optimization"
+        description: "实际优化资产权重或配置，并有目标函数/约束或明确的组合优化方法；股票排序、专家路由或集成不算。"
         keywords:
           - "portfolio optimization"
           - "mean-variance"
@@ -262,6 +269,7 @@ taxonomy:
           - "variance swap"
       statistical_arbitrage:
         label: "Statistical Arbitrage"
+        description: "实际研究配对交易、协整、价差均值回归、相对价值套利等策略；一般股价预测不算。"
         keywords:
           - "pairs trading"
           - "statistical arbitrage"
@@ -272,4 +280,5 @@ taxonomy:
           - "spread"
       other:
         label: "Other"
+        description: "材料明确的研究主题不属于以上类别时使用；已匹配主题时不再添加 other。"
         keywords: []

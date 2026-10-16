@@ -207,7 +207,7 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
         {data.limitations?.length > 0 && <SectionCard title="局限与待核查项" icon="🔎">
           <ul className="list-disc pl-4 space-y-2">{data.limitations.map((s, i) => <li key={i}>{s}</li>)}</ul>
         </SectionCard>}
-        {data.evidence?.length > 0 && <SectionCard title="原文依据" icon="📖">
+        {data.evidence?.length > 0 && <SectionCard title="原文引证（供核对）" icon="📖">
           <div className="space-y-3">{data.evidence.map((e, i) => <details key={i}>
             <summary className="cursor-pointer">{e.claim}</summary>
             <p className="text-xs text-muted-foreground mt-2">{e.locator}</p>
@@ -219,7 +219,7 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
         {!data.summary && data.highlights.length === 0 && data.methodology_steps.length === 0 && (
           <div className="text-center text-muted-foreground py-12">
             <p className="text-sm">暂无结构化分析数据</p>
-            <p className="text-xs mt-1">请先完成全文证据评估。</p>
+            <p className="text-xs mt-1">请先完成全文阅读评估。</p>
           </div>
         )}
       </div>

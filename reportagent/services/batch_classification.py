@@ -10,7 +10,7 @@ import logging
 
 from reportagent.db.engine import init_db, get_session_factory
 from reportagent.db.repository import ReportRepository
-from reportagent.models.database import Report, Tag
+from reportagent.models.database import Report
 from reportagent.classifiers.rule_classifier import RuleClassifier
 from reportagent.classifiers.llm_classifier import LLMClassifier
 from reportagent.llm.client import LLMClient
@@ -43,38 +43,8 @@ class ClassificationOptions:
 
 
 def _merge_results(rule: ClassificationResult, llm: ClassificationResult) -> ClassificationResult:
-    """Merge rule and LLM results, taking union of tags."""
-    return ClassificationResult(
-        markets=list(set(rule.markets) | set(llm.markets)),
-        asset_classes=list(set(rule.asset_classes) | set(llm.asset_classes)),
-        frequencies=list(set(rule.frequencies) | set(llm.frequencies)),
-        topics=list(set(rule.topics) | set(llm.topics)),
-        custom_tags=list(set(rule.custom_tags) | set(llm.custom_tags)),
-        confidence=max(rule.confidence, llm.confidence),
-        method="hybrid",
-    )
-
-
-def _ensure_tags(session, db_report: Report, custom_tags: list[str]) -> bool:
-    """Sync custom tags. Returns True if any changes made."""
-    dimension = "custom"
-    existing = {(t.dimension, t.value) for t in db_report.tags}
-
-    changed = False
-    for value in custom_tags:
-        if (dimension, value) not in existing:
-            tag = session.query(Tag).filter(
-                Tag.dimension == dimension, Tag.value == value
-            ).first()
-            if not tag:
-                tag = Tag(dimension=dimension, value=value)
-                session.add(tag)
-                session.flush()
-            if tag not in db_report.tags:
-                db_report.tags.append(tag)
-                changed = True
-
-    return changed
+    """Model evidence is authoritative; rule guesses cannot restore rejected labels."""
+    return llm.model_copy(update={"method": "hybrid"})
 
 
 def _summary(rep: Report) -> str:
@@ -146,28 +116,7 @@ async def classify_async(options: ClassificationOptions) -> dict:
                 continue
             audit["classified_ids"].append(r.id)
 
-            new_markets = ",".join(m.value for m in result.markets)
-            new_assets = ",".join(a.value for a in result.asset_classes)
-            new_freqs = ",".join(f.value for f in result.frequencies)
-            new_topics = ",".join(t.value for t in result.topics)
-            new_custom = result.custom_tags or []
-
-            tags_changed = _ensure_tags(session, r, new_custom)
-            fields_changed = (
-                new_markets != (r.markets or "") or
-                new_assets != (r.asset_classes or "") or
-                new_freqs != (r.frequencies or "") or
-                new_topics != (r.topics or "")
-            )
-
-            if fields_changed or tags_changed:
-                if not options.dry_run:
-                    r.markets = new_markets
-                    r.asset_classes = new_assets
-                    r.frequencies = new_freqs
-                    r.topics = new_topics
-                    r.classification_confidence = result.confidence
-                    r.classification_method = result.method
+            if repo.apply_classification(r, result, dry_run=options.dry_run):
                 updated += 1
                 summary = _summary(r)
                 logger.info(f"  [{i+1}/{len(reports)}] {r.title[:50]} → {summary}")

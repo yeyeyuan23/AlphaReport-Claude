@@ -105,3 +105,21 @@ def test_reproduction_api_persists_valid_output_and_preserves_it_on_failure(libr
     finally:
         client.app.dependency_overrides.clear()
         client.close()
+
+
+def test_generate_button_api_works_with_full_text_and_no_saved_review(library, monkeypatch):
+    import reportagent.llm.client as models
+    llm = SimpleNamespace(chat_json=AsyncMock(return_value=output()))
+    monkeypatch.setattr(models, 'LLMClient', lambda: llm)
+    with library() as db:
+        db.get(Report, 1).evaluation_json = None
+        db.commit()
+    client = client_for(library)
+    try:
+        result = client.post('/api/v1/reports/1/reproduction-card').json()['data']
+        assert result['status'] == 'ready'
+        assert client.get('/api/v1/reports/1/reproduction-card').json()['data']['status'] == 'ready'
+        llm.chat_json.assert_awaited_once()
+    finally:
+        client.app.dependency_overrides.clear()
+        client.close()

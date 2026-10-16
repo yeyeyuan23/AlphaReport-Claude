@@ -107,6 +107,25 @@ def test_reimport_backfills_date_without_clearing_analysis_or_delivery(library):
         assert session.query(Report).count() == 1
 
 
+@pytest.mark.parametrize('new_date', [None, datetime(2024, 2, 3)])
+def test_reimport_local_pdf_repairs_legacy_creation_date_and_fake_abstract(library, new_date):
+    def local(date, abstract, checked=False):
+        return ClassifiedReport(search_result=SearchResult(
+            title='Portfolio risk model', authors=['author'], abstract=abstract,
+            source=SourceType.LOCAL_PDF, pdf_path='/library/paper.pdf',
+            full_text='A full financial risk paper with sufficient research evidence. ' * 5,
+            published_date=date, raw_metadata=({
+                'publication_date_checked': True, 'abstract_source': 'unavailable'} if checked else {})),
+            classification=ClassificationResult())
+    with library() as session:
+        repo = ReportRepository(session)
+        _, rid = repo.upsert_report(local(datetime(2026, 1, 2), 'Title authors and arbitrary leading text'))
+        repo.upsert_report(local(new_date, None, checked=True))
+        row = session.get(Report, rid)
+        assert row.published_date == new_date
+        assert row.abstract is None
+
+
 def test_unknown_or_repost_date_does_not_replace_known_same_revision_date(library):
     with library() as session:
         repo = ReportRepository(session)

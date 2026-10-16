@@ -1,5 +1,6 @@
 """Canonical web entrypoint for local and Docker deployments."""
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+import asyncio
 import logging
 import os
 
@@ -20,7 +21,14 @@ async def lifespan(app):
         start_scheduler()
     except Exception:
         logger.exception("Scheduler could not start")
-    yield
+    from reportagent.services.local_pdf_import import import_pdf_library
+    pdf_import_task = asyncio.create_task(import_pdf_library())
+    try:
+        yield
+    finally:
+        pdf_import_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await pdf_import_task
     try:
         from reportagent.services.scheduler import stop_scheduler
         stop_scheduler()

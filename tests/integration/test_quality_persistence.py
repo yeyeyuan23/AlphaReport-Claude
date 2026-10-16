@@ -34,6 +34,8 @@ def test_database_migration_is_additive_and_idempotent():
     with engine.begin() as conn:
         conn.exec_driver_sql("CREATE TABLE reports (id INTEGER PRIMARY KEY, title TEXT)")
         conn.exec_driver_sql("INSERT INTO reports VALUES (1, 'Keep this paper')")
+        conn.exec_driver_sql("CREATE TABLE local_pdf_imports (file_path TEXT PRIMARY KEY, file_sha256 TEXT, report_id INTEGER, status TEXT)")
+        conn.exec_driver_sql("INSERT INTO local_pdf_imports VALUES ('/paper.pdf', 'old-file-hash', 1, 'imported')")
     with patch.object(db, "get_engine", return_value=engine):
         db.init_db()
         db.init_db()
@@ -41,7 +43,32 @@ def test_database_migration_is_additive_and_idempotent():
         fields = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(reports)")}
         assert {"evaluation_json", "selection_direction", "selection_relevance", "selection_provenance_json"} <= fields
         assert conn.exec_driver_sql("SELECT title FROM reports").scalar() == "Keep this paper"
+        import_fields = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(local_pdf_imports)")}
+        assert "report_content_hash" in import_fields
+        assert conn.exec_driver_sql("SELECT file_path FROM local_pdf_imports").scalar() == "/paper.pdf"
     engine.dispose()
+
+
+def test_concurrent_service_starts_initialize_one_consistent_database(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from reportagent.db import engine as db
+    engine = create_engine(f"sqlite:///{tmp_path / 'library.db'}", connect_args={"check_same_thread": False})
+    ready = Barrier(4)
+
+    def initialize(_):
+        ready.wait()
+        db.init_db()
+
+    try:
+        with patch.object(db, "get_engine", return_value=engine), ThreadPoolExecutor(max_workers=4) as pool:
+            list(pool.map(initialize, range(4)))
+        with engine.connect() as conn:
+            assert conn.exec_driver_sql("SELECT COUNT(*) FROM local_pdf_imports").scalar() == 0
+            fields = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(reports)")}
+            assert "publication_date_info_json" in fields
+    finally:
+        engine.dispose()
 
 
 def test_new_revision_invalidates_previous_analysis_and_screening():
@@ -85,3 +112,15 @@ def test_changed_title_revision_keeps_identity_and_cannot_be_downgraded():
         assert session.get(Report, same).arxiv_id == "2005.13665v2"
         assert session.query(Report).count() == 1
     engine.dispose()
+
+
+def test_legacy_quote_gate_is_shown_as_outdated_assessment_not_active_screening():
+    from reportagent.services.report_views import read_evaluation
+    legacy = {'schema_version': 3, 'tier': 'pending', 'label': '待核验',
+              'status': 'needs_verification', 'quality': 'sound',
+              'validation_issues': ['引文未能定位：C005'], 'findings': []}
+    shown = read_evaluation(json.dumps(legacy))
+    assert shown['tier'] == 'pending'
+    assert '规则已更新' in ' '.join(shown['validation_issues'])
+    assert '引文未能定位' not in ' '.join(shown['validation_issues'])
+    assert legacy['validation_issues'] == ['引文未能定位：C005']

@@ -9,12 +9,14 @@ def report_to_dict(r) -> dict:
         "abstract": r.abstract, "source": r.source, "source_url": r.source_url,
         "doi": r.doi, "arxiv_id": r.arxiv_id,
         "published_date": r.published_date.isoformat() if r.published_date else None,
+        "publication_date_info": json.loads(r.publication_date_info_json) if r.publication_date_info_json else {},
         "has_full_text": r.has_full_text, "pdf_path": r.pdf_path,
         "markets": r.markets.split(",") if r.markets else [],
         "asset_classes": r.asset_classes.split(",") if r.asset_classes else [],
         "frequencies": r.frequencies.split(",") if r.frequencies else [],
         "topics": r.topics.split(",") if r.topics else [],
         "custom_tags": custom_tags, "content_hash": r.content_hash,
+        "classification_provenance": json.loads(r.classification_provenance_json) if r.classification_provenance_json else {},
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,
         "summary": r.summary,
@@ -28,7 +30,13 @@ def report_to_dict(r) -> dict:
 def read_evaluation(value) -> dict | None:
     try:
         parsed = json.loads(value) if value else None
-        return parsed if isinstance(parsed, dict) else None
+        if not isinstance(parsed, dict):
+            return None
+        from reportagent.services.report_quality import SCHEMA_VERSION
+        if parsed.get('schema_version') in range(1, SCHEMA_VERSION):
+            return {**parsed, 'tier': 'pending', 'label': '待重新评估', 'status': 'pending',
+                    'validation_issues': ['评估规则已更新，请重新生成全文阅读评估。']}
+        return parsed
     except (TypeError, ValueError):
         return None
 

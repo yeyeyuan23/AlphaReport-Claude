@@ -1,11 +1,10 @@
-"""Deterministic, versioned cards projected from current, located paper evidence."""
+"""Deterministic, versioned cards projected from current reading assessments."""
 from __future__ import annotations
 
 import hashlib
 import json
 
 from reportagent.services.report_quality import Review, review_fingerprint
-from reportagent.services.text_evidence import locate_quote
 from reportagent.skills.registry import skill_resource
 from reportagent.utils.config import get_llm_model, get_llm_base_url, get_llm_provider
 
@@ -20,7 +19,7 @@ def report_snapshot(report) -> dict:
 
 
 def current_review(paper: dict) -> dict | None:
-    """Recheck provenance and exact excerpts, including legacy/tampered cache data."""
+    """Require a complete, current assessment; quote matching is not a reading gate."""
     try:
         review = json.loads(paper.get("evaluation_json") or "null")
         if not isinstance(review, dict) or not paper.get("has_full_text"):
@@ -29,14 +28,8 @@ def current_review(paper: dict) -> dict | None:
                 or review.get("model") != get_llm_model()
                 or review.get("fingerprint") != review_fingerprint(paper, get_llm_model())):
             return None
-        Review.model_validate(review)
-        text = paper.get("full_text") or ""
-        for item in [review["method"], *review["findings"], *review["strengths"]]:
-            located = locate_quote(text, item["quote"], item["chunk_id"])
-            if not item.get("verified") or located is None:
-                return None
-            item.update(located)
-        return review
+        observations = Review.model_validate(review).model_dump(exclude_none=True)
+        return {**review, **observations}
     except (ValueError, TypeError, KeyError):
         return None
 
@@ -53,7 +46,7 @@ def build_knowledge_card(report) -> dict:
             "topics": (paper.get("topics") or "").split(",") if paper.get("topics") else [],
             "asset_classes": (paper.get("asset_classes") or "").split(",") if paper.get("asset_classes") else [],
             "status": "pending", "quality_label": "待核验", "evidence": [], "limitations": [],
-            "notice": "仅展示原始摘要；需完成当前原文版本的证据评估后再生成阅读卡片。",
+            "notice": "仅展示原始摘要；需完成当前原文版本的阅读评估后再生成阅读卡片。",
             "provenance": {"fingerprint": fingerprint, "model": get_llm_model(), "schema": 1}}
     review = current_review(paper)
     if review is None:
@@ -66,8 +59,9 @@ def build_knowledge_card(report) -> dict:
         results="\n\n".join(e["claim"] for e in review["findings"]),
         marginal_contributions="\n".join(e["claim"] for e in review["strengths"]),
         implications=[review["reading_advice"]], limitations=review["limitations"],
-        evidence=[review["method"], *review["findings"], *review["strengths"]],
-        notice="作者报告的研究结果与条件，来自已保存评估；原文引文可定位，尚未复现实验。",
+        evidence=[item for item in [review["method"], *review["findings"], *review["strengths"]]
+                  if item.get("quote")],
+        notice="基于已保存的全文阅读评估；引文供查阅，未独立验证研究结论或复现实验。",
     )
     return card
 

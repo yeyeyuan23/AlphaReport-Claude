@@ -15,6 +15,7 @@ from reportagent.models.schemas import (
     ReportSummary,
     StorageResult,
     ReportListParams,
+    SourceType,
 )
 from reportagent.utils.hashing import content_hash
 
@@ -54,7 +55,9 @@ class ReportRepository:
                 # A delayed source response must not roll the library back.
                 return "updated", existing.id
             revision_changed = bool(sr.arxiv_id and sr.arxiv_id != existing.arxiv_id)
-            evidence_changed = revision_changed or sr.title != existing.title or bool(sr.full_text and sr.full_text != existing.full_text) or bool(sr.abstract and sr.abstract != existing.abstract)
+            checked_local_pdf = sr.source == SourceType.LOCAL_PDF and existing.source == "local_pdf"
+            checked_abstract = checked_local_pdf and "abstract_source" in sr.raw_metadata
+            evidence_changed = revision_changed or sr.title != existing.title or bool(sr.full_text and sr.full_text != existing.full_text) or bool(sr.abstract and sr.abstract != existing.abstract) or (checked_abstract and sr.abstract != existing.abstract)
             if evidence_changed:
                 existing.analysis_json = existing.evaluation_json = existing.knowledge_card_json = existing.summary = None
                 existing.selection_provenance_json = existing.selection_direction = existing.selection_relevance = None
@@ -66,7 +69,12 @@ class ReportRepository:
             # Publication dates remain stable across reposts and revisions.
             # Re-import only fills a previously unknown date; it never replaces
             # a known date with a later page/revision timestamp or a missing value.
-            if sr.published_date is not None and existing.published_date is None:
+            if checked_local_pdf and sr.raw_metadata.get("publication_date_checked"):
+                # Legacy local imports incorrectly used file creation timestamps.
+                # A fresh explicit-date check can repair those values to unknown.
+                existing.published_date = sr.published_date
+                existing.publication_date_info_json = json.dumps(sr.raw_metadata.get("publication_date_info", {}), ensure_ascii=False)
+            elif sr.published_date is not None and existing.published_date is None:
                 existing.published_date = sr.published_date
             if revision_changed:
                 existing.arxiv_id = sr.arxiv_id
@@ -79,7 +87,7 @@ class ReportRepository:
             elif sr.full_text:
                 existing.full_text = sr.full_text
                 existing.has_full_text = not sr.abstract_only
-            if sr.abstract:
+            if sr.abstract or checked_abstract:
                 existing.abstract = sr.abstract
             if sr.abstract and not existing.abstract:
                 existing.abstract = sr.abstract
@@ -89,16 +97,7 @@ class ReportRepository:
                 existing.equations_json = sr.equations_json
             if sr.pdf_path and not existing.pdf_path:
                 existing.pdf_path = sr.pdf_path
-            if markets_str:
-                existing.markets = markets_str
-            if asset_classes_str:
-                existing.asset_classes = asset_classes_str
-            if frequencies_str:
-                existing.frequencies = frequencies_str
-            if topics_str:
-                existing.topics = topics_str
-            existing.classification_confidence = cl.confidence
-            existing.classification_method = cl.method
+            self.apply_classification(existing, cl)
             self.session.commit()
             return "updated", existing.id
 
@@ -113,6 +112,8 @@ class ReportRepository:
             doi=sr.doi,
             arxiv_id=sr.arxiv_id,
             published_date=sr.published_date,
+            publication_date_info_json=json.dumps(sr.raw_metadata.get("publication_date_info"), ensure_ascii=False)
+                if sr.raw_metadata.get("publication_date_info") else None,
             pdf_path=sr.pdf_path,
             content_hash=c_hash,
             tables_json=sr.tables_json,
@@ -125,13 +126,23 @@ class ReportRepository:
             classification_method=cl.method,
         )
         self.session.add(db_report)
+        self.apply_classification(db_report, cl)
         self.session.commit()
-
-        self._ensure_tags(db_report, cl)
 
         return "added", db_report.id
 
-    def _ensure_tags(self, db_report: Report, cl) -> None:
+    def apply_classification(self, db_report: Report, cl, *, dry_run: bool = False) -> bool:
+        """Replace classification columns, evidence and owned tag links atomically.
+
+        Empty dimensions are meaningful: they remove previous guesses. Shared
+        Tag rows and non-classification associations remain available to others.
+        The caller owns the transaction.
+        """
+        fields = {name: ",".join(value.value for value in getattr(cl, name))
+                  for name in ("markets", "asset_classes", "frequencies", "topics")}
+        fields.update(classification_confidence=cl.confidence, classification_method=cl.method,
+                      classification_provenance_json=json.dumps(cl.provenance, ensure_ascii=False, sort_keys=True)
+                      if cl.provenance else None)
         tag_pairs = []
         for m in cl.markets:
             tag_pairs.append(("market", m.value))
@@ -143,8 +154,15 @@ class ReportRepository:
             tag_pairs.append(("topic", t.value))
         for c in cl.custom_tags:
             tag_pairs.append(("custom", c))
-
-        for dimension, value in tag_pairs:
+        owned = {"market", "asset_class", "frequency", "topic", "custom"}
+        current = {(tag.dimension, tag.value) for tag in db_report.tags if tag.dimension in owned}
+        changed = current != set(tag_pairs) or any(getattr(db_report, key) != value for key, value in fields.items())
+        if dry_run or not changed:
+            return changed
+        for key, value in fields.items():
+            setattr(db_report, key, value)
+        replacement = [tag for tag in db_report.tags if tag.dimension not in owned]
+        for dimension, value in dict.fromkeys(tag_pairs):
             tag = self.session.query(Tag).filter(
                 Tag.dimension == dimension, Tag.value == value
             ).first()
@@ -152,10 +170,9 @@ class ReportRepository:
                 tag = Tag(dimension=dimension, value=value)
                 self.session.add(tag)
                 self.session.flush()
-            if tag not in db_report.tags:
-                db_report.tags.append(tag)
-
-        self.session.commit()
+            replacement.append(tag)
+        db_report.tags = replacement
+        return True
 
     def batch_upsert(self, reports: list[ClassifiedReport]) -> StorageResult:
         result = StorageResult(total_processed=len(reports))

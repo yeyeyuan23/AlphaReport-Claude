@@ -68,18 +68,18 @@ function EvidenceClaim({ evidence }: { evidence: ResearchEvidence }) {
   return (
     <div className="space-y-1.5">
       <p className="whitespace-pre-line leading-relaxed">{evidence.claim}</p>
-      <details className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs">
+      {evidence.quote && <details className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs">
         <summary className="cursor-pointer text-muted-foreground focus-visible:outline-2 focus-visible:outline-offset-2">
-          查看原文引证 · 提取文本段 {evidence.chunk_id}
+          查看原文引证（供核对）{evidence.chunk_id && ` · 提取文本段 ${evidence.chunk_id}`}
         </summary>
         <blockquote className="mt-3 border-l-2 border-indigo-200 pl-3 whitespace-pre-wrap break-words leading-relaxed text-foreground/80">
           {evidence.quote}
         </blockquote>
         <p className="mt-2 text-muted-foreground">
-          {evidence.locator || `提取文本段 ${evidence.chunk_id}`} · 文本段编号不是 PDF 页码。
-          {evidence.verified && "引文已与提取文本匹配；不代表研究结论已被独立复现。"}
+          {evidence.locator || (evidence.chunk_id && `提取文本段 ${evidence.chunk_id} · `)}
+          引证供查阅，不代表研究结论已被独立验证。文本段编号不是 PDF 页码。
         </p>
-      </details>
+      </details>}
     </div>
   );
 }
@@ -141,8 +141,8 @@ export default function ResearchEvaluation({ evaluation }: { evaluation?: Evalua
 
       {(evaluation.status !== "reviewed" || evaluation.validation_issues.length > 0) && (
         <NotesSection
-          title="核验状态：待核验"
-          items={evaluation.validation_issues.length ? evaluation.validation_issues : ["本次评估尚未通过全部核验。"]}
+          title="评估尚未完成"
+          items={evaluation.validation_issues.length ? evaluation.validation_issues : ["本次全文阅读评估尚未完成。"]}
           caution
         />
       )}

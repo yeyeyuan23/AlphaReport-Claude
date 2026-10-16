@@ -306,7 +306,7 @@ def run_weekly_report(options: WeeklyReportOptions) -> dict:
     text = generate_weekly_report(papers, start_label, end_label)
     failures = preparation.get("failures", [])
     if failures:
-        text += f"\n\n本期有 {len(failures)} 项筛选或全文核验未完成；相关条目保留待核验，可重试。"
+        text += f"\n\n本期有 {len(failures)} 项筛选或全文阅读评估未完成；相关条目保留待核验，可重试。"
     unattempted = preparation.get("unreviewed_candidates", 0) - len(preparation.get("review_ids", []))
     if unattempted > 0:
         text += f"\n\n本次全文核验预算为 {options.max_reviews} 篇，另有 {unattempted} 篇候选尚未核验；重跑可继续处理。"

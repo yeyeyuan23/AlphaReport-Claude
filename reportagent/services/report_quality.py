@@ -1,4 +1,4 @@
-"""Evidence-grounded reading assessments, shared by daily and single-paper flows."""
+"""Full-text reading assessments, shared by daily and single-paper flows."""
 from __future__ import annotations
 
 import asyncio
@@ -15,19 +15,20 @@ from pydantic import BaseModel, Field, ConfigDict
 from reportagent.skills.registry import skill_resource
 from reportagent.utils.config import get_llm_model, get_llm_base_url, get_llm_provider
 from reportagent.services.paper_scoring import scoring_fingerprint, screening_is_current
-from reportagent.services.text_evidence import locate_quote, text_chunks
+from reportagent.services.text_evidence import text_chunks
 
 logger = logging.getLogger(__name__)
 MAX_REVIEW_CHARS = 240000
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 TIER_LABELS = {"focus": "重点阅读", "browse": "值得浏览", "pending": "待核验", "exclude": "不推荐"}
 
 
 class Evidence(BaseModel):
+    """A reading observation with optional references for the reader to consult."""
     model_config = ConfigDict(str_strip_whitespace=True)
     claim: str = Field(min_length=1)
-    quote: str = Field(min_length=20)
-    chunk_id: str = Field(pattern=r"^C\d{3,}$")
+    quote: str | None = None
+    chunk_id: str | None = None
 
 
 class Review(BaseModel):
@@ -115,22 +116,8 @@ async def evaluate_paper(paper: dict, llm, *, max_chars: int = MAX_REVIEW_CHARS)
         {"role": "system", "content": instructions},
         {"role": "user", "content": prompt},
     ], temperature=0.1, max_tokens=6000)
-    review = Review.model_validate(data).model_dump()
-    issues, rejected = [], []
-
-    def check(item):
-        located = locate_quote(content, item["quote"], item["chunk_id"])
-        if located is None:
-            issues.append(f"引文未能定位：{item['chunk_id']}")
-            rejected.append({**item, "verified": False})
-            return None
-        if located["chunk_id"] != item["chunk_id"]:
-            item = {**item, "original_chunk_id": item["chunk_id"]}
-        return {**item, **located, "verified": True}
-
-    review["method"] = check(review["method"])
-    for field in ("findings", "strengths"):
-        review[field] = [checked for item in review[field] if (checked := check(item))]
+    review = Review.model_validate(data).model_dump(exclude_none=True)
+    issues = []
     complete = len(content) == len(text)
     if not complete:
         issues.append("全文超过本次输入上限，当前仅完成部分文本评估。")
@@ -143,13 +130,14 @@ async def evaluate_paper(paper: dict, llm, *, max_chars: int = MAX_REVIEW_CHARS)
         tier = "pending"
     elif review["quality"] == "weak" or review["critical_concerns"]:
         tier = "exclude"
-    elif review["quality"] == "strong" and review["confidence"] == "high" and review["strengths"] and relevance is not None and relevance >= 6:
+    elif (review["quality"] in {"sound", "strong"}
+          and review["confidence"] in {"medium", "high"}
+          and relevance is not None and relevance >= 6):
         tier = "focus"
     else:
         tier = "browse"
     return {**review, "schema_version": SCHEMA_VERSION, "tier": tier, "label": TIER_LABELS[tier],
             "status": "needs_verification" if tier == "pending" else "reviewed", "validation_issues": issues,
-            "rejected_evidence": rejected,
             "source_category": source_category(paper.get("source", "")), "text_complete": complete,
             "input_chars": len(content), "full_text_chars": len(text), "relevance": relevance,
             "relevance_reason": paper.get("selection_reason", "") if relevance is not None else "尚未按当前研究方向完成相关性初筛。", "model": llm.model,

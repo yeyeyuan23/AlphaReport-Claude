@@ -41,7 +41,6 @@ def get_db() -> Session:
 def init_db():
     from reportagent.models.database import Base
     engine = get_engine()
-    Base.metadata.create_all(bind=engine)
 
     # Add columns if missing (SQLite doesn't support ADD COLUMN IF NOT EXISTS).
     # Idempotent: inspect PRAGMA table_info first, skip columns that already exist.
@@ -55,22 +54,19 @@ def init_db():
         ("selection_relevance", "FLOAT"),
         ("selection_provenance_json", "TEXT"),
         ("evaluation_json", "TEXT"),
+        ("publication_date_info_json", "TEXT"),
+        ("classification_provenance_json", "TEXT"),
     ]
-    with engine.connect() as conn:
-        existing = {
-            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(reports)").fetchall()
-        }
-        for col_name, col_type in _new_columns:
-            if col_name in existing:
-                continue
-            try:
-                conn.exec_driver_sql(
-                    f"ALTER TABLE reports ADD COLUMN {col_name} {col_type}"
-                )
-                conn.commit()
-            except Exception:
-                conn.rollback()
-                # Only suppress a concurrent successful addition, not a failed migration.
-                actual = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(reports)")}
-                if col_name not in actual:
-                    raise
+    with engine.begin() as conn:
+        # Web and bot can start together against a fresh SQLite file. Serialize
+        # schema inspection and DDL in the same explicit write transaction.
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
+        Base.metadata.create_all(bind=conn)
+        for table, columns in (
+            ("reports", _new_columns),
+            ("local_pdf_imports", [("report_content_hash", "VARCHAR(64)")]),
+        ):
+            existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            for col_name, col_type in columns:
+                if col_name not in existing:
+                    conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")

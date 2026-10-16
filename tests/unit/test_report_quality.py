@@ -14,21 +14,29 @@ def test_missing_full_text_never_calls_model_or_becomes_focus():
     assert not llm.requests
 
 
-def test_review_requires_findable_evidence_and_preserves_its_locator():
-    result = asyncio.run(module().evaluate_paper(paper(), Model(response())))
+def test_reading_assessment_does_not_require_quotes_or_text_locators():
+    data = response()
+    data['method'] = {'claim': '作者使用滚动样本外检验并计入交易成本'}
+    data['findings'] = [{'claim': '作者报告了样本外结果及适用条件'}]
+    data['strengths'] = [{'claim': '明确讨论了方法的适用范围'}]
+    result = asyncio.run(module().evaluate_paper(paper(), Model(data)))
     assert result["tier"] == "focus"
-    assert result["findings"][0]["chunk_id"] == "C001"
-    assert result["findings"][0]["verified"] is True
+    assert result['status'] == 'reviewed'
+    assert result['findings'] == [{'claim': '作者报告了样本外结果及适用条件'}]
+    assert not result['validation_issues']
     assert result["text_complete"] is True
 
 
-def test_fabricated_quote_cannot_produce_high_quality_recommendation():
+def test_unlocatable_quote_does_not_override_research_assessment():
     data = response()
-    data["findings"] = [{"claim": "收益提升50%", "quote": "A fabricated performance result of fifty percent.", "chunk_id": "C001"}]
+    data["findings"] = [{"claim": "作者讨论了研究边界", "quote": "A paraphrase with PDF typesetting differences.", "chunk_id": "C009"}]
     result = asyncio.run(module().evaluate_paper(paper(), Model(data)))
-    assert result["tier"] == "pending"
-    assert result["findings"] == []
-    assert result["validation_issues"]
+    assert result['tier'] == 'focus'
+    assert result['status'] == 'reviewed'
+    assert result['findings'][0]['claim'] == '作者讨论了研究边界'
+    assert result['findings'][0]['quote'] == data['findings'][0]['quote']
+    assert not result['findings'][0].get('verified')
+    assert not result['validation_issues']
 
 
 def test_partial_input_cannot_be_described_as_completed_full_text_review():
@@ -42,6 +50,40 @@ def test_weak_method_is_not_promoted_by_relevance():
     data.update(quality="weak", critical_concerns=["作者报告的检验设计不足以支持结论"])
     result = asyncio.run(module().evaluate_paper(paper(selection_relevance=10), Model(data)))
     assert result["tier"] == "exclude"
+
+
+@pytest.mark.parametrize(('quality', 'confidence'), [
+    ('sound', 'medium'), ('sound', 'high'), ('strong', 'medium'),
+])
+def test_readworthy_relevant_work_can_be_featured_with_disclosed_limitations(quality, confidence):
+    data = response()
+    data.update(quality=quality, confidence=confidence, strengths=[],
+                limitations=['原文明示：目前仅在一个市场检验，跨市场适用性待验证。'])
+    result = asyncio.run(module().evaluate_paper(paper(selection_relevance=6), Model(data)))
+    assert result['tier'] == 'focus'
+    assert result['limitations'] == ['原文明示：目前仅在一个市场检验，跨市场适用性待验证。']
+    assert result['quality'] == quality
+    assert result['confidence'] == confidence
+
+
+def test_low_confidence_remains_browsable_without_becoming_a_top_recommendation():
+    data = response()
+    data['confidence'] = 'low'
+    result = asyncio.run(module().evaluate_paper(paper(selection_relevance=9), Model(data)))
+    assert result['tier'] == 'browse'
+    assert result['status'] == 'reviewed'
+
+
+def test_low_relevance_still_does_not_become_a_top_recommendation():
+    result = asyncio.run(module().evaluate_paper(paper(selection_relevance=5), Model(response())))
+    assert result['tier'] == 'browse'
+
+
+def test_explicit_critical_flaw_still_prevents_a_top_recommendation():
+    data = response()
+    data['critical_concerns'] = ['实验明确将测试集标签用于训练，主要样本外结论不成立。']
+    result = asyncio.run(module().evaluate_paper(paper(selection_relevance=9), Model(data)))
+    assert result['tier'] == 'exclude'
 
 
 def test_theoretical_paper_does_not_require_trading_backtest_fields():
@@ -75,9 +117,9 @@ def test_invalid_model_schema_is_failure_not_a_default_positive_review():
         asyncio.run(module().evaluate_paper(paper(), Model({"quality": "strong"})))
 
 
-def test_whitespace_is_not_evidence_or_a_research_question():
+def test_whitespace_is_not_a_method_description():
     data = response()
-    data["method"]["quote"] = " " * 30
+    data["method"]["claim"] = " " * 30
     with pytest.raises(ValueError):
         asyncio.run(module().evaluate_paper(paper(), Model(data)))
 
@@ -97,65 +139,14 @@ def test_legacy_or_stale_relevance_cannot_promote_explicit_paper(provenance):
     assert result["relevance"] is None
 
 
-def test_exact_quote_in_another_chunk_is_relocated_without_fuzzy_matching():
+def test_quote_metadata_is_not_a_requirement_of_reading_assessment():
     data = response()
-    data["method"]["chunk_id"] = "C009"
+    data["method"]["chunk_id"] = "unknown PDF page"
+    data["method"]["quote"] = ""
     result = asyncio.run(module().evaluate_paper(paper(), Model(data)))
     assert result["tier"] == "focus"
-    assert result["method"]["chunk_id"] == "C001"
-    assert result["method"]["original_chunk_id"] == "C009"
-
-
-def test_rejected_evidence_is_retained_for_audit_but_not_shown_as_a_finding():
-    data = response()
-    data["findings"][0] = {"claim": "假发现", "quote": "This exact quote is not in this paper.", "chunk_id": "C001"}
-    result = asyncio.run(module().evaluate_paper(paper(), Model(data)))
-    assert result["findings"] == []
-    assert result["rejected_evidence"][0]["quote"] == data["findings"][0]["quote"]
-
-
-@pytest.mark.parametrize(('raw', 'quote'), [
-    ('The ﬁnal efﬁcient oﬀer remains conditional.', 'The final efficient offer remains conditional.'),
-    ('The tem-\nperature must remain sufficiently small.', 'The temperature must remain sufficiently small.'),
-])
-def test_pdf_typesetting_normalization_retains_exact_raw_evidence(raw, quote):
-    data = response()
-    for field in ('method',):
-        data[field] = {'claim': '原文的条件', 'quote': quote, 'chunk_id': 'C001'}
-    data['findings'] = [dict(data['method'])]
-    data['strengths'] = []
-    text = raw + '\n' + TEXT
-    result = asyncio.run(module().evaluate_paper(paper(full_text=text), Model(data)))
-    assert result['tier'] == 'browse'
-    evidence = result['findings'][0]
-    assert evidence['raw_quote'] == raw
-    assert text[evidence['raw_start']:evidence['raw_end']] == raw
-
-
-def test_cross_chunk_quote_is_located_in_raw_text_without_losing_boundary():
-    quote = 'The temperature must remain sufficiently small for convexity.'
-    text = 'x' * 3980 + quote + '\n' + TEXT
-    data = response()
-    data['findings'] = [{'claim': '凸性要求温度足够小', 'quote': quote, 'chunk_id': 'C009'}]
-    result = asyncio.run(module().evaluate_paper(paper(full_text=text), Model(data)))
-    assert result['findings'][0]['chunk_ids'] == ['C001', 'C002']
-    assert result['findings'][0]['raw_start'] == 3980
-    assert result['findings'][0]['raw_quote'] == quote
-
-
-@pytest.mark.parametrize('bad_quote', [
-    'The method works. It applies universally.',
-    'The temperature can be arbitrarily large.',
-    'For all x, x2 = x^2 and α = a.',
-])
-def test_normalization_does_not_accept_omitted_conditions_or_changed_math(bad_quote):
-    text = ('The method works. Only for small temperatures. It applies universally.\n'
-            'The temperature must be sufficiently small.\nFor all x, x² = x^2 and α = α.\n' + TEXT)
-    data = response()
-    data['findings'] = [{'claim': '未经支持的结论', 'quote': bad_quote, 'chunk_id': 'C001'}]
-    result = asyncio.run(module().evaluate_paper(paper(full_text=text), Model(data)))
-    assert result['tier'] == 'pending'
-    assert not result['findings']
+    assert result['method']['claim'] == data['method']['claim']
+    assert not result['validation_issues']
 
 
 @pytest.mark.parametrize('size', [63000, 76000, 115000])
@@ -174,15 +165,6 @@ def test_explicit_review_limit_is_pending_and_never_sends_partial_text():
     result = asyncio.run(module().evaluate_paper(paper(), llm, max_chars=1000))
     assert result['tier'] == 'pending'
     assert not llm.requests
-
-
-def test_letter_names_in_line_broken_equations_are_not_dehyphenated():
-    data = response()
-    data['findings'] = [{'claim': '错误等式', 'quote': 'For this case alphabeta = 0.', 'chunk_id': 'C001'}]
-    text = 'For this case alpha-\nbeta = 0.\n' + TEXT
-    result = asyncio.run(module().evaluate_paper(paper(full_text=text), Model(data)))
-    assert result['tier'] == 'pending'
-    assert not result['findings']
 
 
 @pytest.mark.parametrize('field', ['title', 'abstract'])

@@ -9,6 +9,7 @@ import re
 from reportagent.models.schemas import UserCriteria, SearchResult, SourceType
 from reportagent.processors.pdf_extractor import PDFExtractor
 from reportagent.processors.metadata_extractor import MetadataExtractor
+from reportagent.processors.paper_sections import extract_paper_sections
 from reportagent.sources.base import BaseSource, SourceParseError, usable_full_text
 
 logger = logging.getLogger(__name__)
@@ -175,8 +176,8 @@ class LocalPDFSource(BaseSource):
         # Fallback: if title is just a date or too short, use filename
         if not title or re.match(r'^\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日?\s*$', title.strip()):
             title = self._title_from_filename(pdf_path.stem)
-        abstract_end = min(len(text), 2000)
-        abstract = text[:abstract_end].strip() if text else None
+        sections = extract_paper_sections(text)
+        abstract = sections["abstract"]
 
         return SearchResult(
             title=title,
@@ -189,6 +190,14 @@ class LocalPDFSource(BaseSource):
             arxiv_id=meta.get("arxiv_id"),
             published_date=meta.get("date"),
             pdf_path=str(pdf_path),
+            raw_metadata={
+                "introduction": sections["introduction"],
+                "abstract_source": "paper_abstract" if abstract else "unavailable",
+                "publication_date_checked": True,
+                "publication_date_source": meta.get("date_source", "unknown"),
+                "pdf_creation_date": meta.get("pdf_creation_date"),
+                "publication_date_info": meta.get("publication_date_info", {}),
+            },
             tables_json=tables_json_str,
             equations_json=equations_json_str,
         )
