@@ -1,4 +1,4 @@
-import type { ReportSummary, ReportDetail, ReportStats, KnowledgeCard } from "../types";
+import type { ReportSummary, ReportDetail, ReportStats, KnowledgeCard, ReproductionCard } from "../types";
 
 const BASE = "/api/v1";
 
@@ -67,4 +67,12 @@ export function getKnowledgeCard(reportId: number, force = false) {
 
 export function getResearchBriefing(reportId: number, force = false) {
   return request<ResearchBriefingResult>(`${BASE}/reports/${reportId}/research-briefing?force=${force}`, { method: "POST" });
+}
+
+export function getReproductionCard(reportId: number) {
+  return request<ReproductionCard>(`${BASE}/reports/${reportId}/reproduction-card`);
+}
+
+export function prepareReproductionCard(reportId: number, force = false) {
+  return request<ReproductionCard>(`${BASE}/reports/${reportId}/reproduction-card?force=${force}`, { method: "POST" });
 }

@@ -501,96 +501,21 @@ async def analyze_report(
 # ── Knowledge Card ──────────────────────────────────────────────
 
 
-from reportagent.services.report_views import map_analysis_to_knowledge_card as _map_analysis_to_knowledge_card
-
-
-from reportagent.skills.registry import skill_resource
-_KNOWLEDGE_CARD_PROMPT = skill_resource("analyze-report", "knowledge-card.md").read_text(encoding="utf-8")
-
-
 @router.post("/{report_id}/knowledge-card")
-async def get_knowledge_card(
+def get_knowledge_card(
     report_id: int,
-    force: bool = Query(False, description="强制重新生成，忽略已有的分析缓存"),
+    force: bool = Query(False, description="刷新当前证据的卡片展示；不重新评估论文"),
     db: Session = Depends(get_db),
 ):
-    """获取论文的 Knowledge Card 结构化摘要。"""
-    repo = ReportRepository(db)
-    report = repo.get_report(report_id)
+    from reportagent.services.knowledge_cards import get_knowledge_card as prepare_card
+    report = ReportRepository(db).get_report(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
-
-    topics = report.topics.split(",") if report.topics else []
-    asset_classes = report.asset_classes.split(",") if report.asset_classes else []
-
-    # 1) Return cached LLM-generated Knowledge Card (unless force=True)
-    if not force and report.knowledge_card_json:
-        try:
-            kc = json.loads(report.knowledge_card_json)
-            kc["topics"] = topics
-            kc["asset_classes"] = asset_classes
-            return {"success": True, "data": kc}
-        except (json.JSONDecodeError, Exception):
-            pass
-
-    # 2) Map from existing analysis_json (unless force=True)
-    if not force and report.analysis_json:
-        try:
-            analysis = json.loads(report.analysis_json)
-            kc = _map_analysis_to_knowledge_card(analysis)
-            kc["topics"] = topics
-            kc["asset_classes"] = asset_classes
-            return {"success": True, "data": kc}
-        except (json.JSONDecodeError, Exception):
-            pass
-
-    # 3) Generate via LLM
-    content = report.full_text or report.abstract or ""
-    if not content:
-        raise HTTPException(status_code=400, detail="No content available for this report")
-
-    from reportagent.llm.client import LLMClient
-
-    prompt = _KNOWLEDGE_CARD_PROMPT.format(
-        title=report.title,
-        content=content[:8000],
-    )
-
-    client = LLMClient()
-    try:
-        resp = await client.chat_json(
-            [{"role": "user", "content": prompt}],
-            temperature=0.3,
-            max_tokens=2000,
-        )
-        resp["topics"] = topics
-        resp["asset_classes"] = asset_classes
-        resp["quality_score"] = None
-
-        # Persist the generated Knowledge Card so subsequent visits don't re-run LLM
-        try:
-            report.knowledge_card_json = json.dumps(resp, ensure_ascii=False)
-            db.commit()
-        except Exception:
-            db.rollback()
-
-        return {"success": True, "data": resp}
-    except Exception as e:
-        return {
-            "success": True,
-            "data": {
-                "summary": report.abstract or f"论文「{report.title}」的 Knowledge Card 生成失败: {e}",
-                "highlights": [],
-                "methodology_steps": [],
-                "results": "",
-                "marginal_contributions": "",
-                "implications": [],
-                "topics": topics,
-                "asset_classes": asset_classes,
-                "quality_score": None,
-            },
-        }
-
+    previous = report.knowledge_card_json
+    card = prepare_card(report, force=force)
+    if report.knowledge_card_json != previous:
+        db.commit()
+    return {"success": True, "data": card}
 
 # ── Per-Paper Ask AI ────────────────────────────────────────────
 

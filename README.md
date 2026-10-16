@@ -26,7 +26,7 @@
 | 按研究方向筛选论文 | `cli.llm_filter`、`cli.llm_direction_filter` | 找出摘要与关注方向匹配的论文；相关性初筛不代表研究质量结论 |
 | 阅读原文、简报与知识卡片 | 网页、`cli.narrative_brief` | 对照 PDF 阅读研究解读，查看方法、发现、原文引证和局限 |
 | 飞书日报 | 私聊 `/daily`、`cli.daily_feishu_push` | 收到有主次的新文章集合，最多重点推荐 5 篇，另列其他材料和待核验项 |
-| 飞书周报 | `cli.weekly_report` + 外部调度 | 汇总上一个完整周发表的论文并发送 |
+| 飞书周报 | 私聊 `/weekly`、`cli.weekly_report`；自动运行用外部调度 | 汇总上一个完整周发表的论文并发送 |
 | 按意思查找论文（语义检索） | Python 查询、实验聊天 API | 按研究问题寻找相近论文与正文片段；需先准备索引，网页搜索框仍只支持关键词 |
 | 围绕主题寻找研究思路 | Python 调用、实验聊天 API | 结合相关文献生成研究机会和方法建议，引用与新颖性需人工核对 |
 | 保存可复用的聊天任务要求（自定义技能） | Python 调用、实验聊天 API | 将常用任务指令保存下来供聊天复用；不会自动改写单篇或日报的固定分析规则 |
@@ -118,6 +118,7 @@ bash scripts/ops/run_bot.sh           # 只启动飞书机器人
 | `/clear` | 清除当前会话映射与摘要，不删除研报 |
 | `/report 2005.13665` | 分析一篇 arXiv 论文并推送回当前私聊，**仅限私聊** |
 | `/daily` | 手动采集、筛选与全文评估，生成分层日报并推送到当前私聊，**仅限私聊** |
+| `/weekly` | 汇总上一完整 UTC 周的库中资料，刷新评估并推送到当前私聊，**仅限私聊** |
 
 `/report` 也接受 `https://arxiv.org/abs/2005.13665v3` 这样的链接，目前支持现代 arXiv 编号，一次只处理一篇。
 
@@ -129,7 +130,7 @@ bash scripts/ops/run_bot.sh           # 只启动飞书机器人
 用现有 CLI 生成一份周报预览，先不要发送。
 ```
 
-这些是交给模型理解的请求，不是固定命令。模型需要可用的 Shell/文件工具权限；旧 LangGraph 的工具名称没有直接注册给飞书 Claude Code。普通聊天上限 300 秒，长回复会截断；每个 chat_id 保持独立会话，群里共用该群的会话。能收到哪些群消息取决于飞书订阅权限，代码没有强制“必须 @ 才处理”的过滤。
+这些是交给模型理解的请求，不是固定命令。模型需要可用的 Shell/文件工具权限；旧 LangGraph 的工具名称没有直接注册给飞书 Claude Code。普通聊天上限 300 秒，长回复完整分段发送；短提示使用纯文本，含标题、链接或代码的回复使用卡片，表格转为逐项字段；每个 chat_id 保持独立会话，群里共用该群的会话。能收到哪些群消息取决于飞书订阅权限，代码没有强制“必须 @ 才处理”的过滤。
 
 单篇分析要求可用 PDF 全文，关键分析阶段缺失时停止发送；同时保存可在网页查看的证据评估。用户指定阅读未完成方向初筛时不显示相关性分数。只有版本、PDF、模型与技能资源指纹一致时才复用分析；`--force` 可强制刷新，已有发送回执保留。产物位于 `data/one_reports/`，并写入研报库：
 
@@ -232,6 +233,8 @@ ALPHAREPORT_BASE_URL=https://your-report-site.example
 
 按发表日期查询上一个完整 **UTC 周一至周日**的全部库中论文，不自动重复采集，也不限于精选。默认通过配置的模型 API 更新过期相关性与最多 12 篇全文评估，复用保存的证据分层排版；只凭摘要相关性不能进入重点推荐。缺正文、材料不足或引文待核验的条目单独列出。`--max-reviews` 可设 1–12，`--force-review` 刷新评估，`--no-llm` 仅读取缓存，过期或缺失的评估保留待核验。
 
+在机器人私聊发送 `/weekly` 即可生成并发送到当前会话，无需配置推送目标；空周会明确告知暂无资料。与 `/daily`、`/report` 共用任务锁，同一时间处理一个任务。命令在后台运行，不占用普通聊天的 300 秒调用窗口。此命令不安装周报定时任务。
+
 ```bash
 # 不调用模型的模板预览；--weeks-ago 0 为上周，1 为上上周
 .venv/bin/python -m reportagent.cli.weekly_report --dry-run --no-llm --output data/weekly-preview.md
@@ -260,7 +263,7 @@ bash scripts/ops/keepalive.sh    # 检查整套服务的 PID；需要时后台�
 |---|---|---|
 | 飞书聊天与快捷命令 | 启动 `reportagent.bot.feishu` | WebSocket 常驻，无需定时 |
 | 飞书日报 | 私聊 `/daily`、`cli.daily_feishu_push` 或 Web 内置调度 | 内置 Feishu 模式默认开启；也可改用外部调度 |
-| 飞书周报 | 调用 `cli.weekly_report` | 需自己配置外部调度 |
+| 飞书周报 | 私聊 `/weekly` 或调用 `cli.weekly_report` | 手动按需运行；自动运行需外部调度 |
 | 服务进程守护 | 调用 `scripts/ops/keepalive.sh` | 需自己配置外部调度 |
 | arXiv 独立采集 | 选择独立采集模式并启用调度后注册 | `daily_report.arxiv_collection`，Feishu 模式不单独注册 |
 
@@ -339,21 +342,34 @@ PY
 
 ### 围绕主题寻找研究思路
 
-输入研究主题和想讨论的角度，工具会检索相关文献并调用模型，生成方法或研究方向建议；
-检索失败时可能退回模型知识，需核对实际引用：
+输入研究主题和角度，程序检索最多 8 篇相关库内文献，保留完整摘要；有当前有效的全文评估时加入原文方法、发现与局限。
+输出候选假设、最接近的已有工作、候选差异、数据需求、最小验证与否定条件。检索失败会明确提示；未命中不代表领域内无人研究。
 
 ```bash
-.venv/bin/python - <<'PY'
-import asyncio
-from reportagent.chat.tools import brainstorm_research
-print(asyncio.run(brainstorm_research.ainvoke({
-    "topic": "波动率预测", "angle": "methodology",
-})))
-PY
+.venv/bin/python -m reportagent.cli.ideation --topic '波动率预测' --angle methodology
 ```
 
-`angle` 还可用 `general`、`factor`、`cross_pollination`、`critique`、`data`，
-分别偏向综合研究机会、因子、跨领域嫁接、方法批评和数据来源。
+`angle` 还可用 `general`、`factor`、`cross_pollination`、`critique`、`data`。
+显式需要外部查新时添加 `--verify-external`，需配置 `TAVILY_API_KEY`；结果仍只是网页线索，不能确认新颖性。
+
+### 论文速览与复现准备
+
+网页详情右侧的“论文速览”就是知识卡片：展示已保存的研究问题、方法、发现、阅读建议和可展开的原文引证。
+它不另调模型补写数字或打质量分；原文、模型或评估规则变化后，过期卡片显示待核验。
+“刷新展示”只更新展示，不重做评估。`cli.narrative_brief` 也使用相同的证据卡片服务。
+
+“复现准备”页整理研究/预测目标、推断时可用信息、训练目标、数据、划分、基准、指标和假设。
+点击生成时调用模型核对全文；原文事实附引文，缺失设置列为待核查，最小验证与否定条件标为建议。
+理论研究核对命题、假设与反例，不强求训练或回测。准备卡不会下载数据、训练模型或证明复现成功。
+
+```bash
+.venv/bin/python -m reportagent.cli.reproduction --report-id 1
+# 预览不写数据库，但仍可能调用模型
+.venv/bin/python -m reportagent.cli.reproduction --report-id 1 --dry-run
+```
+
+前提是已有可用全文和当前有效的证据评估；单篇 arXiv 可用 `cli.report` 准备。
+成功准备卡按原文、评估、模型与提示词缓存；`--force` 可重新提取，失败不会覆盖旧成功结果。
 
 ### 保存可复用的聊天任务要求
 
@@ -405,7 +421,7 @@ PY
 - 有论文但没有日报：检查来源状态、四天日期窗口、当前相关性评分指纹与门槛、全文评估状态，以及目标回执。`data/daily_reports/` 保存本次产物，数据库保存运行结果；周报没有同样的去重回执。
 - 旧 `pushed_at` 没有收件人信息，无法转换成新回执；首次使用新逻辑时，窗口内旧论文可能重新发送一次。
 - 迁移机器时另行保存所需的 `.env`、`data/`、`.claude-bot/`，并核对模型配置与系统调度；重装依赖不会恢复历史数据。它们都不提交 Git。
-- PDF 文本可能丢失公式或图表，长论文按阶段截取输入；模型分析没有复现论文实验，重要结论需对照原文。
+- PDF 文本可能丢失公式或图表，长论文按完整提取文本组织输入，超过限额时停止或保持待核验；模型分析没有复现论文实验，重要结论需对照原文。
 
 <details>
 <summary>可选的飞书 HTTP 备用通道</summary>

@@ -25,6 +25,7 @@ from reportagent.services.public_url import sync_public_url
 from reportagent.skills.registry import skill_resource
 from reportagent.services.report_quality import review_report_ids, select_candidates, pending_review, review_fingerprint
 from reportagent.services.report_briefing import render_briefing
+from reportagent.services.feishu_markdown import card_sections
 from reportagent.services.paper_scoring import load_enabled_directions, scoring_fingerprint, screening_is_current
 
 logger = logging.getLogger("daily_push")
@@ -480,24 +481,8 @@ def send_feishu_card(receive_id: str, briefing: str, papers: list[dict], date_la
         "content": f"**📊 量化研报日报 — {label}**\n共收录 {len(papers)} 篇论文"
     })
 
-    # Add briefing content (split into sections for card)
-    # Truncate for card size limit
-    lines = briefing.split("\n")
-    current_section = []
-    for line in lines:
-        current_section.append(line)
-        # Flush every ~15 lines to avoid oversized card blocks
-        if len(current_section) >= 15:
-            elements.append({
-                "tag": "markdown",
-                "content": "\n".join(current_section)
-            })
-            current_section = []
-    if current_section:
-        elements.append({
-            "tag": "markdown",
-            "content": "\n".join(current_section)
-        })
+    # Native section breaks keep lists and the next heading visually separate.
+    elements.extend(card_sections(briefing, omit_leading_title=True))
 
     # Divider + action note
     elements.append({"tag": "hr"})

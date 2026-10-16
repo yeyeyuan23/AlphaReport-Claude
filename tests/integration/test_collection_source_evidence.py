@@ -98,6 +98,72 @@ def pdf_bytes(text):
     return data
 
 
+def test_bigquant_skips_out_of_window_and_undated_pdfs_before_download(tmp_path, monkeypatch):
+    from reportagent.sources import content_fetch
+    monkeypatch.setattr(content_fetch, "PDF_DIRECTORY", tmp_path)
+    dates = {
+        "old": "2020-01-01", "unknown": None, "future": "2026-10-12",
+        "lower": "2026-10-05T00:00:00Z", "upper": "2026-10-11T23:59:59Z",
+    }
+    downloads = []
+    attachment = pdf_bytes("A portfolio risk model uses observed returns to estimate risk budgets. " * 8)
+
+    def respond(request):
+        path = request.url.path
+        if "/collection/" in path:
+            return httpx.Response(200, text='<h1>Collection</h1>' + ''.join(
+                f'<a href="/wiki/doc/{name}">portfolio {name}</a>' for name in dates))
+        if path.endswith('.pdf'):
+            downloads.append(path)
+            return httpx.Response(200, content=attachment) if path in {
+                '/pdf/lower.pdf', '/pdf/upper.pdf'} else httpx.Response(404)
+        name = path.rsplit('/', 1)[1]
+        meta = f'<meta name="citation_date" content="{dates[name]}">' if dates[name] else ''
+        return httpx.Response(200, text=meta + f'<article><h1>Portfolio {name}</h1>'
+            f'<a href="/pdf/{name}.pdf">PDF</a></article>')
+
+    mock_http(monkeypatch, respond)
+    source = BigQuantSource(rate_limit_seconds=0, max_listing_pages=1)
+    rows = asyncio.run(source.search(UserCriteria(topics=["portfolio"],
+        date_from=datetime(2026, 10, 5, tzinfo=timezone.utc),
+        date_to=datetime(2026, 10, 11, 23, 59, 59, tzinfo=timezone.utc),
+        max_results_per_source=2)))
+
+    assert downloads == ['/pdf/lower.pdf', '/pdf/upper.pdf']
+    assert [row.title for row in rows] == ['Portfolio lower', 'Portfolio upper']
+    assert all(row.full_text and not row.abstract_only for row in rows)
+    assert len(list(tmp_path.glob('*.pdf'))) == 1  # Identical PDFs share the content cache.
+    assert not source.last_search.errors
+
+
+@pytest.mark.parametrize("entrypoint", ["search", "hydrate_result"])
+def test_bigquant_undated_pdf_is_available_without_a_date_window(tmp_path, monkeypatch, entrypoint):
+    from reportagent.sources import content_fetch
+    monkeypatch.setattr(content_fetch, "PDF_DIRECTORY", tmp_path)
+    attachment = pdf_bytes("Portfolio risk is estimated from daily returns and compared with equal risk budgets. " * 8)
+
+    def respond(request):
+        if "/collection/" in request.url.path:
+            return httpx.Response(200, text='<h1>Collection</h1><a href="/wiki/doc/undated">portfolio undated</a>')
+        if request.url.path.endswith('.pdf'):
+            return httpx.Response(200, content=attachment)
+        return httpx.Response(200, text='<article><h1>Portfolio undated</h1><a href="/pdf/undated.pdf">PDF</a></article>')
+
+    mock_http(monkeypatch, respond)
+    source = BigQuantSource(rate_limit_seconds=0, max_listing_pages=1)
+    if entrypoint == "search":
+        rows = asyncio.run(source.search(UserCriteria(topics=["portfolio"])))
+        assert len(rows) == 1
+        row = rows[0]
+    else:
+        row = asyncio.run(source.hydrate_result(paper(source=SourceType.BIGQUANT,
+            source_url='https://bigquant.com/wiki/doc/undated')))
+    assert row.published_date is None
+    assert row.full_text and not row.abstract_only
+    assert Path(row.pdf_path).is_file()
+    assert not source.last_search.errors
+
+
 def fetch_bigquant(html, attachment=None):
     async def run():
         def respond(request):

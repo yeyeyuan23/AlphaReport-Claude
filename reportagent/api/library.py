@@ -14,7 +14,6 @@ from reportagent.utils.config import PROJECT_ROOT
 from reportagent.skills.registry import skill_resource
 from reportagent.services.report_views import (
     report_to_dict as _report_to_dict,
-    map_analysis_to_knowledge_card as _map_analysis_to_knowledge_card,
     map_analysis_to_briefing_sections as _map_analysis_to_briefing_sections,
 )
 
@@ -58,9 +57,8 @@ def get_report(report_id: int, db: Session = Depends(get_db)):
     if report.analysis_json:
         try: data["analysis"] = json.loads(report.analysis_json)
         except json.JSONDecodeError: pass
-    if report.knowledge_card_json:
-        try: data["knowledge_card"] = json.loads(report.knowledge_card_json)
-        except json.JSONDecodeError: pass
+    from reportagent.services.knowledge_cards import build_knowledge_card
+    data["knowledge_card"] = build_knowledge_card(report)
     return {"success": True, "data": data}
 
 @router.get("/reports/{report_id}/pdf")
@@ -106,52 +104,18 @@ def get_report_pdf(report_id: int, db: Session = Depends(get_db)):
 @router.post("/reports/{report_id}/knowledge-card")
 def get_knowledge_card(
     report_id: int,
-    force: bool = Query(False, description="强制重新生成"),
+    force: bool = Query(False, description="刷新当前证据的卡片展示；不重新评估论文"),
     db: Session = Depends(get_db),
 ):
+    from reportagent.services.knowledge_cards import get_knowledge_card as prepare_card
     report = ReportRepository(db).get_report(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
-
-    topics = report.topics.split(",") if report.topics else []
-    asset_classes = report.asset_classes.split(",") if report.asset_classes else []
-
-    # 1) Return cached LLM-generated Knowledge Card
-    if not force and report.knowledge_card_json:
-        try:
-            kc = json.loads(report.knowledge_card_json)
-            kc["topics"] = topics
-            kc["asset_classes"] = asset_classes
-            return {"success": True, "data": kc}
-        except (json.JSONDecodeError, Exception):
-            pass
-
-    # 2) Map from existing analysis_json
-    if not force and report.analysis_json:
-        try:
-            analysis = json.loads(report.analysis_json)
-            kc = _map_analysis_to_knowledge_card(analysis)
-            kc["topics"] = topics
-            kc["asset_classes"] = asset_classes
-            return {"success": True, "data": kc}
-        except (json.JSONDecodeError, Exception):
-            pass
-
-    # 3) Fallback: return basic info from available data
-    return {
-        "success": True,
-        "data": {
-            "summary": report.abstract or "",
-            "highlights": [],
-            "methodology_steps": [],
-            "results": "",
-            "marginal_contributions": "",
-            "implications": [],
-            "topics": topics,
-            "asset_classes": asset_classes,
-            "quality_score": None,
-        },
-    }
+    previous = report.knowledge_card_json
+    card = prepare_card(report, force=force)
+    if report.knowledge_card_json != previous:
+        db.commit()
+    return {"success": True, "data": card}
 
 @router.post("/reports/{report_id}/research-briefing")
 async def get_research_briefing(

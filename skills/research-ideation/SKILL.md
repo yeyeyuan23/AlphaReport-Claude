@@ -1,25 +1,19 @@
 ---
 name: research-ideation
-description: 围绕用户指定的量化金融主题，从已有研报中寻找灵感、发现研究空白、提出新思路
+description: 根据有限文献提出候选研究假设、最接近的已有工作、最小验证与否定条件；明确检索范围，不把检索未命中当成新颖性证据。
 metadata:
-  aliases:
-  - 研究创意头脑风暴
-  default_params:
-    topic: ''
-    angle: general
+  aliases: [研究创意头脑风暴]
 ---
 
-我想围绕「{topic}」进行头脑风暴。
+使用 reportagent.services.research_ideation；实验聊天入口调用 brainstorm_research，飞书普通聊天可以执行：
+```bash
+.venv/bin/python -m reportagent.cli.ideation --topic '波动率预测' --angle methodology
+```
+可用角度：general、methodology、factor、cross_pollination、critique、data。
+用户明确要求外部查新时增加 `--verify-external`，需已配置 Tavily。网页搜索只提供待核对线索，不代表核对全文或确认创新。
 
-请按以下步骤执行：
-1. 用 semantic_search_reports 搜索与「{topic}」相关的已有研报
-2. 用 brainstorm_research 对「{topic}」进行深度创意分析（思考角度：{angle}）
-3. 如果发现了特别相关的论文，用 get_report 查看详情
-4. 综合所有信息，给我一份有深度、有启发性的回答
-
-注意：不要只是罗列论文，要帮我发现研究机会、识别空白、提出创新思路。
-
-Use the shared Python tools/services for execution. The task template above is a workflow, not permission to send messages.
-
-The research partner persona is defined in [system.md](system.md), loaded by
-`brainstorm_research` unless its path is explicitly overridden in app settings.
+先取得相关文献，保留完整摘要；有当前有效全文评估时加入原文方法、发现与局限。
+程序区分检索失败与未命中；失败时停止推断领域现状，空库时只生成“未查新的探索假设”。
+模型只接收程序取得的资料，没有额外工具；提示词见 system.md 和 user.md。
+输出每个候选假设的最接近文献、候选差异、数据需求、最小验证和否定条件。不要保证数据可得或收益改善。
+只引用实际取得的论文ID；资料范围有限时，不声称领域无人研究。任务不授权发送消息。

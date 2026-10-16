@@ -18,6 +18,7 @@ from reportagent.db.engine import init_db, get_session_factory
 from reportagent.utils.config import get_config, get_llm_model
 from reportagent.services.report_briefing import render_briefing
 from reportagent.services.report_quality import pending_review, review_fingerprint
+from reportagent.services.feishu_markdown import card_sections
 
 logger = logging.getLogger("weekly_report")
 
@@ -235,16 +236,8 @@ def send_feishu_card(receive_id: str, report_text: str, papers: list[dict],
         "content": f"**📊 量化研报周报**\n{week_start} ~ {week_end} ｜ 共收录 {len(papers)} 篇论文"
     })
 
-    # Report content — split into card-sized chunks
-    lines = report_text.split("\n")
-    chunk: list[str] = []
-    for line in lines:
-        chunk.append(line)
-        if len(chunk) >= 15:
-            elements.append({"tag": "markdown", "content": "\n".join(chunk)})
-            chunk = []
-    if chunk:
-        elements.append({"tag": "markdown", "content": "\n".join(chunk)})
+    # Use the same section spacing as daily cards.
+    elements.extend(card_sections(report_text, omit_leading_title=True))
 
     # Footer
     elements.append({"tag": "hr"})

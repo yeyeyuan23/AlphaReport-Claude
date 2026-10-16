@@ -270,16 +270,11 @@ async def prepare_report(arxiv_id: str, *, force: bool = False) -> tuple[Path, d
 
 def _send_to_chat(chat_id: str, text: str, request_id: str) -> str:
     from reportagent.services.feishu_service import _build_client
-    from lark_oapi.api.im.v1.model.create_message_request import CreateMessageRequest
-    from lark_oapi.api.im.v1.model.create_message_request_body import CreateMessageRequestBody
-    request = CreateMessageRequest.builder().receive_id_type("chat_id").request_body(
-        CreateMessageRequestBody.builder().receive_id(chat_id).msg_type("text")
-        .content(json.dumps({"text": text}, ensure_ascii=False)).uuid(request_id).build()
-    ).build()
-    response = _build_client().im.v1.message.create(request)
-    if not response.success() or not response.data or not response.data.message_id:
-        raise RuntimeError(f"Feishu send failed: code={response.code}")
-    return response.data.message_id
+    from reportagent.services.feishu_replies import deliver_response
+    message_ids = deliver_response(_build_client(), text, chat_id, request_id=request_id, title="单篇研报分析")
+    if not message_ids:
+        raise RuntimeError("Empty report cannot be delivered")
+    return message_ids[-1]
 
 
 def push_artifact(artifact: dict, chat_id: str) -> dict:

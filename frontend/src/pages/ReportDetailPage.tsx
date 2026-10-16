@@ -12,6 +12,7 @@ import PaperViewer from "@/components/PaperViewer";
 import ResearchBriefing from "@/components/ResearchBriefing";
 import ResearchEvaluation from "@/components/ResearchEvaluation";
 import KnowledgeCard from "@/components/KnowledgeCard";
+import ReproductionCard from "@/components/ReproductionCard";
 
 export default function ReportDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -117,15 +118,19 @@ export default function ReportDetailPage() {
               <div className="px-4 pt-3">
                 <TabsList className="w-full">
                   <TabsTrigger value="knowledge-card" className="flex-1 text-xs">
-                    Knowledge Card
+                    论文速览
                   </TabsTrigger>
+                  <TabsTrigger value="reproduction" className="flex-1 text-xs">复现准备</TabsTrigger>
                 </TabsList>
               </div>
               <TabsContent
                 value="knowledge-card"
                 className="flex-1 min-h-0 mt-0 data-[state=inactive]:hidden"
               >
-                <KnowledgeCard reportId={report.id} />
+                <KnowledgeCard key={report.id} reportId={report.id} />
+              </TabsContent>
+              <TabsContent value="reproduction" className="flex-1 min-h-0 mt-0 data-[state=inactive]:hidden">
+                <ReproductionCard key={report.id} reportId={report.id} />
               </TabsContent>
             </Tabs>
           </ResizablePanel>

@@ -82,6 +82,14 @@ Plan-Execute 都通过 registry 加载完整技能说明；CLI 和 `/api/v1/skil
 PDF连字、安全英文断行和空白规范化保留原始字符位置，不放宽为删句或数学符号模糊匹配。
 修改这些资源后按相应指纹刷新缓存；模型阅读不等于复现论文实验。
 
+知识卡片由 `services/knowledge_cards.py` 从当前有效的 `evaluation_json` 确定性生成，
+网页、旧 API 和批量 CLI 共用同一服务；无当前证据时只展示摘要和待核验状态。
+复现准备使用 `services/reproduction.py` 与 `skills/prepare-reproduction/`，
+原文事实逐项定位，建议方案独立标注，成功卡片存入 `analysis_json.reproduction_preparation`。
+模型调用前后核对源资料，失败或过期结果不覆盖成功缓存。
+研究创意使用 `services/research_ideation.py`；检索由程序执行，模型仅生成有范围声明的候选假设，
+不再声称具备生成阶段未接入的工具能力。
+
 内置 Feishu 日报调度默认开启。Web 运行时按 `Asia/Shanghai` 工作日设定时刻
 调用同一日报服务；独立采集模式仅负责入库。手动 `/daily` 不依赖调度开关。
 

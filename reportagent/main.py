@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from reportagent.db.engine import init_db
-from reportagent.api import library, feishu, frontend
+from reportagent.api import library, feishu, frontend, reproduction
 from reportagent.skills.registry import load_all_skills
 
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ def create_app():
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                        allow_methods=["*"], allow_headers=["*"])
     app.include_router(library.router)
+    app.include_router(reproduction.router)
     app.include_router(feishu.router)
 
     @app.get("/api/v1/health")

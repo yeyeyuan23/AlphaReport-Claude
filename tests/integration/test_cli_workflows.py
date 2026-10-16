@@ -23,6 +23,7 @@ from reportagent.models.schemas import SearchResult, SourceType
     ("classify", "--hybrid"), ("llm_filter", "--published-days"),
     ("llm_direction_filter", "--report-ids"), ("narrative_brief", "--force"),
     ("daily_feishu_push", "--no-collect"), ("weekly_report", "--no-llm"),
+    ("reproduction", "--dry-run"), ("ideation", "--verify-external"),
     ("parse_pdf", "--save"), ("db_query", "--update-knowledge-card"),
 ])
 def test_cli_commands_offer_documented_options(name, flag):

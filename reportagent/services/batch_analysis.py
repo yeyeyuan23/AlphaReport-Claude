@@ -10,7 +10,6 @@ import hashlib
 import logging
 
 
-from reportagent.services.report_views import map_analysis_to_knowledge_card as _map_analysis_to_knowledge_card
 
 from reportagent.db.engine import init_db, get_session_factory
 from reportagent.db.repository import ReportRepository
@@ -153,13 +152,10 @@ async def run_analysis(options: AnalysisOptions) -> dict:
                 analysis_dict = result.model_dump()
                 analysis_dict.update(evidence_scope=evidence_scope, model_calls=calls,
                                      depth=options.depth, analysis_fingerprint=fingerprint)
-                kc = _map_analysis_to_knowledge_card(analysis_dict)
-                kc["topics"] = [t.strip() for t in (r.topics or "").split(",") if t.strip()]
-                kc["asset_classes"] = [t.strip() for t in (r.asset_classes or "").split(",") if t.strip()]
-                kc["evidence_scope"] = evidence_scope
-                # Save one coherent paper snapshot; rollback cannot undo siblings.
+                # Save analysis, but only evidence-backed cards may populate the cache.
                 r.analysis_json = json.dumps(analysis_dict, ensure_ascii=False, indent=2)
-                r.knowledge_card_json = json.dumps(kc, ensure_ascii=False)
+                from reportagent.services.knowledge_cards import get_knowledge_card
+                get_knowledge_card(r)
                 session.commit()
                 audit["analyzed_ids"].append(r.id)
                 logger.info(f"  [{i+1}/{len(reports)}] ✓ {r.title[:50]}")

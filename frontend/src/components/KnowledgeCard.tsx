@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Markdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -39,8 +39,11 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const requestId = useRef<object | null>(null);
 
   const fetchCard = async (force: boolean = false) => {
+    const id = {};
+    requestId.current = id;
     try {
       if (force) {
         setRegenerating(true);
@@ -49,23 +52,29 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
       }
       setError(null);
       const res = await getKnowledgeCard(reportId, force);
+      if (requestId.current !== id) return;
       if (res.success && res.data) {
         setData(res.data as KnowledgeCardType);
       } else {
         setError((res as { error?: string }).error || "Failed to load knowledge card");
       }
     } catch (e) {
-      setError((e as Error).message);
+      if (requestId.current === id) setError((e as Error).message);
     } finally {
-      setLoading(false);
-      setRegenerating(false);
+      if (requestId.current === id) { setLoading(false); setRegenerating(false); }
     }
   };
 
   useEffect(() => {
-    let cancelled = false;
-    if (!cancelled) fetchCard();
-    return () => { cancelled = true; };
+    const id = {};
+    requestId.current = id;
+    getKnowledgeCard(reportId).then(res => {
+      if (requestId.current !== id) return;
+      setData(res.data); setLoading(false);
+    }).catch((e: Error) => {
+      if (requestId.current === id) { setError(e.message); setLoading(false); }
+    });
+    return () => { requestId.current = null; };
   }, [reportId]);
 
   if (loading && !data) {
@@ -84,7 +93,7 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
   if (error) {
     return (
       <div className="p-6 text-center text-muted-foreground text-sm">
-        <p>Knowledge Card 加载失败</p>
+        <p>论文速览加载失败</p>
         <p className="text-xs mt-1">{error}</p>
       </div>
     );
@@ -112,11 +121,7 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
               ))}
             </>
           ) : null}
-          {data.quality_score != null && (
-            <Badge variant="default" className="text-xs ml-auto">
-              Score: {data.quality_score.toFixed(1)}
-            </Badge>
-          )}
+          <Badge variant="outline" className="text-xs ml-auto">{data.quality_label}</Badge>
           <Button
             variant="ghost"
             size="sm"
@@ -124,13 +129,14 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
             onClick={() => fetchCard(true)}
             disabled={regenerating}
           >
-            {regenerating ? "重新生成中..." : "重新生成"}
+            {regenerating ? "刷新中..." : "刷新展示"}
           </Button>
         </div>
+        <p className="text-xs text-muted-foreground">{data.notice}</p>
 
         {/* Summary */}
         {data.summary && (
-          <SectionCard title="原文总结" icon="&#x1F4DD;">
+          <SectionCard title={data.status === "ready" ? "研究问题" : "原始摘要"} icon="&#x1F4DD;">
             <div className="prose prose-sm max-w-none text-muted-foreground leading-relaxed">
               <Markdown {...markdownPlugins}>{data.summary}</Markdown>
             </div>
@@ -166,7 +172,7 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
 
         {/* Results */}
         {data.results && (
-          <SectionCard title="实证结果" icon="&#x1F4CA;">
+          <SectionCard title="研究结果与条件" icon="&#x1F4CA;">
             <div className="prose prose-sm max-w-none text-muted-foreground leading-relaxed">
               <Markdown {...markdownPlugins}>{data.results}</Markdown>
             </div>
@@ -184,7 +190,7 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
 
         {/* Implications */}
         {data.implications.length > 0 && (
-          <SectionCard title="实践启示" icon="&#x1F52E;">
+          <SectionCard title="阅读与验证建议" icon="&#x1F52E;">
             <div className="flex flex-col gap-2">
               {data.implications.map((imp, i) => (
                 <div
@@ -198,11 +204,22 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
           </SectionCard>
         )}
 
+        {data.limitations?.length > 0 && <SectionCard title="局限与待核查项" icon="🔎">
+          <ul className="list-disc pl-4 space-y-2">{data.limitations.map((s, i) => <li key={i}>{s}</li>)}</ul>
+        </SectionCard>}
+        {data.evidence?.length > 0 && <SectionCard title="原文依据" icon="📖">
+          <div className="space-y-3">{data.evidence.map((e, i) => <details key={i}>
+            <summary className="cursor-pointer">{e.claim}</summary>
+            <p className="text-xs text-muted-foreground mt-2">{e.locator}</p>
+            <blockquote className="border-l-2 pl-3 mt-2 text-xs whitespace-pre-wrap">{e.raw_quote || e.quote}</blockquote>
+          </details>)}</div>
+        </SectionCard>}
+
         {/* Empty state */}
         {!data.summary && data.highlights.length === 0 && data.methodology_steps.length === 0 && (
           <div className="text-center text-muted-foreground py-12">
             <p className="text-sm">暂无结构化分析数据</p>
-            <p className="text-xs mt-1">请先运行 AI 深度分析以生成 Knowledge Card</p>
+            <p className="text-xs mt-1">请先完成全文证据评估。</p>
           </div>
         )}
       </div>

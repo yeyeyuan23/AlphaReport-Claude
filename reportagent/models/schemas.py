@@ -256,6 +256,12 @@ class KnowledgeCard(BaseModel):
     topics: list[str] = Field(default_factory=list)
     asset_classes: list[str] = Field(default_factory=list)
     quality_score: Optional[float] = None
+    status: str = "pending"
+    quality_label: str = "待核验"
+    notice: str = ""
+    limitations: list[str] = Field(default_factory=list)
+    evidence: list[dict] = Field(default_factory=list)
+    provenance: dict = Field(default_factory=dict)
 
 
 class ReportListParams(BaseModel):

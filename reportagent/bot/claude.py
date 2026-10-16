@@ -66,7 +66,7 @@ def ask_claude(msg, chat_id):
         out = r.stdout.strip()
         if r.returncode == 0 and out:
             save_session(chat_id, sid, summary)
-            return out[:4000] + ("\n...(截断)" if len(out) > 4000 else "")
+            return out
         if not new and "session" in r.stderr.lower():
             del_session(chat_id)
             return ask_claude(msg, chat_id)

@@ -10,8 +10,8 @@ def main():
                         help="过滤最近 N 天的论文 (default: 1)")
     parser.add_argument("--report-ids", type=str, default="",
                         help="指定论文 ID，逗号分隔（优先于 --days）")
-    parser.add_argument("--threshold", type=float, default=6.0,
-                        help="精选阈值 (default: 6.0)")
+    parser.add_argument("--threshold", type=float, default=None,
+                        help="精选阈值（默认读取 push_directions.yaml）")
     parser.add_argument("--dry-run", action="store_true",
                         help="仅评分不入库")
     parser.add_argument("--json", action="store_true", dest="json_output",

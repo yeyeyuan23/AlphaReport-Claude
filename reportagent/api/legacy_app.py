@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from reportagent.db.engine import init_db
-from reportagent.api import collection, reports, classification, system, chat
+from reportagent.api import collection, reports, classification, system, chat, reproduction
 
 
 @asynccontextmanager
@@ -44,6 +44,7 @@ app.add_middleware(
 
 app.include_router(collection.router)
 app.include_router(reports.router)
+app.include_router(reproduction.router)
 app.include_router(classification.router)
 app.include_router(system.router)
 app.include_router(chat.router)

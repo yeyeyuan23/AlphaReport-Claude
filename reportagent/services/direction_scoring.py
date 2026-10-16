@@ -19,7 +19,7 @@ logger = logging.getLogger("llm_direction_filter")
 class DirectionOptions:
     days: int = 1
     report_ids: str = ''
-    threshold: float = 6.0
+    threshold: float | None = None
     dry_run: bool = False
     json_output: bool = False
 
@@ -50,7 +50,7 @@ def get_papers(days: int = 1, report_ids: list[int] | None = None) -> list[dict]
                 "id": r.id,
                 "title": r.title or "",
                 "authors": r.authors or "",
-                "abstract": (r.abstract or "")[:500],
+                "abstract": r.abstract or "",
                 "source": r.source or "",
                 "source_url": r.source_url or "",
                 "arxiv_id": r.arxiv_id or "",
@@ -74,6 +74,8 @@ def store_scores(results: list[PaperDirectionResult]):
         repo = ReportRepository(session)
 
         for r in results:
+            if r.status == "retryable_error":
+                continue  # Preserve previous successful data; retry on the next run.
             # Build scores JSON
             scores_data = {
                 "direction_scores": [
@@ -88,6 +90,7 @@ def store_scores(results: list[PaperDirectionResult]):
                 "max_score": r.max_score,
                 "best_direction": r.best_direction,
                 "selected": r.is_selected,
+                "status": r.status, "reason": r.reason, "threshold": r.threshold,
                 "scored_at": datetime.now(timezone.utc).isoformat(),
             }
             # Merge with existing analysis_json
@@ -99,6 +102,8 @@ def store_scores(results: list[PaperDirectionResult]):
                         existing = json.loads(report.analysis_json)
                     except json.JSONDecodeError:
                         pass
+                if not isinstance(existing, dict):
+                    existing = {}
                 existing.update(scores_data)
                 report.analysis_json = json.dumps(existing, ensure_ascii=False)
 
@@ -121,7 +126,9 @@ async def run_direction_filter(options: DirectionOptions) -> None:
 
     # Score
     filt = DirectionFilter()
-    filt.SELECTION_THRESHOLD = options.threshold
+    if options.threshold is not None:
+        from reportagent.services.paper_scoring import _valid_score
+        filt.SELECTION_THRESHOLD = _valid_score(options.threshold, "threshold")
     results = await filt.score_papers(papers)
 
     # Output
@@ -129,7 +136,7 @@ async def run_direction_filter(options: DirectionOptions) -> None:
     output = {
         "total": len(results),
         "selected": len(selected),
-        "threshold": options.threshold,
+        "threshold": filt.SELECTION_THRESHOLD,
         "results": [
             {
                 "report_id": r.report_id,
@@ -137,13 +144,14 @@ async def run_direction_filter(options: DirectionOptions) -> None:
                 "max_score": r.max_score,
                 "best_direction": r.best_direction,
                 "selected": r.is_selected,
+                "status": r.status, "reason": r.reason, "threshold": r.threshold,
                 "scores": [
                     {"direction": s.direction_name, "score": s.score, "reason": s.reason}
                     for s in sorted(r.direction_scores, key=lambda x: x.score, reverse=True)
                     if s.score > 0
                 ],
             }
-            for r in sorted(results, key=lambda x: x.max_score, reverse=True)
+            for r in sorted(results, key=lambda x: x.max_score if x.max_score is not None else -1, reverse=True)
         ],
     }
 
@@ -155,7 +163,7 @@ async def run_direction_filter(options: DirectionOptions) -> None:
         print(f"{'='*60}")
         for r in output["results"]:
             icon = "⭐" if r["selected"] else "  "
-            print(f"\n{icon} [{r['max_score']:.1f}] {r['title']}")
+            print(f"\n{icon} [{r['max_score'] if r['max_score'] is not None else r['status']}] {r['title']}")
             if r["scores"]:
                 for s in r["scores"][:3]:
                     print(f"     {s['direction']}: {s['score']:.1f} — {s['reason']}")

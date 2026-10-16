@@ -61,12 +61,78 @@ def run_daily_job(chat_id):
     finally:
         _report_lock.release()
 
+
+def run_weekly_job(chat_id):
+    """Reuse the weekly CLI outside the event callback and deliver to this chat."""
+    try:
+        from reportagent.services.weekly_report import get_previous_week_range, get_weekly_papers
+        start, end, first, last = get_previous_week_range()
+        if not get_weekly_papers(start, end):
+            send_chat(chat_id, f"上一完整 UTC 周（{first} 至 {last}）库中暂无符合发表日期的资料，可先采集后再试。")
+            return
+        path = PROJECT_ROOT / "data" / "report-jobs.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as log:
+            result = subprocess.run([
+                sys.executable, "-u", "-m", "reportagent.cli.weekly_report",
+                "--receive-ids", chat_id, "--receive-type", "chat_id",
+            ], cwd=str(PROJECT_ROOT), stdout=log, stderr=log, timeout=5400)
+        if result.returncode:
+            send_chat(chat_id, "周报未完整完成，部分评估或投递可能未完成，可稍后重试。")
+    except subprocess.TimeoutExpired:
+        logger.warning("Weekly report job timed out")
+        send_chat(chat_id, "周报生成超时，可稍后重试。")
+    except Exception:
+        logger.exception("Weekly report job failed")
+        send_chat(chat_id, "周报任务未完成，可稍后重试。")
+    finally:
+        _report_lock.release()
+
+
+def _report_list(reports, total, title):
+    base = (os.environ.get("ALPHAREPORT_BASE_URL") or
+            f"http://{os.environ.get('ALPHAREPORT_HOST', 'localhost')}:{os.environ.get('ALPHAREPORT_PORT', '8000')}").rstrip('/')
+    sources = {"arxiv": "arXiv", "eastmoney": "东方财富", "bigquant": "BigQuant", "local_pdf": "本地 PDF"}
+    entries = [f"{title}\n共 {total} 篇，本次展示 {len(reports)} 篇"]
+    for i, report in enumerate(reports, 1):
+        name = ' '.join(report.title.split())
+        name = name[:89] + '…' if len(name) > 90 else name
+        source = sources.get(report.source, report.source)
+        added = report.created_at.strftime('%Y-%m-%d') if report.created_at else '日期未知'
+        entries.append(f"{i}. {name}\n来源：{source} · 入库：{added}\n网页详情：{base}/library/{report.id}")
+    return '\n\n'.join(entries)
+
+
 def handle_cmd(text, chat_id, chat_type):
     text = re.sub(r'<at[^>]*>.*?</at>', '', text.strip())
     text = re.sub(r'@\S+\s*', '', text).strip()
 
     if text in ("/help", "/start"):
-        return "📊 AlphaReport 指令\n\n/report <arXiv编号或链接>：下载全文、分析并推送到当前私聊\n/daily：采集、评估最多12篇候选，推送分层日报\n/stats /search <词> /recent /chatid /clear /help\n\n💬 直接发问题，模型为你解答"
+        return ("📊 AlphaReport 指令\n\n"
+                "/report <arXiv编号或链接>：分析单篇论文并推送到当前私聊\n"
+                "/daily：采集、评估并生成日报\n"
+                "/weekly：汇总上一完整 UTC 周的库中资料\n\n"
+                "/stats：查看研报库统计\n"
+                "/search <关键词>：搜索研报，最多显示 5 篇\n"
+                "/recent：查看最近入库的 5 篇研报\n"
+                "/chatid：查看当前会话 ID\n"
+                "/clear：清除聊天记忆（不删除研报）\n"
+                "/help：显示帮助\n\n"
+                "💬 直接发问题，也可以讨论论文。")
+
+    if re.match(r"^/weekly(?:\s|$)", text):
+        if chat_type != "p2p":
+            return "请在机器人私聊中使用 /weekly。"
+        if text != "/weekly":
+            return "用法：/weekly（无需参数，汇总上一完整 UTC 周）。"
+        if not _report_lock.acquire(blocking=False):
+            return "已有研报任务正在处理，请等待完成后再提交。"
+        try:
+            threading.Thread(target=run_weekly_job, args=(chat_id,), daemon=True).start()
+        except Exception:
+            _report_lock.release()
+            raise
+        return "开始生成上一完整 UTC 周的周报：使用库中资料，刷新相关性与最多12篇全文评估，完成后推送到当前私聊。"
 
     if text == "/daily":
         if chat_type != "p2p":
@@ -103,11 +169,13 @@ def handle_cmd(text, chat_id, chat_type):
             from reportagent.db.repository import ReportRepository
             s = get_session_factory()()
             st = ReportRepository(s).get_stats(); s.close()
-            return f"📚 研报库：{st['total_reports']} 篇 | 含全文 {st['with_full_text']} | 仅摘要 {st['without_full_text']}"
-        except Exception as e: return f"查询失败: {e}"
+            return f"📚 研报库统计\n\n总计：{st['total_reports']} 篇\n含全文：{st['with_full_text']} 篇\n仅摘要：{st['without_full_text']} 篇"
+        except Exception:
+            logger.exception("Report query failed")
+            return "查询失败，请稍后重试。"
 
-    if text.startswith("/search"):
-        q = text.replace("/search", "").strip()
+    if text == "/search" or text.startswith("/search "):
+        q = text.removeprefix("/search").strip()
         if not q: return "用法：/search <关键词>"
         try:
             from reportagent.db.engine import get_session_factory
@@ -117,8 +185,10 @@ def handle_cmd(text, chat_id, chat_type):
             reps, total = ReportRepository(s).list_reports(ReportListParams(search=q, limit=5))
             s.close()
             if not reps: return f"未找到「{q}」"
-            return "\n".join([f"{i}. {r.title[:70]} ({r.source})" for i, r in enumerate(reps, 1)])
-        except Exception as e: return f"搜索失败: {e}"
+            return _report_list(reps, total, f"🔍 搜索「{q}」")
+        except Exception:
+            logger.exception("Report search failed")
+            return "搜索失败，请稍后重试。"
 
     if text == "/recent":
         try:
@@ -126,15 +196,17 @@ def handle_cmd(text, chat_id, chat_type):
             from reportagent.db.repository import ReportRepository
             from reportagent.models.schemas import ReportListParams
             s = get_session_factory()()
-            reps, _ = ReportRepository(s).list_reports(ReportListParams(sort_by="created_at", limit=5))
+            reps, total = ReportRepository(s).list_reports(ReportListParams(sort_by="created_at", limit=5))
             s.close()
             if not reps: return "研报库为空"
-            return "\n".join([f"{i}. {r.title[:60]} — {r.created_at.strftime('%m-%d') if r.created_at else ''}" for i, r in enumerate(reps, 1)])
-        except Exception as e: return f"查询失败: {e}"
+            return _report_list(reps, total, "📄 最近入库")
+        except Exception:
+            logger.exception("Report query failed")
+            return "查询失败，请稍后重试。"
 
     if text == "/chatid":
         t = "群聊" if chat_type == "group" else "对话"
-        return f"📋 当前{t} ID: `{chat_id}`"
+        return f"📋 当前{t} ID\n\n{chat_id}"
 
     if text == "/clear":
         del_session(chat_id)

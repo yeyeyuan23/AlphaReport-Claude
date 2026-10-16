@@ -198,6 +198,25 @@ export interface KnowledgeCard {
   topics: string[];
   asset_classes: string[];
   quality_score: number | null;
+  status: "ready" | "pending";
+  quality_label: string;
+  notice: string;
+  limitations: string[];
+  evidence: { claim: string; quote: string; raw_quote: string; locator: string }[];
+}
+
+export interface ReproductionCard {
+  status: "ready" | "pending" | "retryable_error";
+  notice: string;
+  fields?: Record<string, {
+    status: "documented" | "needs_verification" | "not_applicable";
+    value: string;
+    evidence: { quote: string; raw_quote: string; locator: string }[];
+  }>;
+  minimum_check?: string;
+  falsification?: string;
+  proposal_label?: string;
+  open_questions?: string[];
 }
 
 export const BIAS_RISK_LABELS: Record<string, string> = {

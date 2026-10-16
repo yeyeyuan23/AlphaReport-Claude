@@ -179,8 +179,9 @@ class BigQuantSource(BaseSource):
             results: list[SearchResult] = []
             for title, doc_path, _ in candidates:
                 try:
-                    sr = await self._fetch_detail(client, title, doc_path)
-                    if sr and in_date_window(sr.published_date, criteria.date_from, criteria.date_to):
+                    sr = await self._fetch_detail(client, title, doc_path,
+                        date_from=criteria.date_from, date_to=criteria.date_to)
+                    if sr:
                         results.append(sr)
                     if len(results) >= criteria.max_results_per_source:
                         break
@@ -221,7 +222,8 @@ class BigQuantSource(BaseSource):
         return entries
 
     async def _fetch_detail(
-        self, client: httpx.AsyncClient, title: str, doc_path: str
+        self, client: httpx.AsyncClient, title: str, doc_path: str, *,
+        date_from: Optional[datetime] = None, date_to: Optional[datetime] = None,
     ) -> Optional[SearchResult]:
         url = f"{BASE_URL}{doc_path}" if doc_path.startswith("/") else doc_path
         body = await bounded_download(client, url, MAX_HTML_BYTES)
@@ -249,12 +251,16 @@ class BigQuantSource(BaseSource):
         if not h1 or not title.strip() or not article:
             raise SourceParseError("unrecognized HTML article or missing title")
 
+        published_date, date_source = _publication_date(soup, article, url)
+        # Determine eligibility from page evidence before downloading attachments.
+        # With no date bounds, explicit single-report reads can still hydrate an
+        # undated paper; a dated collection must exclude unknown publication dates.
+        if not in_date_window(published_date, date_from, date_to):
+            return None
+
         text = article_text(article)
         abstract = (text[:1500] if text else None) or abstract
         links = pdf_links(article, url)
-
-        source_url = f"{BASE_URL}{doc_path}" if doc_path.startswith("/") else doc_path
-        published_date, date_source = _publication_date(soup, article, source_url)
 
         result = SearchResult(
             title=title,
@@ -263,7 +269,7 @@ class BigQuantSource(BaseSource):
             full_text=text if usable_full_text(text) else None,
             abstract_only=not usable_full_text(text),
             source=SourceType.BIGQUANT,
-            source_url=source_url,
+            source_url=url,
             published_date=published_date,
             raw_metadata={
                 "doc_path": doc_path,
