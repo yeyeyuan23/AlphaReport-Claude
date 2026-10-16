@@ -13,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from reportagent.models.database import Base, Report, ReportRun
 from reportagent.services import daily_push as daily
 from reportagent.services.report_quality import review_fingerprint
+from reportagent.services.paper_scoring import evidence_fingerprint
 
 
 def save_offline_assessment(session, row, assessment):
@@ -33,7 +34,6 @@ def offline_daily(tmp_path, monkeypatch):
     monkeypatch.setattr(daily, "get_session_factory", lambda: factory)
     monkeypatch.setattr(daily, "sync_public_url", lambda: None)
     monkeypatch.setattr(daily, "load_dotenv", lambda **kwargs: None)
-    monkeypatch.setattr(daily, "scoring_fingerprint", lambda: "current")
     monkeypatch.setattr(daily, "load_enabled_directions", lambda: {"portfolio": {}})
     monkeypatch.setattr(daily.subprocess, "run", lambda *args, **kwargs:
                         subprocess.CompletedProcess([], 0, "", ""))
@@ -57,11 +57,14 @@ def offline_daily(tmp_path, monkeypatch):
 
 def insert_paper(factory):
     with factory() as session:
-        session.add(Report(id=1, title="Old title", source="arxiv", content_hash="one",
-                           source_url="https://arxiv.org/abs/2610.00001v1", arxiv_id="2610.00001v1",
-                           published_date=datetime.now(timezone.utc), selection_score=8,
-                           selection_relevance=8, selection_direction="portfolio",
-                           selection_provenance_json=json.dumps({"fingerprint": "current"})))
+        row = Report(id=1, title="Old title", source="arxiv", content_hash="one",
+                     abstract="We study portfolio allocation and compare rolling trading policies with transaction costs.",
+                     source_url="https://arxiv.org/abs/2610.00001v1", arxiv_id="2610.00001v1",
+                     published_date=datetime.now(timezone.utc), selection_score=8,
+                     selection_relevance=8, selection_direction="portfolio")
+        row.selection_provenance_json = json.dumps({"fingerprint": daily.scoring_fingerprint(),
+            "status": "scored", "evidence_fingerprint": evidence_fingerprint(vars(row))})
+        session.add(row)
         session.commit()
 
 

@@ -25,7 +25,7 @@ from reportagent.services.public_url import sync_public_url
 from reportagent.skills.registry import skill_resource
 from reportagent.services.report_quality import review_report_ids, select_candidates, pending_review, review_fingerprint
 from reportagent.services.report_briefing import render_briefing
-from reportagent.services.paper_scoring import load_enabled_directions, scoring_fingerprint
+from reportagent.services.paper_scoring import load_enabled_directions, scoring_fingerprint, screening_is_current
 
 logger = logging.getLogger("daily_push")
 
@@ -177,6 +177,7 @@ def _paper_metadata(row) -> dict:
         )},
         "published_date": row.published_date.isoformat() if row.published_date else "",
         "has_full_text": row.has_full_text,
+        "selection_provenance_json": row.selection_provenance_json,
         "selection_score": row.selection_score or 0.0,
         "selection_relevance": row.selection_relevance,
         "selection_direction": row.selection_direction,
@@ -264,13 +265,7 @@ def get_todays_papers(collect_result: dict = None, receive_ids: list[str] | None
         q = q.order_by(desc(Report.selection_relevance), desc(Report.published_date))
         reports = q.all()
         if not report_ids:
-            fingerprint = scoring_fingerprint()
-            def current_score(row):
-                try:
-                    return json.loads(row.selection_provenance_json or "{}").get("fingerprint") == fingerprint
-                except (ValueError, TypeError, AttributeError):
-                    return False
-            reports = [r for r in reports if current_score(r)][:200]
+            reports = [r for r in reports if screening_is_current(r)][:200]
 
         if not reports:
             date_label = today_start.strftime("%Y-%m-%d")

@@ -20,7 +20,7 @@ def test_full_library_acceptance_rescores_old_and_already_scored_rows(tmp_path, 
     try:
         with factory() as session:
             session.add_all([Report(title=f"paper-{i}", content_hash=str(i), source="arxiv",
-                                    abstract="Portfolio model", selection_relevance=9,
+                                    abstract="We evaluate dynamic portfolio optimization under transaction costs using out-of-sample returns.", selection_relevance=9,
                                     is_selected=True, published_date=datetime(2000, 1, 1))
                              for i in range(207)])
             session.commit()

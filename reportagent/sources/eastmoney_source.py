@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
+from bs4 import BeautifulSoup
 
 from reportagent.models.schemas import UserCriteria, SearchResult, SourceType
-from reportagent.sources.base import BaseSource, SourceParseError, deduplicate_results
+from reportagent.sources.base import BaseSource, SourceParseError, deduplicate_results, usable_full_text
+from reportagent.sources.date_window import in_date_window
+from reportagent.sources.content_fetch import (
+    MAX_HTML_BYTES, article_text, bounded_download, hydrate_pdf, pdf_links,
+)
 from reportagent.utils.topic_expansion import expand_topics
 
 logger = logging.getLogger(__name__)
@@ -121,12 +126,49 @@ class EastMoneySource(BaseSource):
                 except Exception as e:
                     logger.warning("EastMoney %s", self.last_search.record_error(e, f"qType {qt}"))
 
-        filtered = self._filter_by_keywords(deduplicate_results(all_results), criteria)
+        dated = [row for row in deduplicate_results(all_results)
+                 if in_date_window(row.published_date, criteria.date_from, criteria.date_to)]
+        filtered = self._filter_by_keywords(dated, criteria)
         logger.info(
             "EastMoney: fetched %d, filtered to %d quant-related",
             len(all_results), len(filtered),
         )
-        return filtered[: criteria.max_results_per_source]
+        selected = filtered[: criteria.max_results_per_source]
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            for index, result in enumerate(selected):
+                try:
+                    selected[index] = await self._fetch_detail(client, result)
+                except Exception as error:
+                    self.last_search.record_error(error, "article detail")
+        return selected
+
+    async def hydrate_result(self, result: SearchResult) -> SearchResult:
+        """Fetch public research evidence without models or database writes."""
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            return await self._fetch_detail(client, result)
+
+    async def _fetch_detail(self, client, result: SearchResult) -> SearchResult:
+        if not result.source_url:
+            raise SourceParseError("missing report detail URL")
+        data = await bounded_download(client, result.source_url, MAX_HTML_BYTES)
+        soup = BeautifulSoup(data, "html.parser")
+        article = soup.select_one(".ctx-content, .newsContent, .news-content, .report-content, article")
+        text = article_text(article)
+        links = pdf_links(soup, result.source_url)
+        updates = {"abstract": text[:1500] if text else None,
+                   "raw_metadata": {**result.raw_metadata,
+                                    "content_kind": "html" if text else "metadata_only",
+                                    "text_scope": "html_article" if text else "metadata_only",
+                                    "pdf_link": links[0] if links else None}}
+        if usable_full_text(text):
+            updates.update(full_text=text, abstract_only=False)
+        result = result.model_copy(update=updates)
+        # Public HTML is often an excerpt; the linked report is the better source.
+        if links:
+            result = await hydrate_pdf(client, result, links, self.last_search)
+        if not result.abstract and not result.full_text and not links:
+            self.last_search.record_error(SourceParseError("no research text or public PDF in report page"), "article content")
+        return result
 
     def _filter_by_keywords(
         self, results: list[SearchResult], criteria: UserCriteria
@@ -266,32 +308,8 @@ class EastMoneySource(BaseSource):
         rating = item.get("emRatingName", "")
         report_type_label = REPORT_TYPE_LABELS.get(q_type, "研报")
 
-        abstract_parts = []
-        if org_name:
-            abstract_parts.append(f"来源: {org_name}")
-        if stock_name and stock_code:
-            abstract_parts.append(f"标的: {stock_name}({stock_code})")
-        if industry_name:
-            abstract_parts.append(f"行业: {industry_name}")
-        if rating:
-            abstract_parts.append(f"评级: {rating}")
-        abstract_parts.append(f"类型: {report_type_label}")
-        if item.get("attachPages"):
-            abstract_parts.append(f"页数: {item['attachPages']}")
-
-        eps_parts = []
-        for label, key in [
-            ("今年EPS预测", "predictThisYearEps"),
-            ("明年EPS预测", "predictNextYearEps"),
-            ("后年EPS预测", "predictNextTwoYearEps"),
-        ]:
-            val = item.get(key)
-            if val:
-                eps_parts.append(f"{label}: {val}")
-        if eps_parts:
-            abstract_parts.append(" | ".join(eps_parts))
-
-        abstract = "\n".join(abstract_parts)
+        # Institution, type, page count and forecasts are metadata, not a research abstract.
+        abstract = None
 
         source_url = DETAIL_BASE.format(info_code=info_code) if info_code else None
 
@@ -341,11 +359,11 @@ class EastMoneySource(BaseSource):
         if criteria.date_to:
             date_to = criteria.date_to.strftime("%Y-%m-%d")
         else:
-            date_to = datetime.now().strftime("%Y-%m-%d")
+            date_to = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         if criteria.date_from:
             date_from = criteria.date_from.strftime("%Y-%m-%d")
         else:
-            date_from = (datetime.now() - timedelta(days=180)).strftime("%Y-%m-%d")
+            date_from = (datetime.now(timezone.utc) - timedelta(days=180)).strftime("%Y-%m-%d")
 
         return date_from, date_to

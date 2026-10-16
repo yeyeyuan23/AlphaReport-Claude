@@ -22,7 +22,10 @@ def main():
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s")
     from reportagent.services.batch_classification import ClassificationOptions, classify_async
 
-    asyncio.run(classify_async(ClassificationOptions(**vars(args))))
+    audit = asyncio.run(classify_async(ClassificationOptions(**vars(args))))
+    if audit["failed"]:
+        logging.error("Classification failed for papers %s: %s", audit["failed_ids"], audit["errors"])
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

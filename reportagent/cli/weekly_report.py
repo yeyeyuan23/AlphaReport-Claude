@@ -13,14 +13,18 @@ def main():
     parser.add_argument("--receive-type", type=str, default="",
                         choices=["", "open_id", "chat_id"], help="接收者类型")
     parser.add_argument("--output", type=str, default=None, help="将周报输出到文件")
-    parser.add_argument("--no-llm", action="store_true", help="跳过 LLM 生成，使用模板")
+    parser.add_argument("--no-llm", action="store_true", help="不刷新模型评估；过期或缺失的证据显示待核验")
 
+    parser.add_argument("--max-reviews", type=int, default=12, help="全文评估数量，1–12")
+    parser.add_argument("--force-review", action="store_true", help="强制刷新全文评估")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s")
     from reportagent.services.weekly_report import WeeklyReportOptions, run_weekly_report
 
-    run_weekly_report(WeeklyReportOptions(**vars(args)))
+    result = run_weekly_report(WeeklyReportOptions(**vars(args)))
+    if result["status"] in {"failed", "partial"}:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

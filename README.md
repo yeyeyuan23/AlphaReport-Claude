@@ -87,9 +87,9 @@ CLAUDE_BOT_MODEL=deepseek-v4-pro
 | 飞书普通聊天 | `CLAUDE_BOT_MODEL`；机器人会把 `DEEPSEEK_*` 映射给 Claude Code 子进程 |
 | 单篇、相关性初筛和全文评估 | Python `LLMClient` 读取 `configs/app.yaml` 的 `llm` 设置；分析阶段及评估要求由 `skills/` 管理 |
 | 日报排版 | 从保存的评估结果填充 `skills/daily-report/briefing.md`，此步不调用模型 |
-| 周报的简报生成 | 调用 `claude`，使用运行账户的环境与 `.claude-bot` 配置；失败时回退论文列表 |
+| 周报的简报生成 | Python 模型 API 刷新过期相关性和全文评估，再从保存的证据填充 `skills/weekly-report/briefing.md` |
 
-普通聊天和周报需要可非交互运行的 Claude Code；日报的相关性筛选、全文评估使用 Python 模型 API。周报没有自动复用聊天适配器的 DeepSeek 环境映射。
+普通聊天需要可非交互运行的 Claude Code；单篇、批量分析以及日/周报的相关性筛选和全文评估使用配置的 Python 模型 API。周报复用全文评估，不再单独调用 Claude 改写研究结论。
 
 ### 3. 启动
 
@@ -148,8 +148,8 @@ bash scripts/ops/run_bot.sh           # 只启动飞书机器人
 | 来源 | 适用方式 | 全文情况 |
 |---|---|---|
 | arXiv | 关键词搜索、日期范围、`--broad` 广泛拉取量化金融论文 | 尝试下载 PDF；一般采集失败时可能只保存摘要 |
-| 东方财富 | 券商研报元数据、机构、标的等 | 当前以摘要和原文链接为主 |
-| BigQuant | 指定 Wiki 合集与文章 | 当前以摘要和链接为主，不自动取得 PDF 全文 |
+| 东方财富 | 券商研报、机构、标的等 | 取得真实文章正文，优先下载可访问的公开 PDF |
+| BigQuant | 指定 Wiki 合集与文章 | 提取文章正文或公开 PDF 附件；提取明确的原报告或文章发表日期，仅有更新时间时保留未知 |
 | 本地 PDF | 递归扫描 `sources.local_pdf.library_path`，默认 `data/pdf_library/` | 提取本地文件文本，按已安装解析器增强 |
 
 ```bash
@@ -203,7 +203,7 @@ FEISHU_WEEKLY_PUSH_TYPE=chat_id
 ALPHAREPORT_BASE_URL=https://your-report-site.example
 ```
 
-`open_id` 适合指定个人，`chat_id` 适合指定会话/群。多个目标用逗号分隔；CLI 的 `--receive-ids`、`--receive-type` 优先。周报未设置目标时会复用日报目标，但**接收者类型应显式配置**，不要依赖自动跟随。
+`open_id` 适合指定个人，`chat_id` 适合指定会话/群。多个目标用逗号分隔；CLI 的 `--receive-ids`、`--receive-type` 优先。周报未设置目标时同时复用日报目标和接收者类型；设置周报目标时使用周报类型（默认 `chat_id`）。
 
 详情链接需要收件人的设备能够访问 `ALPHAREPORT_BASE_URL`；本机的 `localhost` 链接不能直接供其他设备访问。
 
@@ -230,7 +230,7 @@ ALPHAREPORT_BASE_URL=https://your-report-site.example
 
 ### 周报
 
-按发表日期查询上一个完整 **UTC 周一至周日**的论文，不自动采集，也不限于精选。突出展示高分论文，生成周报或模板列表后发送。
+按发表日期查询上一个完整 **UTC 周一至周日**的全部库中论文，不自动重复采集，也不限于精选。默认通过配置的模型 API 更新过期相关性与最多 12 篇全文评估，复用保存的证据分层排版；只凭摘要相关性不能进入重点推荐。缺正文、材料不足或引文待核验的条目单独列出。`--max-reviews` 可设 1–12，`--force-review` 刷新评估，`--no-llm` 仅读取缓存，过期或缺失的评估保留待核验。
 
 ```bash
 # 不调用模型的模板预览；--weeks-ago 0 为上周，1 为上上周
@@ -392,7 +392,9 @@ PY
 .venv/bin/python -m reportagent.cli.skills show analyze-report
 ```
 
-内置任务只有 `skills/` 一份来源，Claude Code 与两种 LangGraph Agent 共享读取。分析共用 `analyze-report/grounding.md` 的证据规则；`analyze-report/quality-review.md` 定义全文评估，`paper-selection/` 定义摘要相关性初筛。`daily-report/briefing.md` 和 `analyze-report/single-brief.md` 是确定性排版模板，不是模型提示词。修改研究判断应修改对应评估资源；修改排版不应改动已保存的证据。
+内置任务只有 `skills/` 一份来源，Claude Code 与两种 LangGraph Agent 共享读取。分析共用 `analyze-report/grounding.md` 的证据规则；`analyze-report/quality-review.md` 定义全文评估，`paper-selection/` 定义摘要相关性初筛。摘要汇总的提示词和各深度长度预算位于 `analyze-report/summary.yaml`。`daily-report/briefing.md`、`weekly-report/briefing.md` 和 `analyze-report/single-brief.md` 是确定性排版模板，不是模型提示词。修改研究判断应修改对应评估资源；修改排版不应改动已保存的证据。
+
+分析与质量评估默认覆盖完整提取文本（最多 240,000 字符），以带偏移的文本段组织；超过上限会明确停止或待核验，不截前半篇冒充全文。引文核验只容许可追溯的空白、英文连字与安全断行还原，保存原始文本位置；删句、改数学符号仍被拒绝。材料不足独立于不相关，补全文/摘要后重新评估。模型、任务资源、分析深度或来源内容变化会令缓存失效；失败刷新保留原成功结果。
 
 `CLAUDE.md` 是编程 Agent 的项目指南；技能说明不能替代代码中的权限、完整性校验和回执。配置归属见 [configs/README.md](configs/README.md)，脚本用途与旧命令迁移见 [scripts/README.md](scripts/README.md)。
 

@@ -32,7 +32,7 @@
 # 2. 扩充近期资料，再用真实模型重新分类；检查 classify-library.json 中的标签
 .venv/bin/python -m tests.acceptance.workflows collect --run-dir data/acceptance/my-run --label recent-collection --days 7 --max-per-source 6
 .venv/bin/python -m tests.acceptance.workflows classify --run-dir data/acceptance/my-run
-# 按实际分类选择一类；覆盖整类，已分析的默认跳过，先确认预计调用量
+# 按实际分类选择一类；仅复用深度、模型、资源和原文一致的分析，先确认预计调用量
 .venv/bin/python -m tests.acceptance.workflows batch --run-dir data/acceptance/my-run --topic portfolio_optimization --depth standard
 # 3. 对整个库重新做摘要相关性评分；--review 再对所有过线候选做全文评估
 .venv/bin/python -m tests.acceptance.workflows score --run-dir data/acceptance/my-run --review
@@ -43,7 +43,7 @@
 
 `score` 不受近期日期或默认 200 条限制，也会重评已有分数。它验证的是摘要相关性；`--review` 才执行有全文依据的质量评估。数据量大时先查看库规模，避免一次触发过多调用。`batch --topic` 使用完整分类标签匹配；`evidence_scope` 区分全文与摘要分析，不能把摘要分析称为全文精读。
 
-周报模型验收会显式复用机器人的 DeepSeek 凭据映射，并固定配置模型；原周报 CLI 本身没有这层映射。结果记录是否请求模型、是否退回模板、资料来源和文章 ID。BigQuant 当前没有发表日期，东方财富通常只有机构/页数等元数据；这些来源的连通不能代表取得了近期论文全文。
+周报使用配置的 Python 模型 API 刷新相关性与全文评估，再以保存证据排版；`--no-llm` 不调用模型，缺失或过期评估显示待核验。结果记录刷新审计、来源、文章 ID 与预览状态。BigQuant 和东方财富取得可访问的正文或 PDF，附件失效时记录错误；仅有更新时间的条目仍可能缺发表日期。来源连通不能代表已穷尽所有近期论文，摘要相关性也不代表研究质量。
 
 ## 如何评阅内容
 

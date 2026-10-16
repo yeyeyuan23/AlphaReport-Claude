@@ -69,7 +69,7 @@ async def score(args):
             await client._client.close()
         report_ids = [p.id for p in papers]
     save(args.run_dir, f"{args.label}-scores.json", scores)
-    review_ids = [r["id"] for r in scores if r["relevance"] >= 6]
+    review_ids = [r["id"] for r in scores if r.get("relevance") is not None and r["relevance"] >= 6]
     evaluations = await review_report_ids(review_ids) if args.review else {}
     records = library_snapshot(args.run_dir, args.label)
     for r in records:
@@ -81,7 +81,8 @@ async def score(args):
     return {"library_ids": report_ids, "stats": stats, "failed_batches": failures, "model_calls": calls,
             "review_requested": args.review, "review_ids": review_ids if args.review else [],
             "review_tiers": Counter(e.get("tier") for e in evaluations.values()),
-            "all_scored": len(results) == len(report_ids) and not failures and stats["errors"] == 0}
+            "all_processed": len(results) == len(report_ids) and not failures and stats["errors"] == 0,
+            "all_scored": stats["total_scored"] == len(report_ids) and not failures and stats["errors"] == 0}
 
 
 async def batch(args):
@@ -94,10 +95,10 @@ async def batch(args):
 
 async def classify(args):
     from reportagent.services.batch_classification import ClassificationOptions, classify_async
-    await classify_async(ClassificationOptions(all=True, llm=True))
+    audit = await classify_async(ClassificationOptions(all=True, llm=True))
     records = library_snapshot(args.run_dir, args.label)
     failed = [r["id"] for r in records if not r["topics"] or not r["classification_confidence"]]
-    return {"library_count": len(records), "missing_classification_ids": failed,
+    return {"audit": audit, "library_count": len(records), "missing_classification_ids": failed,
             "topics": Counter(t for r in records for t in (r["topics"] or "").split(",") if t)}
 
 
@@ -111,25 +112,15 @@ def weekly(args):
     save(args.run_dir, f"{args.label}-input.json", papers)
     preview = args.run_dir / f"{args.label}.md"
     options = WeeklyReportOptions(dry_run=True, output=str(preview), no_llm=not args.llm_weekly)
-    # The production weekly entry does not map DeepSeek credentials. This explicit
-    # acceptance setup reuses the bot mapping, and records that adjustment below.
-    env = {}
-    if args.llm_weekly:
-        from reportagent.bot.claude import claude_environment
-        if not os.environ.get("DEEPSEEK_API_KEY") or not get_llm_model().startswith("deepseek"):
-            raise ValueError("Live weekly requires the configured DeepSeek account/model")
-        env = claude_environment()
-        env.update(ANTHROPIC_MODEL=get_llm_model(),
-                   ANTHROPIC_DEFAULT_OPUS_MODEL=get_llm_model(),
-                   ANTHROPIC_DEFAULT_SONNET_MODEL=get_llm_model(),
-                   ANTHROPIC_DEFAULT_HAIKU_MODEL=get_llm_model())
-    with patch.dict(os.environ, env), redirect_stdout(io.StringIO()):
-        run_weekly_report(options)
+    with redirect_stdout(io.StringIO()):
+        audit = run_weekly_report(options)
+    papers = get_weekly_papers(start, end)
+    save(args.run_dir, f"{args.label}-input.json", papers)
     text = preview.read_text(encoding="utf-8") if preview.exists() else ""
     return {"start": start, "end": end, "paper_ids": [p["id"] for p in papers],
             "sources": Counter(p["source"] for p in papers), "collects_sources": False,
-            "llm_requested": args.llm_weekly, "explicit_deepseek_environment": bool(env),
-            "fallback": bool(text) and text == fallback_weekly_report(papers, first, last),
+            "llm_requested": args.llm_weekly, "explicit_deepseek_environment": False, "audit": audit,
+            "fallback": not args.llm_weekly, "renderer": "saved_evidence",
             "empty": not papers, "preview_chars": len(text), "sent": False}
 
 
@@ -147,7 +138,7 @@ async def main():
     parser.add_argument("--topic")
     parser.add_argument("--depth", choices=["quick", "standard", "deep"], default="standard")
     parser.add_argument("--review", action="store_true", help="Review every relevant library paper against full text")
-    parser.add_argument("--llm-weekly", action="store_true", help="Generate weekly preview with own DeepSeek via Claude Code")
+    parser.add_argument("--llm-weekly", action="store_true", help="Refresh weekly evidence with configured Python model API")
     args = parser.parse_args()
     args.label = args.label or args.stage
     if Path(args.label).name != args.label:
@@ -162,7 +153,7 @@ async def main():
     started = datetime.now(timezone.utc).isoformat()
     # Archive an interrupted/failed run's evidence too; no automatic quality pass.
     try:
-        result = (weekly(args) if args.stage == "weekly" else {} if args.stage == "snapshot"
+        result = (await asyncio.to_thread(weekly, args) if args.stage == "weekly" else {} if args.stage == "snapshot"
                   else await {"collect": collect, "classify": classify, "score": score, "batch": batch}[args.stage](args))
         save(args.run_dir, f"{args.label}-result.json", {
             "started": started, "completed": datetime.now(timezone.utc).isoformat(),

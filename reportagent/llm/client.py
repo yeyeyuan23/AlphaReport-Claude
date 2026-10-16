@@ -148,28 +148,37 @@ class LLMClient:
         self, messages: list[dict[str, str]], temperature: float, max_tokens: int,
         model: str | None = None,
     ) -> str:
-        response = await self._client.chat.completions.create(
-            model=model or self.model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        return response.choices[0].message.content or ""
+        return await self._openai_text({
+            "model": model or self.model, "messages": messages,
+            "temperature": temperature, "max_tokens": max_tokens,
+        })
 
     async def _chat_json_openai(
         self, messages: list[dict[str, str]], temperature: float, max_tokens: int,
         model: str | None = None,
     ) -> dict[str, Any]:
-        patched = self._inject_json_instruction(messages)
-        response = await self._client.chat.completions.create(
-            model=model or self.model,
-            messages=patched,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
-        )
-        content = response.choices[0].message.content or "{}"
+        content = await self._openai_text({
+            "model": model or self.model, "messages": self._inject_json_instruction(messages),
+            "temperature": temperature, "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"},
+        })
         return self._safe_json_parse(content)
+
+    async def _openai_text(self, kwargs: dict) -> str:
+        try:
+            response = await self._client.chat.completions.create(**kwargs)
+        except Exception:
+            self.calls.append({"model": kwargs["model"], "complete": False})
+            raise
+        choice = response.choices[0]
+        content = choice.message.content or ""
+        complete = choice.finish_reason == "stop" and bool(content.strip())
+        self.calls.append({"model": response.model, "stop_reason": choice.finish_reason,
+                           "input_tokens": response.usage.prompt_tokens,
+                           "output_tokens": response.usage.completion_tokens, "complete": complete})
+        if not complete:
+            raise ValueError(f"Incomplete model response: {choice.finish_reason}")
+        return content
 
     # --- Anthropic / Claude ---
 

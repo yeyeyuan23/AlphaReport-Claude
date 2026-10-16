@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import asyncio
 import json
+import hashlib
 import logging
 
 
@@ -17,8 +18,37 @@ from reportagent.models.database import Report
 from reportagent.llm.client import LLMClient
 from reportagent.agents.analysis_agent import AnalysisAgent
 from reportagent.services.one_report import validate_analysis
+from reportagent.services.paper_scoring import has_screening_material
+from reportagent.skills.registry import skill_resource
+from reportagent.utils.config import get_llm_model, get_llm_base_url, get_llm_provider
 
 logger = logging.getLogger("analyze")
+
+
+def analysis_cache_fingerprint(report, depth: str) -> str:
+    """A cache represents this purpose, source snapshot and effective model policy."""
+    resources = {name: skill_resource("analyze-report", name).read_text(encoding="utf-8")
+                 for name in ("analysis.yaml", "summary.yaml", "grounding.md")}
+    payload = {"schema": 1, "depth": depth, "model": get_llm_model(),
+               "provider": get_llm_provider(), "endpoint": get_llm_base_url(),
+               "resources": resources,
+               "paper": {key: getattr(report, key, None) for key in (
+                   "title", "abstract", "full_text", "has_full_text", "arxiv_id", "equations_json")}}
+    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def _usable_cache(raw: str | None, fingerprint: str, depth: str) -> bool:
+    try:
+        data = json.loads(raw or "null")
+        if not isinstance(data, dict) or data.get("analysis_fingerprint") != fingerprint or data.get("depth") != depth:
+            return False
+        if depth == "quick":
+            return all(isinstance(data.get(key), str) and data[key].strip()
+                       for key in ("research_question", "core_contribution", "summary"))
+        validate_analysis(data)
+        return True
+    except (ValueError, TypeError):
+        return False
 
 
 @dataclass(frozen=True)
@@ -39,6 +69,8 @@ async def run_analysis(options: AnalysisOptions) -> dict:
     ``analyzed_ids``, ``skipped_ids`` and ``failed_ids`` partition that selection.
     Only the current paper's model calls participate in its completeness check.
     """
+    if options.depth not in {"quick", "standard", "deep"}:
+        raise ValueError("depth must be quick, standard or deep")
     if options.topic is not None and (not options.topic.strip() or "," in options.topic):
         raise ValueError("topic must be one nonempty classification token")
     if options.recent is not None and options.recent < 1:
@@ -85,12 +117,13 @@ async def run_analysis(options: AnalysisOptions) -> dict:
         for i, r in enumerate(reports):
             evidence_scope = "full_text" if r.has_full_text and (r.full_text or "").strip() else "abstract"
             audit["evidence_scope_by_id"][r.id] = evidence_scope
-            if r.analysis_json and not options.force:
+            fingerprint = analysis_cache_fingerprint(r, options.depth)
+            if not options.force and _usable_cache(r.analysis_json, fingerprint, options.depth):
                 audit["skipped_ids"].append(r.id)
                 continue
 
             full_text = (r.full_text if evidence_scope == "full_text" else r.abstract) or ""
-            if not any(character.isalnum() for character in full_text):
+            if not has_screening_material({"title": r.title, "abstract": full_text}):
                 logger.warning(f"  [{i+1}/{len(reports)}] SKIP (no text): {r.title[:50]}")
                 audit["skipped_ids"].append(r.id)
                 continue
@@ -105,6 +138,7 @@ async def run_analysis(options: AnalysisOptions) -> dict:
                     abstract=r.abstract or "",
                     full_text=full_text,
                     depth=options.depth,
+                    equations_json=r.equations_json,
                 )
                 if options.depth == "quick":
                     if not all(value.strip() for value in (
@@ -117,7 +151,8 @@ async def run_analysis(options: AnalysisOptions) -> dict:
                 if any(call.get("complete") is not True for call in calls):
                     raise ValueError("存在失败或截断的模型调用，停止保存本篇分析")
                 analysis_dict = result.model_dump()
-                analysis_dict.update(evidence_scope=evidence_scope, model_calls=calls)
+                analysis_dict.update(evidence_scope=evidence_scope, model_calls=calls,
+                                     depth=options.depth, analysis_fingerprint=fingerprint)
                 kc = _map_analysis_to_knowledge_card(analysis_dict)
                 kc["topics"] = [t.strip() for t in (r.topics or "").split(",") if t.strip()]
                 kc["asset_classes"] = [t.strip() for t in (r.asset_classes or "").split(",") if t.strip()]

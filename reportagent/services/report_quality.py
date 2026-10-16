@@ -6,7 +6,6 @@ import hashlib
 import json
 import logging
 import math
-import re
 from collections import deque
 from datetime import datetime, timezone
 from typing import Literal
@@ -15,11 +14,12 @@ from pydantic import BaseModel, Field, ConfigDict
 
 from reportagent.skills.registry import skill_resource
 from reportagent.utils.config import get_llm_model, get_llm_base_url, get_llm_provider
-from reportagent.services.paper_scoring import scoring_fingerprint
+from reportagent.services.paper_scoring import scoring_fingerprint, screening_is_current
+from reportagent.services.text_evidence import locate_quote, text_chunks
 
 logger = logging.getLogger(__name__)
-MAX_REVIEW_CHARS = 60000
-SCHEMA_VERSION = 2
+MAX_REVIEW_CHARS = 240000
+SCHEMA_VERSION = 3
 TIER_LABELS = {"focus": "重点阅读", "browse": "值得浏览", "pending": "待核验", "exclude": "不推荐"}
 
 
@@ -54,10 +54,6 @@ def source_category(source: str) -> str:
     return "other"
 
 
-def _normalized(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip()
-
-
 def current_relevance(paper: dict) -> float | None:
     """Legacy composite scores cannot qualify as a current direction assessment."""
     try:
@@ -65,23 +61,26 @@ def current_relevance(paper: dict) -> float | None:
     except (ValueError, TypeError):
         return None
     value = paper.get("selection_relevance")
-    if (not isinstance(provenance, dict) or provenance.get("fingerprint") != scoring_fingerprint()
+    if (not screening_is_current(paper) or provenance.get("status") != "scored"
             or isinstance(value, bool) or not isinstance(value, (int, float))
             or not math.isfinite(value) or not 0 <= value <= 10):
         return None
     return float(value)
 
 
-def review_fingerprint(paper: dict, model: str, max_chars: int = MAX_REVIEW_CHARS) -> str:
+def review_fingerprint(paper: dict, model: str, max_chars: int = MAX_REVIEW_CHARS, *, instructions: str | None = None) -> str:
+    relevance = paper.get("selection_relevance", paper.get("selection_score"))
+    if isinstance(relevance, (int, float)) and not isinstance(relevance, bool):
+        relevance = float(relevance)  # SQLite REAL and JSON integers represent the same score.
     payload = {"schema": SCHEMA_VERSION, "model": model, "max_chars": max_chars,
                "endpoint": get_llm_base_url(), "provider": get_llm_provider(),
                "source": paper.get("source"), "revision": paper.get("arxiv_id"),
                "text": paper.get("full_text", ""), "title": paper.get("title"),
-               "abstract": paper.get("abstract"), "relevance": paper.get("selection_relevance", paper.get("selection_score")),
+               "abstract": paper.get("abstract"), "relevance": relevance,
                "selection_reason": paper.get("selection_reason"),
                "selection_provenance": paper.get("selection_provenance_json"),
                "current_scoring_rubric": scoring_fingerprint(),
-               "prompt": skill_resource("analyze-report", "quality-review.md").read_text(encoding="utf-8")}
+               "prompt": instructions if instructions is not None else skill_resource("analyze-report", "quality-review.md").read_text(encoding="utf-8")}
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
@@ -100,8 +99,14 @@ async def evaluate_paper(paper: dict, llm, *, max_chars: int = MAX_REVIEW_CHARS)
     text = paper.get("full_text") or ""
     if not paper.get("has_full_text") or len(text.strip()) < 1000:
         return pending_review(paper, "未取得可用全文；摘要只能用于相关性初筛。")
-    content = text[:max_chars]
-    chunks = {f"C{i // 4000 + 1:03}": content[i:i + 4000] for i in range(0, len(content), 4000)}
+    if max_chars < 1:
+        raise ValueError("max_chars must be positive")
+    if len(text) > max_chars:
+        result = pending_review(paper, f"全文 {len(text)} 字符超过可用输入上限 {max_chars}；未发送部分文本，需提高限额或分批完整阅读。")
+        result.update(input_chars=0, full_text_chars=len(text))
+        return result
+    content = text
+    chunks = text_chunks(content)
     instructions = skill_resource("analyze-report", "quality-review.md").read_text(encoding="utf-8")
     prompt = json.dumps({"title": paper.get("title"), "source_category": source_category(paper.get("source", "")),
                          "abstract": paper.get("abstract"), "relevance_reason": paper.get("selection_reason"),
@@ -114,17 +119,14 @@ async def evaluate_paper(paper: dict, llm, *, max_chars: int = MAX_REVIEW_CHARS)
     issues, rejected = [], []
 
     def check(item):
-        quote = _normalized(item["quote"])
-        if quote not in _normalized(chunks.get(item["chunk_id"], "")):
-            # Correct a locator only when the exact words exist in another chunk.
-            actual = next((key for key, value in chunks.items() if quote in _normalized(value)), None)
-            if actual:
-                item = {**item, "original_chunk_id": item["chunk_id"], "chunk_id": actual}
-            else:
-                issues.append(f"引文未能定位：{item['chunk_id']}")
-                rejected.append({**item, "verified": False})
-                return None
-        return {**item, "verified": True, "locator": f"提取文本段 {item['chunk_id']}"}
+        located = locate_quote(content, item["quote"], item["chunk_id"])
+        if located is None:
+            issues.append(f"引文未能定位：{item['chunk_id']}")
+            rejected.append({**item, "verified": False})
+            return None
+        if located["chunk_id"] != item["chunk_id"]:
+            item = {**item, "original_chunk_id": item["chunk_id"]}
+        return {**item, **located, "verified": True}
 
     review["method"] = check(review["method"])
     for field in ("findings", "strengths"):
@@ -151,7 +153,7 @@ async def evaluate_paper(paper: dict, llm, *, max_chars: int = MAX_REVIEW_CHARS)
             "source_category": source_category(paper.get("source", "")), "text_complete": complete,
             "input_chars": len(content), "full_text_chars": len(text), "relevance": relevance,
             "relevance_reason": paper.get("selection_reason", "") if relevance is not None else "尚未按当前研究方向完成相关性初筛。", "model": llm.model,
-            "fingerprint": review_fingerprint(paper, llm.model, max_chars),
+            "fingerprint": review_fingerprint(paper, llm.model, max_chars, instructions=instructions),
             "reviewed_at": datetime.now(timezone.utc).isoformat()}
 
 
@@ -200,6 +202,8 @@ async def review_report_ids(report_ids: list[int], *, force: bool = False) -> di
                     continue
                 paper = snapshot(row)
                 raw_cache = row.evaluation_json
+            refresh_failed = False
+            cached = None
             try:
                 try:
                     cached = json.loads(raw_cache or "null")
@@ -241,6 +245,7 @@ async def review_report_ids(report_ids: list[int], *, force: bool = False) -> di
                         llm = LLMClient(thinking="disabled")
                     result = await asyncio.wait_for(evaluate_paper(paper, llm), timeout=240)
             except Exception as exc:
+                refresh_failed = True
                 logger.warning("Report %s review failed: %s", rid, type(exc).__name__)
                 result = pending_review(paper, f"全文评估未完成（{type(exc).__name__}），可重试。")
             with factory() as session:
@@ -251,8 +256,11 @@ async def review_report_ids(report_ids: list[int], *, force: bool = False) -> di
                 if snapshot(row) != {key: paper[key] for key in fields}:
                     results[rid] = pending_review(snapshot(row), "分析期间原文或筛选结果已更新，请重新评估。")
                     continue
-                row.evaluation_json = json.dumps(result, ensure_ascii=False)
-                session.commit()
+                if refresh_failed and cached and cached.get("status") == "reviewed" and cached.get("tier") != "pending":
+                    result["previous_review_preserved"] = True
+                else:
+                    row.evaluation_json = json.dumps(result, ensure_ascii=False)
+                    session.commit()
             results[rid] = result
     finally:
         if llm is not None:

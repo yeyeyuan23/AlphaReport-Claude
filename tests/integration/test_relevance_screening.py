@@ -42,7 +42,8 @@ class OfflineModel:
 
 
 def score(response, papers=None):
-    papers = papers or [{"title": "Paper", "abstract": "Tail risk"}]
+    papers = papers or [{"title": "Paper"}]
+    papers = [{"abstract": "We study portfolio tail risk using conditional forecasting and compare risk estimates.", **paper} for paper in papers]
     return asyncio.run(scoring.score_papers_batch(OfflineModel(response), papers))
 
 
@@ -137,7 +138,7 @@ def memory_db(monkeypatch):
     monkeypatch.setattr(scoring, "init_db", lambda: None)
     monkeypatch.setattr(scoring, "get_session_factory", lambda: factory)
     with factory() as session:
-        session.add(Report(title="Paper", source="arxiv", content_hash="fixture"))
+        session.add(Report(title="Paper", source="arxiv", content_hash="fixture", abstract="We study portfolio tail risk using conditional forecasting and compare risk estimates."))
         session.commit()
     yield factory
     engine.dispose()

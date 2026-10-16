@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 
 from reportagent.classifiers.taxonomy import load_taxonomy
 from reportagent.llm.client import LLMClient
@@ -26,10 +27,10 @@ SYSTEM_PROMPT = (
     "任务：根据研报标题和摘要，从多个维度为研报打标签。\n"
     "重要规则：\n"
     "1. 每个维度可以且应该选择多个匹配的值（多标签），不要只选一个\n"
-    "2. 只要研报内容涉及该标签就应该选上，宁多勿少\n"
+    "2. 标签必须有标题或摘要明确依据；材料不足时允许留空，不推测研究细节\n"
     "3. custom_tags 是你基于摘要内容提取的具体方法/技术标签（中文），"
     "例如：\"LSTM选股\"、\"风险平价\"、\"动量因子\"、\"期权隐含波动率\"。"
-    "每篇研报应至少提取 2-5 个 custom_tags\n"
+    "仅返回有资料依据的 custom_tags，标题/摘要不足时返回空列表\n"
     "4. 如果研报语言为中文，custom_tags 用中文；如果为英文，用英文\n"
 )
 
@@ -52,7 +53,7 @@ class LLMClassifier:
             '- "frequencies": list，交易频率值\n'
             '- "topics": list，研究主题值（多选！一篇研报通常涉及 2-4 个主题）\n'
             '- "custom_tags": list，从摘要中提取的具体方法/技术/模型标签，'
-            '如 ["多因子选股", "XGBoost", "沪深300增强"]，至少 2 个\n'
+            '如 ["多因子选股", "XGBoost", "沪深300增强"]；没有依据时返回 []\n'
             '- "confidence": float 0-1\n'
         )
 
@@ -66,7 +67,7 @@ class LLMClassifier:
             return self._parse_result(result)
         except Exception as e:
             logger.warning("LLM classification failed: %s", e)
-            return ClassificationResult(confidence=0.0, method="llm")
+            raise
 
     def _format_taxonomy(self, taxonomy: dict) -> str:
         lines = []
@@ -80,12 +81,26 @@ class LLMClassifier:
         return "\n".join(lines)
 
     def _parse_result(self, data: dict) -> ClassificationResult:
-        markets = self._safe_enum_list(data.get("markets", []), Market)
-        asset_classes = self._safe_enum_list(data.get("asset_classes", []), AssetClass)
-        frequencies = self._safe_enum_list(data.get("frequencies", []), Frequency)
-        topics = self._safe_enum_list(data.get("topics", []), Topic)
-        custom_tags = data.get("custom_tags", [])
-        confidence = float(data.get("confidence", 0.5))
+        if not isinstance(data, dict):
+            raise ValueError("Classification must be an object")
+        for field, enum_cls in _ENUM_MAP.items():
+            values = data.get(field)
+            valid = {entry.value for entry in enum_cls}
+            if not isinstance(values, list) or any(not isinstance(v, str) or v not in valid for v in values):
+                raise ValueError(f"{field} must contain only valid taxonomy values")
+        custom_tags = data.get("custom_tags")
+        if not isinstance(custom_tags, list) or any(not isinstance(v, str) or not v.strip() for v in custom_tags):
+            raise ValueError("custom_tags must be a list of nonempty strings")
+        if not custom_tags and not any(data[field] for field in _ENUM_MAP):
+            raise ValueError("Model returned no usable classification; existing tags must be retained")
+        confidence = data.get("confidence")
+        if (isinstance(confidence, bool) or not isinstance(confidence, (int, float))
+                or not math.isfinite(confidence) or not 0 <= confidence <= 1):
+            raise ValueError("confidence must be a finite number between 0 and 1")
+        markets = self._safe_enum_list(data["markets"], Market)
+        asset_classes = self._safe_enum_list(data["asset_classes"], AssetClass)
+        frequencies = self._safe_enum_list(data["frequencies"], Frequency)
+        topics = self._safe_enum_list(data["topics"], Topic)
 
         return ClassificationResult(
             markets=markets,

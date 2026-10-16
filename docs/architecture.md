@@ -70,10 +70,16 @@ Plan-Execute 都通过 registry 加载完整技能说明；CLI 和 `/api/v1/skil
   将保存的评估填入 `skills/daily-report/briefing.md`；网页读取同一份评估，显示引文和局限。
   排版不再调用模型改写研究结论。`--dry-run` 可更新评估和运行记录，但不投递、不写发送回执。
 - **飞书周报**：仍使用独立的 [weekly_report.py](../reportagent/services/weekly_report.py)，
-  查询上一个完整 UTC 周、生成周报或列表并发送，尚无日报的按目标去重回执。
+  查询上一个完整 UTC 周的全部库中资料，以配置的 Python API 刷新过期相关性和最多
+  12 篇尚未核验的全文评估；已有有效评估不消耗这次预算。再复用同一评估和
+  `skills/weekly-report/briefing.md` 模板分层排版，不调用 Claude 重写结论。
+  缺失/失效材料单列，相关性不能充当质量；尚无日报的按目标去重回执。
 
 分析技能中的 `grounding.md` 约束原文证据与推断，`quality-review.md` 定义质量评估；
-`daily-report/briefing.md` 是格式模板。通用批量分析与单篇分析仍使用各自的阶段配置。
+`daily-report/briefing.md` 和 `weekly-report/briefing.md` 是格式模板。
+通用批量分析与单篇分析仍使用各自的阶段配置，摘要汇总共用 `summary.yaml`。
+完整提取文本最多 240,000 字符，以带偏移文本块组织；超过限额明确待核验，不静默截断。
+PDF连字、安全英文断行和空白规范化保留原始字符位置，不放宽为删句或数学符号模糊匹配。
 修改这些资源后按相应指纹刷新缓存；模型阅读不等于复现论文实验。
 
 内置 Feishu 日报调度默认开启。Web 运行时按 `Asia/Shanghai` 工作日设定时刻

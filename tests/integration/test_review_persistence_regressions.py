@@ -32,8 +32,9 @@ def library():
 
 
 def insert(factory, rid=1, **overrides):
-    values = paper(id=rid, content_hash=str(rid), arxiv_id=f"2005.1366{rid}v1", authors='["A"]')
+    values = {"id": rid, "content_hash": str(rid), "arxiv_id": f"2005.1366{rid}v1", "authors": '["A"]'}
     values.update(overrides)
+    values = paper(**values)
     with factory() as session:
         session.add(Report(**values))
         session.commit()
@@ -114,3 +115,49 @@ def test_model_result_cannot_overwrite_concurrent_screening_change(library):
     assert results[1]["tier"] == "pending"
     with library() as session:
         assert session.get(Report, 1).evaluation_json is None
+
+
+def test_failed_forced_review_preserves_previous_successful_saved_evidence(library):
+    previous = asyncio.run(quality.evaluate_paper(paper(), PersistentModel()))
+    insert(library, evaluation_json=json.dumps(previous))
+    llm = PersistentModel()
+
+    async def failed(*args, **kwargs):
+        raise RuntimeError('provider unavailable')
+
+    llm.chat_json = failed
+    with patch.object(database, 'get_session_factory', return_value=library), patch(
+        'reportagent.llm.client.LLMClient', return_value=llm
+    ):
+        results = asyncio.run(quality.review_report_ids([1], force=True))
+    assert results[1]['tier'] == 'pending'
+    with library() as session:
+        assert json.loads(session.get(Report, 1).evaluation_json) == previous
+
+
+def test_fetching_same_revision_full_text_preserves_current_abstract_relevance(library):
+    from reportagent.services.paper_scoring import screening_is_current
+    insert(library, full_text=None, has_full_text=False)
+    with library() as session:
+        row = session.get(Report, 1)
+        before_provenance = row.selection_provenance_json
+        before_review_fingerprint = quality.review_fingerprint(vars(row), "fixture-model")
+        fetched = SearchResult(title=row.title, authors=["A"], abstract=row.abstract,
+            arxiv_id=row.arxiv_id, source=SourceType.ARXIV, full_text=TEXT,
+            source_url=f"https://arxiv.org/abs/{row.arxiv_id}")
+        assert screening_is_current(vars(row))
+    llm = PersistentModel()
+    with patch.object(database, "get_session_factory", return_value=library), patch(
+        "reportagent.llm.client.LLMClient", return_value=llm
+    ), patch.object(one_report, "collect_paper", return_value=fetched):
+        results = asyncio.run(quality.review_report_ids([1]))
+    assert results[1]['tier'] == 'focus'
+    assert results[1]['status'] == 'reviewed'
+    assert results[1]['relevance'] == 8
+    with library() as session:
+        row = session.get(Report, 1)
+        assert row.has_full_text and row.full_text == TEXT
+        assert row.selection_provenance_json == before_provenance
+        assert screening_is_current(vars(row))
+        assert quality.review_fingerprint(vars(row), "fixture-model") != before_review_fingerprint
+        assert json.loads(row.evaluation_json)['tier'] == 'focus'

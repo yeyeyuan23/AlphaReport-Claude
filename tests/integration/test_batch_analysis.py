@@ -41,7 +41,7 @@ class BatchAnalysisTests(unittest.IsolatedAsyncioTestCase):
         self.llm.calls.append({"complete": True, "model": "fixture"})
         return complete_analysis()
 
-    def add_report(self, title, *, topics="factor_model", abstract="摘要资料", full_text=None,
+    def add_report(self, title, *, topics="factor_model", abstract="We evaluate portfolio optimization with transaction costs using out-of-sample data.", full_text=None,
                    cached=None, has_full_text=False):
         with self.factory() as session:
             row = Report(title=title, source="arxiv", content_hash=title, topics=topics,
@@ -78,6 +78,16 @@ class BatchAnalysisTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["analyzed"], 0)
         self.assertIsNone(self.analysis(report_id))
         self.llm._client.close.assert_awaited_once()
+
+    async def test_metadata_or_title_only_material_never_calls_model(self):
+        ids = [self.add_report("Metadata", abstract="机构：某证券；类型：宏观；页数：10"),
+               self.add_report("Same title", abstract="Same title"),
+               self.add_report("Missing", abstract="未提供摘要"),
+               self.add_report("Fake full text", full_text="机构：某证券；类型：宏观；页数：10", has_full_text=True)]
+        result = await batch_analysis.run_analysis(batch_analysis.AnalysisOptions(all=True))
+        self.assertEqual(set(result["skipped_ids"]), set(ids))
+        self.agent.analyze_report_directly.assert_not_awaited()
+        self.assertTrue(all(self.analysis(rid) is None for rid in ids))
 
     async def test_quick_summary_does_not_require_methodology_or_assessment(self):
         report_id = self.add_report("quick complete")
@@ -131,7 +141,9 @@ class BatchAnalysisTests(unittest.IsolatedAsyncioTestCase):
         self.llm._client.close.assert_awaited_once()
 
     async def test_force_refreshes_cache_but_failed_refresh_preserves_old_analysis(self):
-        report_id = self.add_report("cached", cached=complete_analysis().model_dump_json())
+        report_id = self.add_report("cached")
+        await batch_analysis.run_analysis(batch_analysis.AnalysisOptions(report_id=report_id))
+        self.agent.analyze_report_directly.reset_mock()
         initial = await batch_analysis.run_analysis(batch_analysis.AnalysisOptions(report_id=report_id))
         self.assertEqual(initial["skipped_ids"], [report_id])
         self.assertEqual(self.agent.analyze_report_directly.await_count, 0)
@@ -143,9 +155,52 @@ class BatchAnalysisTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(failed["failed_ids"], [report_id])
         self.assertEqual(self.analysis(report_id), saved)
 
+    async def test_standard_does_not_reuse_quick_cache_and_same_depth_reuses(self):
+        report_id = self.add_report("depth cache")
+        await batch_analysis.run_analysis(batch_analysis.AnalysisOptions(report_id=report_id, depth="quick"))
+        standard = await batch_analysis.run_analysis(batch_analysis.AnalysisOptions(report_id=report_id, depth="standard"))
+        self.assertEqual(standard["analyzed_ids"], [report_id])
+        repeated = await batch_analysis.run_analysis(batch_analysis.AnalysisOptions(report_id=report_id, depth="standard"))
+        self.assertEqual(repeated["skipped_ids"], [report_id])
+
+    async def test_content_change_invalidates_otherwise_valid_analysis_cache(self):
+        report_id = self.add_report("changed evidence")
+        await batch_analysis.run_analysis(batch_analysis.AnalysisOptions(report_id=report_id))
+        with self.factory() as session:
+            session.get(Report, report_id).abstract = "Updated study evaluates dynamic portfolios with transaction costs and a new out-of-sample comparison."
+            session.commit()
+        result = await batch_analysis.run_analysis(batch_analysis.AnalysisOptions(report_id=report_id))
+        self.assertEqual(result["analyzed_ids"], [report_id])
+
+    async def test_model_change_invalidates_batch_cache(self):
+        report_id = self.add_report("changed model")
+        await batch_analysis.run_analysis(batch_analysis.AnalysisOptions(report_id=report_id))
+        with patch("reportagent.services.batch_analysis.get_llm_model", return_value="new-model"):
+            result = await batch_analysis.run_analysis(batch_analysis.AnalysisOptions(report_id=report_id))
+        self.assertEqual(result["analyzed_ids"], [report_id])
+
+    async def test_shared_summary_prompt_change_invalidates_batch_cache(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        report_id = self.add_report("changed prompt")
+        await batch_analysis.run_analysis(batch_analysis.AnalysisOptions(report_id=report_id))
+        original = batch_analysis.skill_resource
+        with TemporaryDirectory() as directory:
+            changed = Path(directory) / "summary.yaml"
+            changed.write_text(original("analyze-report", "summary.yaml").read_text() + "\n# revised prompt policy")
+            with patch.object(batch_analysis, "skill_resource", side_effect=lambda skill, name: changed if name == "summary.yaml" else original(skill, name)):
+                result = await batch_analysis.run_analysis(batch_analysis.AnalysisOptions(report_id=report_id))
+        self.assertEqual(result["analyzed_ids"], [report_id])
+
+    async def test_legacy_unfingerprinted_analysis_is_retryable(self):
+        report_id = self.add_report("legacy", cached=complete_analysis().model_dump_json())
+        result = await batch_analysis.run_analysis(batch_analysis.AnalysisOptions(report_id=report_id))
+        self.assertEqual(result["analyzed_ids"], [report_id])
+        self.assertTrue(self.analysis(report_id)["analysis_fingerprint"])
+
     async def test_abstract_evidence_is_persisted_and_full_text_flag_is_respected(self):
         abstract_id = self.add_report("abstract", full_text="摘要复制内容", has_full_text=False)
-        full_id = self.add_report("full", full_text="实际全文", has_full_text=True)
+        full_id = self.add_report("full", full_text="We evaluate actual full-text portfolio methods and report out-of-sample evidence.", has_full_text=True)
         result = await batch_analysis.run_analysis(batch_analysis.AnalysisOptions(all=True))
         self.assertEqual(self.analysis(abstract_id)["evidence_scope"], "abstract")
         self.assertEqual(self.analysis(full_id)["evidence_scope"], "full_text")

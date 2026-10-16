@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import json
 import logging
 import os
-import subprocess
+import asyncio
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -15,8 +15,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from reportagent.db.engine import init_db, get_session_factory
-from reportagent.utils.config import get_config, PROJECT_ROOT
-from reportagent.skills.registry import skill_resource
+from reportagent.utils.config import get_config, get_llm_model
+from reportagent.services.report_briefing import render_briefing
+from reportagent.services.report_quality import pending_review, review_fingerprint
 
 logger = logging.getLogger("weekly_report")
 
@@ -28,17 +29,6 @@ APP_SECRET = os.environ.get(cfg.get("app_secret_env", "FEISHU_APP_SECRET"), "")
 SERVER_HOST = os.environ.get("ALPHAREPORT_HOST", "localhost")
 SERVER_PORT = os.environ.get("ALPHAREPORT_PORT", "8000")
 UI_BASE_URL = os.environ.get("ALPHAREPORT_BASE_URL", f"http://{SERVER_HOST}:{SERVER_PORT}")
-
-FEISHU_RECEIVE_IDS = os.environ.get("FEISHU_WEEKLY_PUSH_IDS", "").split(",") if os.environ.get("FEISHU_WEEKLY_PUSH_IDS") else []
-FEISHU_RECEIVE_TYPE = os.environ.get("FEISHU_WEEKLY_PUSH_TYPE", "chat_id")
-
-# Fallback to daily push config if weekly not set
-if not FEISHU_RECEIVE_IDS or FEISHU_RECEIVE_IDS == [""]:
-    FEISHU_RECEIVE_IDS = os.environ.get("FEISHU_DAILY_PUSH_IDS", "").split(",") if os.environ.get("FEISHU_DAILY_PUSH_IDS") else []
-    FEISHU_RECEIVE_IDS = [i for i in FEISHU_RECEIVE_IDS if i]
-if not FEISHU_RECEIVE_IDS or FEISHU_RECEIVE_IDS == [""]:
-    FEISHU_RECEIVE_TYPE = os.environ.get("FEISHU_DAILY_PUSH_TYPE", "chat_id")
-
 
 # ═══════════════════════════════════════════════════
 # Date helpers — all based on published_date
@@ -52,6 +42,8 @@ class WeeklyReportOptions:
     receive_type: str = ''
     output: str | None = None
     no_llm: bool = False
+    max_reviews: int = 12
+    force_review: bool = False
 
 
 def get_previous_week_range(weeks_ago: int = 0) -> tuple[datetime, datetime, str, str]:
@@ -99,7 +91,7 @@ def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
             Report.published_date >= week_start,
             Report.published_date <= week_end,
         )
-        q = q.order_by(desc(Report.published_date)).limit(100)
+        q = q.order_by(desc(Report.published_date), Report.id)
         reports = q.all()
 
         papers = []
@@ -108,7 +100,8 @@ def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
                 "id": r.id,
                 "title": r.title or "",
                 "authors": r.authors or "",
-                "abstract": (r.abstract or "")[:300],
+                "abstract": r.abstract or "",
+                "full_text": r.full_text or "",
                 "source": r.source or "",
                 "source_url": r.source_url or "",
                 "arxiv_id": r.arxiv_id or "",
@@ -118,7 +111,12 @@ def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
                 "has_full_text": r.has_full_text,
                 "selection_score": r.selection_score or 0.0,
                 "is_selected": bool(r.is_selected),
-                "summary": (r.summary or "")[:200],
+                "selection_relevance": r.selection_relevance,
+                "selection_direction": r.selection_direction,
+                "selection_reason": r.selection_reason,
+                "selection_provenance_json": r.selection_provenance_json,
+                "evaluation_json": r.evaluation_json,
+                "pdf_url": f"https://arxiv.org/pdf/{r.arxiv_id}" if r.arxiv_id else "",
                 "ui_url": f"{UI_BASE_URL}/library/{r.id}",
             })
 
@@ -135,96 +133,90 @@ def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
 
 
 def generate_weekly_report(papers: list[dict], week_start: str, week_end: str) -> str:
-    """Generate weekly report via LLM."""
-    import shutil
-
-    claude_bin = shutil.which("claude")
-    if not claude_bin:
-        logger.error("Claude Code not found")
-        return fallback_weekly_report(papers, week_start, week_end)
-
-    # Only send top papers + brief list to LLM to reduce prompt size
-    selected = sorted(
-        [p for p in papers if p.get("selection_score", 0) >= 6.0],
-        key=lambda x: -(x.get("selection_score", 0))
-    )[:5]
-    rest = [p for p in papers if p not in selected]
-    papers_for_llm = selected + rest
-
-    papers_json = json.dumps(papers_for_llm, ensure_ascii=False, indent=2)
-    prompt = skill_resource("weekly-report", "briefing.md").read_text(encoding="utf-8").format(
-        week_start=week_start,
-        week_end=week_end,
-        total_count=len(papers),
-        papers_json=papers_json,
-    )
-
-    env = os.environ.copy()
-    env["CLAUDE_CONFIG_DIR"] = str(PROJECT_ROOT / ".claude-bot")
-
-    logger.info("Generating weekly report via Claude Code...")
-    try:
-        result = subprocess.run(
-            [claude_bin, "-p", prompt, "--print", "--output-format", "text"],
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 min for weekly
-            cwd=str(PROJECT_ROOT),
-            env=env,
-        )
-        stdout = result.stdout.strip()
-        if result.returncode == 0 and stdout:
-            logger.info(f"Weekly report generated: {len(stdout)} chars")
-            return stdout
-        else:
-            logger.error(f"Claude failed: {result.stderr[:300]}")
-            return fallback_weekly_report(papers, week_start, week_end)
-    except subprocess.TimeoutExpired:
-        logger.error("Claude timed out")
-        return fallback_weekly_report(papers, week_start, week_end)
-    except Exception as e:
-        logger.error(f"Claude error: {e}")
-        return fallback_weekly_report(papers, week_start, week_end)
+    """Render current saved assessments; never generate a second research judgment."""
+    checked = []
+    for paper in papers:
+        p = dict(paper)
+        evaluation = p.get("evaluation")
+        if not isinstance(evaluation, dict):
+            try:
+                evaluation = json.loads(p.get("evaluation_json") or "null")
+            except (ValueError, TypeError):
+                evaluation = None
+        if (not isinstance(evaluation, dict)
+                or evaluation.get("fingerprint") != review_fingerprint(p, get_llm_model())):
+            evaluation = pending_review(p, "尚无与当前原文、模型和筛选标准一致的全文评估。")
+        p["evaluation"] = evaluation
+        checked.append(p)
+    return render_briefing(checked, f"{week_start} ~ {week_end}", template_skill="weekly-report")
 
 
 def fallback_weekly_report(papers: list[dict], week_start: str, week_end: str) -> str:
-    """Fallback report without LLM."""
-    selected = sorted(
-        [p for p in papers if p.get("selection_score", 0) >= 6.0],
-        key=lambda x: -(x.get("selection_score", 0))
-    )[:5]
-    rest = [p for p in papers if p not in selected]
+    """Read cached evidence without model calls; missing/stale evidence stays pending."""
+    return generate_weekly_report(papers, week_start, week_end)
 
-    lines = [
-        f"### 📊 AlphaReport 周报",
-        f"**{week_start} ~ {week_end}** ｜ 共 {len(papers)} 篇",
-        "",
-    ]
 
-    if selected:
-        lines.append("### 🏆 精选 Top 5\n")
-        for p in selected:
-            score = p.get("selection_score", 0)
-            title = p["title"][:70]
-            url = p.get("ui_url", "")
-            pub_date = p.get("published_date", "")[:10]
-            abstract = (p.get("abstract", "") or "")[:120]
-            lines.append(f"**{title}** ⭐{score:.1f} | {pub_date}")
-            if abstract:
-                lines.append(f">{abstract[:120]}...")
-            lines.append(f"[📄 查看]({url})\n")
-
-    if rest:
-        lines.append(f"### 📄 其余 {len(rest)} 篇")
-        for p in rest[:20]:
-            title = p["title"][:60]
-            url = p.get("ui_url", "")
-            pub_date = p.get("published_date", "")[:10]
-            lines.append(f"- {title} ({pub_date}) [📄 查看]({url})")
-        if len(rest) > 20:
-            lines.append(f"... 还有 {len(rest) - 20} 篇")
-
-    return "\n".join(lines)
+async def prepare_weekly_evidence(papers: list[dict], *, max_reviews: int = 12,
+                                  force_review: bool = False) -> dict:
+    """Refresh relevance and complete reviews through the same Python API as daily."""
+    from reportagent.llm.client import LLMClient
+    from reportagent.services.paper_scoring import (
+        screening_is_current, has_screening_material, score_papers_batch, apply_scores,
+        _load_scoring_config, _configured_threshold,
+    )
+    from reportagent.services.report_quality import review_report_ids, select_candidates
+    if not 1 <= max_reviews <= 12:
+        raise ValueError("max_reviews must be between 1 and 12")
+    stale = [p for p in papers if not screening_is_current(p)]
+    audit = {"screened": 0, "pending_needs_material": 0, "review_ids": [], "failures": []}
+    if stale:
+        client = None
+        try:
+            if any(has_screening_material(p) for p in stale):
+                client = LLMClient()
+            results, failures = await score_papers_batch(client, stale, batch_size=5)
+            stats = apply_scores(results)
+            audit.update(screened=stats["total_scored"], pending_needs_material=stats["pending_needs_material"])
+            audit["failures"].extend({"stage": "screening", "count": n, "error": error}
+                                     for _, n, error in failures)
+            if stats["errors"]:
+                audit["failures"].append({"stage": "persistence", "count": stats["errors"]})
+        except Exception as error:
+            audit["failures"].append({"stage": "screening", "error": type(error).__name__})
+            logger.warning("Weekly screening failed: %s", type(error).__name__)
+        finally:
+            if client is not None:
+                await client._client.close()
+    # Reload only the requested IDs so partial scoring failures cannot use stale scores.
+    from reportagent.models.database import Report
+    with get_session_factory()() as session:
+        ids = [p["id"] for p in papers]
+        rows = session.query(Report).filter(Report.id.in_(ids)).all()
+        threshold = _configured_threshold(_load_scoring_config())
+        candidates = []
+        for row in rows:
+            if not screening_is_current(row) or row.selection_relevance is None or row.selection_relevance < threshold:
+                continue
+            snapshot = dict(vars(row))
+            try:
+                cached = json.loads(row.evaluation_json or "null")
+            except (ValueError, TypeError):
+                cached = None
+            if (not force_review and isinstance(cached, dict) and cached.get("status") == "reviewed"
+                    and cached.get("tier") != "pending"
+                    and cached.get("fingerprint") == review_fingerprint(snapshot, get_llm_model())):
+                continue  # Saved reviews remain visible without consuming new-review budget.
+            candidates.append(snapshot)
+    audit["unreviewed_candidates"] = len(candidates)
+    selected = select_candidates(candidates, max_reviews=max_reviews)
+    audit["review_ids"] = [p["id"] for p in selected]
+    reviewed = await review_report_ids(audit["review_ids"], force=force_review) if selected else {}
+    audit["review_tiers"] = {str(rid): result.get("tier") for rid, result in reviewed.items()}
+    for rid, result in reviewed.items():
+        if result.get("status") != "reviewed":
+            audit["failures"].append({"stage": "review", "id": rid,
+                                      "reason": result.get("validation_issues", [])})
+    return audit
 
 
 # ═══════════════════════════════════════════════════
@@ -258,7 +250,7 @@ def send_feishu_card(receive_id: str, report_text: str, papers: list[dict],
     elements.append({"tag": "hr"})
     elements.append({
         "tag": "note",
-        "elements": [{"tag": "plain_text", "content": "🤖 由 Claude Code 自动生成 ｜ AlphaReport 周报"}]
+        "elements": [{"tag": "plain_text", "content": "AlphaReport 周报 · 复用原文证据评估"}]
     })
 
     card = {
@@ -303,64 +295,49 @@ def send_feishu_card(receive_id: str, report_text: str, papers: list[dict],
 # ═══════════════════════════════════════════════════
 
 
-def run_weekly_report(options: WeeklyReportOptions) -> None:
-    # ── Date range ──
+def run_weekly_report(options: WeeklyReportOptions) -> dict:
     week_start, week_end, start_label, end_label = get_previous_week_range(options.weeks_ago)
-
-    # ── Receive IDs ──
-    receive_ids = FEISHU_RECEIVE_IDS
-    if options.receive_ids:
-        receive_ids = [i.strip() for i in options.receive_ids.split(",") if i.strip()]
-    receive_ids = [i for i in receive_ids if i]
-
-    receive_type = options.receive_type or FEISHU_RECEIVE_TYPE
-
+    weekly_ids = os.environ.get("FEISHU_WEEKLY_PUSH_IDS", "").strip()
+    configured_ids = weekly_ids or os.environ.get("FEISHU_DAILY_PUSH_IDS", "")
+    receive_ids = [i.strip() for i in (options.receive_ids or configured_ids).split(",") if i.strip()]
+    type_env = "FEISHU_WEEKLY_PUSH_TYPE" if weekly_ids else "FEISHU_DAILY_PUSH_TYPE"
+    receive_type = options.receive_type or os.environ.get(type_env, "chat_id")
     if not options.dry_run and not receive_ids:
-        logger.error("No receive IDs. Set FEISHU_WEEKLY_PUSH_IDS or FEISHU_DAILY_PUSH_IDS in .env")
-        raise ValueError("Invalid workflow options or missing destination")
-
-    # ── Query papers ──
-    logger.info("=" * 50)
-    logger.info(f"Weekly range: {start_label} (Mon) ~ {end_label} (Sun)")
-    logger.info("Querying by published_date (NOT created_at)...")
+        raise ValueError("Set FEISHU_WEEKLY_PUSH_IDS or FEISHU_DAILY_PUSH_IDS before delivery")
     papers = get_weekly_papers(week_start, week_end)
-
-    if not papers:
-        logger.warning(f"No papers published between {start_label} and {end_label}. Skipping push (silent).")
-        if options.dry_run:
-            print(f"\n[Dry run] No papers in range, push skipped (silent)")
-        return
-    else:
-        # ── Generate report ──
-        logger.info("=" * 50)
-        if options.no_llm:
-            logger.info("Using fallback template (--no-llm)")
-            report_text = fallback_weekly_report(papers, start_label, end_label)
-        else:
-            logger.info("Generating weekly report via LLM...")
-            report_text = generate_weekly_report(papers, start_label, end_label)
-
+    preparation = {}
+    if papers and not options.no_llm:
+        preparation = asyncio.run(prepare_weekly_evidence(
+            papers, max_reviews=options.max_reviews, force_review=options.force_review))
+        papers = get_weekly_papers(week_start, week_end)
+    text = generate_weekly_report(papers, start_label, end_label)
+    failures = preparation.get("failures", [])
+    if failures:
+        text += f"\n\n本期有 {len(failures)} 项筛选或全文核验未完成；相关条目保留待核验，可重试。"
+    unattempted = preparation.get("unreviewed_candidates", 0) - len(preparation.get("review_ids", []))
+    if unattempted > 0:
+        text += f"\n\n本次全文核验预算为 {options.max_reviews} 篇，另有 {unattempted} 篇候选尚未核验；重跑可继续处理。"
     if options.output:
-        Path(options.output).write_text(report_text, encoding="utf-8")
-        logger.info(f"Report saved to {options.output}")
-
-    # ── Push ──
+        output = Path(options.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(text, encoding="utf-8")
+    result = {"status": "preview" if options.dry_run else "empty" if not papers else "complete",
+              "week_start": start_label, "week_end": end_label, "paper_ids": [p["id"] for p in papers],
+              "model_refresh": not options.no_llm, "preparation": preparation,
+              "sent": 0, "failed_recipients": []}
     if options.dry_run:
-        logger.info("=" * 50)
-        logger.info(f"[DRY RUN] Would push to: {receive_ids}")
-        print("\n" + "=" * 60)
-        print(report_text)
-        print("=" * 60)
-        print(f"\n[DRY RUN] {len(papers)} papers, push to {len(receive_ids)} recipients")
-        return
-
-    logger.info("=" * 50)
-    logger.info(f"Pushing to {len(receive_ids)} recipients")
+        print(text)
+        return result
+    if not papers:
+        logger.info("No published papers in week %s ~ %s", start_label, end_label)
+        return result
     for rid in receive_ids:
-        success = send_feishu_card(rid, report_text, papers, start_label, end_label, receive_type)
-        if success:
-            logger.info(f"  ✓ {rid}")
+        if send_feishu_card(rid, text, papers, start_label, end_label, receive_type):
+            result["sent"] += 1
         else:
-            logger.error(f"  ✗ {rid}")
-
-    logger.info("Weekly report complete!")
+            result["failed_recipients"].append(rid)
+    if result["failed_recipients"]:
+        result["status"] = "partial" if result["sent"] else "failed"
+    elif failures:
+        result["status"] = "partial"
+    return result

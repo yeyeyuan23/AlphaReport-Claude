@@ -32,7 +32,7 @@ def analysis_fingerprint() -> str:
     """Model and task resources are part of an analysis, not just the PDF bytes."""
     from reportagent.services.report_quality import SCHEMA_VERSION
     resources = {name: skill_resource("analyze-report", name).read_text(encoding="utf-8")
-                 for name in ("one-report.yaml", "quality-review.md", "grounding.md", "single-brief.md")}
+                 for name in ("one-report.yaml", "summary.yaml", "quality-review.md", "grounding.md", "single-brief.md")}
     content = {"version": 3, "quality_schema": SCHEMA_VERSION, "model": get_llm_model(), "endpoint": get_llm_base_url(),
                "thinking": "disabled", "resources": resources}
     return hashlib.sha256(json.dumps(content, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
@@ -171,16 +171,29 @@ def store_paper(paper: SearchResult, result: AnalysisResult | None = None, evalu
         if any(getattr(stored, field) != getattr(paper, field) for field in ("arxiv_id", "title", "abstract", "full_text")):
             stored.selection_provenance_json = stored.selection_direction = stored.selection_relevance = stored.selection_reason = None
             stored.selection_score, stored.is_selected = 0.0, False
+            stored.analysis_json = stored.evaluation_json = stored.knowledge_card_json = stored.summary = None
         for field in ("title", "full_text", "abstract", "arxiv_id", "source_url", "pdf_path", "published_date", "tables_json", "equations_json"):
             setattr(stored, field, getattr(paper, field))
         stored.authors = json.dumps(paper.authors, ensure_ascii=False)
-        stored.analysis_json = result.model_dump_json() if result else None
-        stored.evaluation_json = json.dumps(evaluation, ensure_ascii=False) if evaluation else None
+        if result is not None:
+            stored.analysis_json = result.model_dump_json()
+            stored.summary = result.summary
+            stored.knowledge_card_json = json.dumps(_map_analysis_to_knowledge_card(result.model_dump()), ensure_ascii=False)
+        if evaluation is not None:
+            stored.evaluation_json = json.dumps(evaluation, ensure_ascii=False)
         stored.has_full_text = bool(paper.full_text) and not paper.abstract_only
-        stored.summary = result.summary if result else None
-        stored.knowledge_card_json = json.dumps(_map_analysis_to_knowledge_card(result.model_dump()), ensure_ascii=False) if result else None
         session.commit()
     return report_id
+
+
+def _stored_review_input(report_id: int) -> dict:
+    with get_session_factory()() as session:
+        row = session.get(Report, report_id)
+        if row is None:
+            raise ValueError("论文已不存在，请重试")
+        return {key: getattr(row, key) for key in (
+            "title", "source", "abstract", "arxiv_id", "full_text", "has_full_text",
+            "selection_score", "selection_relevance", "selection_reason", "selection_provenance_json")}
 
 
 async def prepare_report(arxiv_id: str, *, force: bool = False) -> tuple[Path, dict]:
@@ -190,6 +203,8 @@ async def prepare_report(arxiv_id: str, *, force: bool = False) -> tuple[Path, d
     path = PROJECT_ROOT / "data" / "one_reports" / f"{paper.arxiv_id}.json"
     pdf_hash = hashlib.sha256(Path(paper.pdf_path).read_bytes()).hexdigest()
     fingerprint = analysis_fingerprint()
+    report_id = store_paper(paper)
+    review_input = _stored_review_input(report_id)
     previous_deliveries = []
     cached_result, cached_limits, cached_calls = None, {}, []
     if path.exists():
@@ -198,7 +213,9 @@ async def prepare_report(arxiv_id: str, *, force: bool = False) -> tuple[Path, d
         if not force and cached.get("pdf_sha256") == pdf_hash and cached.get("analysis_fingerprint") == fingerprint:
             result = validate_analysis(cached["analysis"])
             evaluation = cached.get("evaluation") or {}
-            if evaluation.get("status") == "reviewed" and evaluation.get("tier") != "pending":
+            from reportagent.services.report_quality import review_fingerprint
+            if (evaluation.get("status") == "reviewed" and evaluation.get("tier") != "pending"
+                    and evaluation.get("fingerprint") == review_fingerprint(review_input, get_llm_model())):
                 cached["report_id"] = store_paper(paper, result, evaluation)
                 save_artifact(path, cached)
                 logger.info("Reusing completed analysis and delivery receipts: %s", path)
@@ -206,7 +223,6 @@ async def prepare_report(arxiv_id: str, *, force: bool = False) -> tuple[Path, d
             cached_result = result
             cached_limits = cached.get("phase_input_chars", {})
             cached_calls = cached.get("model_calls", [])
-    report_id = store_paper(paper, cached_result)
     llm = LLMClient(thinking="disabled")
     limits = cached_limits
 
@@ -218,7 +234,8 @@ async def prepare_report(arxiv_id: str, *, force: bool = False) -> tuple[Path, d
             agent = AnalysisAgent(llm_client=llm, config_path=str(skill_resource("analyze-report", "one-report.yaml")))
             for name, cfg in agent._config["analysis"]["phases"].items():
                 cfg["model"] = "default"  # Respect this environment's configured model in every phase.
-                limits[name] = min(len(paper.full_text), cfg.get("max_input_chars", 8000))
+                if cfg.get("enabled", True):
+                    limits[name] = len(paper.full_text)
             result = await asyncio.wait_for(agent.analyze_report_directly(
                 title=paper.title, abstract=paper.abstract, full_text=paper.full_text,
                 depth="standard", progress_cb=progress,
@@ -226,16 +243,14 @@ async def prepare_report(arxiv_id: str, *, force: bool = False) -> tuple[Path, d
         else:
             result = cached_result
         from reportagent.services.report_quality import evaluate_paper
-        evaluation = await asyncio.wait_for(evaluate_paper({
-            "title": paper.title, "source": paper.source.value, "abstract": paper.abstract,
-            "arxiv_id": paper.arxiv_id, "full_text": paper.full_text, "has_full_text": not paper.abstract_only,
-            "selection_score": 0, "selection_reason": "用户指定阅读，未进行方向相关性评分。",
-        }, llm), timeout=240)
+        evaluation = await asyncio.wait_for(evaluate_paper(review_input, llm), timeout=240)
     finally:
         await llm._client.close()
     validate_analysis(result.model_dump())
     if any(not call["complete"] for call in llm.calls):
         raise ValueError("存在失败或截断的模型调用，停止推送")
+    if _stored_review_input(report_id) != review_input:
+        raise ValueError("分析期间原文或相关性结果已更新，请重新评估")
     report_id = store_paper(paper, result, evaluation)
     artifact = {
         "report_id": report_id, "arxiv_id": paper.arxiv_id, "title": paper.title,

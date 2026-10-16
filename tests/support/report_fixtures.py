@@ -36,11 +36,17 @@ def module():
 
 
 def paper(**extra):
-    from reportagent.services.paper_scoring import scoring_fingerprint
-    return {"id": 1, "source": "arxiv", "title": "Portfolio research", "full_text": TEXT,
-            "has_full_text": True, "abstract": "Portfolio research", "selection_relevance": 8,
-            "selection_provenance_json": json.dumps({"fingerprint": scoring_fingerprint()}),
-            "selection_score": 8, "selection_reason": "与组合优化有关", **extra}
+    from reportagent.services.paper_scoring import scoring_fingerprint, evidence_fingerprint
+    result = {"id": 1, "source": "arxiv", "title": "Portfolio research", "full_text": TEXT,
+              "has_full_text": True,
+              "abstract": "We study portfolio allocation and evaluate a rolling trading policy with transaction costs.",
+              "selection_relevance": 8, "selection_score": 8,
+              "selection_reason": "与组合优化有关", **extra}
+    if "selection_provenance_json" not in extra:
+        result["selection_provenance_json"] = json.dumps({
+            "fingerprint": scoring_fingerprint(), "status": "scored",
+            "evidence_fingerprint": evidence_fingerprint(result)})
+    return result
 
 
 def complete_analysis():

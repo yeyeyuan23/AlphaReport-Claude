@@ -93,7 +93,7 @@ def _summary(rep: Report) -> str:
     return " ".join(parts) if parts else "(无标签)"
 
 
-async def classify_async(options: ClassificationOptions) -> None:
+async def classify_async(options: ClassificationOptions) -> dict:
     init_db()
     factory = get_session_factory()
     session = factory()
@@ -122,19 +122,29 @@ async def classify_async(options: ClassificationOptions) -> None:
         logger.info(f"Processing {len(reports)} reports "
                     f"(method: {'hybrid' if options.hybrid else 'llm' if options.llm else 'rule'})...")
 
+        audit = {"selected": len(reports), "classified": 0, "failed": 0, "updated": 0,
+                 "report_ids": [r.id for r in reports], "classified_ids": [], "failed_ids": [], "errors": {}}
         updated = 0
         for i, r in enumerate(reports):
             title = r.title or ""
             abstract = r.abstract or ""
 
-            if options.hybrid:
-                rule_result = rule_classifier.classify(title, abstract)
-                llm_result = await llm_classifier.classify(title, abstract)
-                result = _merge_results(rule_result, llm_result)
-            elif options.llm:
-                result = await llm_classifier.classify(title, abstract)
-            else:
-                result = rule_classifier.classify(title, abstract)
+            try:
+                if options.hybrid:
+                    rule_result = rule_classifier.classify(title, abstract)
+                    llm_result = await llm_classifier.classify(title, abstract)
+                    result = _merge_results(rule_result, llm_result)
+                elif options.llm:
+                    result = await llm_classifier.classify(title, abstract)
+                else:
+                    result = rule_classifier.classify(title, abstract)
+
+            except Exception as error:
+                audit["failed_ids"].append(r.id)
+                audit["errors"][r.id] = str(error)[:500]
+                logger.error("Classification failed for paper %s; existing tags retained: %s", r.id, error)
+                continue
+            audit["classified_ids"].append(r.id)
 
             new_markets = ",".join(m.value for m in result.markets)
             new_assets = ",".join(a.value for a in result.asset_classes)
@@ -173,6 +183,8 @@ async def classify_async(options: ClassificationOptions) -> None:
             logger.info(f"[DRY RUN] Would update {updated}/{len(reports)} reports")
         else:
             logger.info("No changes needed")
+        audit.update(classified=len(audit["classified_ids"]), failed=len(audit["failed_ids"]), updated=updated)
+        return audit
 
     finally:
         try:

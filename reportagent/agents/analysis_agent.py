@@ -26,6 +26,7 @@ from reportagent.models.schemas import (
 )
 from reportagent.utils.config import PROJECT_ROOT
 from reportagent.skills.registry import skill_resource
+from reportagent.services.text_evidence import text_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +133,8 @@ class AnalysisAgent:
             grounding = skill_resource("analyze-report", "grounding.md").read_text(encoding="utf-8")
             for phase in config.get("analysis", {}).get("phases", {}).values():
                 phase["system_prompt"] = phase.get("system_prompt", "") + "\n" + grounding
+            config.setdefault("analysis", {})["summary"] = yaml.safe_load(
+                skill_resource("analyze-report", "summary.yaml").read_text(encoding="utf-8"))
             return config
         return {}
 
@@ -149,6 +152,12 @@ class AnalysisAgent:
 
     def _phase_config(self, phase: str) -> dict:
         return self._config.get("analysis", {}).get("phases", {}).get(phase, {})
+
+    def _phase_content(self, text: str, cfg: dict) -> str:
+        limit = cfg.get("max_input_chars", 240000)
+        if len(text) > limit:
+            raise ValueError(f"全文 {len(text)} 字符超过阶段输入上限 {limit}，停止分析；未截取部分正文")
+        return "\n\n".join(f"[{key}]\n{value}" for key, value in text_chunks(text).items())
 
     def _phase_model(self, cfg: dict) -> str | None:
         """Return model override if phase specifies a non-default model."""
@@ -270,8 +279,8 @@ class AnalysisAgent:
         self, title: str, abstract: str, full_text: str, result: AnalysisResult
     ) -> AnalysisResult:
         cfg = self._phase_config("metadata")
-        max_chars = cfg.get("max_input_chars", 6000)
-        content = full_text[:max_chars] if not abstract else f"{abstract}\n\n{full_text[:max_chars]}"
+        max_chars = len(full_text)
+        content = self._phase_content(full_text, cfg)
 
         prompt = cfg.get("user_prompt_template", "").format(
             title=title,
@@ -317,8 +326,8 @@ class AnalysisAgent:
         equations_json: str | None = None,
     ) -> AnalysisResult:
         cfg = self._phase_config("methodology")
-        max_chars = cfg.get("max_input_chars", 12000)
-        content = full_text[:max_chars]
+        max_chars = len(full_text)
+        content = self._phase_content(full_text, cfg)
 
         # Parse extracted equations for inclusion in the prompt
         equations_text = ""
@@ -476,8 +485,8 @@ class AnalysisAgent:
         self, title: str, full_text: str, result: AnalysisResult
     ) -> AnalysisResult:
         cfg = self._phase_config("assessment")
-        max_chars = cfg.get("max_input_chars", 8000)
-        content = full_text[:max_chars]
+        max_chars = len(full_text)
+        content = self._phase_content(full_text, cfg)
 
         extra = ""
         if result.equations:
@@ -768,32 +777,17 @@ class AnalysisAgent:
 
         context = "\n\n".join(context_parts)
 
-        prompt = (
-            "你是一位量化金融研究总结专家。请根据以下分析结果，撰写一篇流畅的研报总结。\n\n"
-            "【强制格式要求 - 必须严格遵守】\n"
-            "- 写成流畅的叙事性文章，像学术期刊摘要一样自然连贯。不要分节、不要用小标题、不要用列表。\n"
-            "- 所有数学符号、变量名可用 $...$ 行内包裹。完整公式必须用 $$...$$ 单独一行显示，不要嵌在句子中间。\n"
-            "- 严禁使用 \\(...\\) 或 \\[...\\] 格式。\n"
-            "- 正确示例：\n"
-            "  「该研究通过以下回归模型估计市场贝塔：\n"
-            "  $$r_t = \\alpha + \\beta r_{m,t} + \\varepsilon_t$$\n"
-            "  其中 $r_t$ 为个股收益，$r_{m,t}$ 为市场收益...」\n"
-            "- 错误示例：「该研究通过 $r_t = \\alpha + \\beta r_{m,t}$ 估计市场贝塔」或使用 \\(r_t\\) 格式\n\n"
-            "【输出语言】全部用中文输出。\n\n"
-            "总结应自然涵盖：研究问题与核心贡献、数据与方法、关键公式及其作用、因子构建逻辑、"
-            "边际贡献（相对基准的增量在哪）、实践推论（从业者该做什么不同的事）、综合评估。"
-            "以自然段落组织，让读者能像读摘要一样流畅阅读。\n\n"
-            f"论文标题：{title}\n\n"
-            f"分析结果：\n{context}"
+        cfg = self._config["analysis"]["summary"]
+        profile = cfg["profiles"][self._current_depth]
+        grounding = skill_resource("analyze-report", "grounding.md").read_text(encoding="utf-8")
+        prompt = cfg["user_prompt_template"].format(title=title, context=context)
+        prompt += "\n\n" + profile["instruction"]
+        summary = await self._get_llm().chat(
+            [{"role": "system", "content": cfg["system_prompt"] + "\n" + grounding},
+             {"role": "user", "content": prompt}],
+            temperature=cfg.get("temperature", 0.1),
+            max_tokens=profile["max_tokens"],
         )
-
-        try:
-            summary = await self._get_llm().chat(
-                [{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=2000,
-            )
-            return _normalize_latex_delimiters(summary)
-        except Exception as e:
-            logger.warning("Summary synthesis via LLM failed: %s", e)
-            return "\n\n".join(context_parts)
+        if not summary.strip():
+            raise ValueError("分析总结为空，停止保存")
+        return _normalize_latex_delimiters(summary)

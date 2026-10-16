@@ -6,6 +6,7 @@
 [
   {{
     "index": 0,
+    "status": "scored",
     "score": 8.0,
     "relevance": 8.0,
     "best_direction": null,
@@ -17,6 +18,7 @@
 注意：
 - index 是上面论文编号对应的整数，不能遗漏、重复或超出范围
 - best_direction 只能从 [{direction_ids}] 中选择最匹配的方向；无相关方向时为 null
-- score 与 relevance 相同，均为 0 到 10 之间的有限数值，保留一位小数
+- status 为 scored 时，score 与 relevance 相同，均为 0 到 10 之间的有限数值，保留一位小数
+- 无足够研究材料时 status 为 pending_needs_material，score、relevance、best_direction 均为 null，并说明缺少的材料
 - 不输出创新性、实操性或全文质量评分；不设置额外推送阈值
 - 只返回 JSON 数组，不要包含其他文字

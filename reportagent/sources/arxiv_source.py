@@ -3,7 +3,7 @@ from typing import Optional
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from threading import Event
 
 import httpx
@@ -13,6 +13,8 @@ from reportagent.sources.base import (
     BaseSource, SourceParseError, deduplicate_results, usable_full_text,
 )
 from reportagent.utils.topic_expansion import expand_topics
+from reportagent.sources.date_window import in_date_window, utc_datetime
+from reportagent.sources.content_fetch import MAX_PDF_BYTES, bounded_download
 
 logger = logging.getLogger(__name__)
 
@@ -137,9 +139,13 @@ class ArxivSource(BaseSource):
         stop = Event()
         try:
             fetch_count = criteria.max_results_per_source
-            if criteria.date_from or criteria.date_to:
-                fetch_count = fetch_count * 5
             has_date_filter = bool(criteria.date_from or criteria.date_to)
+            if has_date_filter:
+                # The API supports submittedDate (GMT), not updatedDate. Apply the
+                # range before paging so older windows aren't hidden by newest N.
+                start = utc_datetime(criteria.date_from).strftime("%Y%m%d%H%M") if criteria.date_from else "199101010000"
+                end = utc_datetime(criteria.date_to or datetime.now(timezone.utc)).strftime("%Y%m%d%H%M")
+                query = f"({query}) AND submittedDate:[{start} TO {end}]"
             results = await asyncio.wait_for(
                 asyncio.to_thread(
                     self._execute_search, query, fetch_count, sort_by_date=has_date_filter,
@@ -193,12 +199,7 @@ class ArxivSource(BaseSource):
     async def _fetch_one_pdf(
         self, client, result: SearchResult, pdf_url: str
     ) -> SearchResult:
-        resp = await client.get(pdf_url)
-        resp.raise_for_status()
-        # Read content with explicit timeout protection
-        pdf_bytes = await asyncio.wait_for(
-            asyncio.to_thread(lambda: resp.content), timeout=15
-        )
+        pdf_bytes = await bounded_download(client, pdf_url, MAX_PDF_BYTES)
 
         if not pdf_bytes[:1024].lstrip().startswith(b"%PDF-"):
             raise SourceParseError("non-PDF response content")
@@ -263,24 +264,7 @@ class ArxivSource(BaseSource):
     def _filter_by_date(
         self, results: list[SearchResult], date_from, date_to
     ) -> list[SearchResult]:
-        filtered = []
-        for r in results:
-            if not r.published_date:
-                filtered.append(r)
-                continue
-            # Normalize both to naive UTC for comparison
-            if r.published_date.tzinfo:
-                pub = r.published_date.replace(tzinfo=None)
-            else:
-                pub = r.published_date
-            df = date_from.replace(tzinfo=None) if date_from and date_from.tzinfo else date_from
-            dt = date_to.replace(tzinfo=None) if date_to and date_to.tzinfo else date_to
-            if df and pub < df:
-                continue
-            if dt and pub > dt:
-                continue
-            filtered.append(r)
-        return filtered
+        return [r for r in results if in_date_window(r.published_date, date_from, date_to)]
 
     def _build_query(self, criteria: UserCriteria) -> str:
         en_terms = expand_topics(criteria.topics, criteria.keywords, lang="en")
@@ -386,8 +370,9 @@ class ArxivSource(BaseSource):
             abstract=(entry.findtext(atom + "summary") or "").strip(),
             full_text=None, abstract_only=True, source=SourceType.ARXIV,
             source_url=values["id"], arxiv_id=values["id"].split("/abs/", 1)[1],
-            doi=entry.findtext(arxiv_ns + "doi"), published_date=updated or published,
+            doi=entry.findtext(arxiv_ns + "doi"), published_date=utc_datetime(published),
             raw_metadata={
+                "updated_date": updated.isoformat(),
                 "categories": [category.get("term", "") for category in entry.findall(atom + "category")],
                 "primary_category": primary.get("term", "") if primary is not None else "",
                 "pdf_url": pdf_url,

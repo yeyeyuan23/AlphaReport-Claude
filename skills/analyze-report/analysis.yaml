@@ -16,7 +16,7 @@ analysis:
     metadata:
       enabled: true
       model: default
-      max_input_chars: 30000
+      max_input_chars: 240000
       temperature: 0.1
       max_tokens: 2000
       system_prompt: |
@@ -44,7 +44,7 @@ analysis:
         ## 论文摘要
         {abstract}
 
-        ## 论文内容（前 {max_chars} 字符）
+        ## 论文完整提取文本（共 {max_chars} 字符，按提取偏移分段）
         {content}
 
         请提取以上论文的结构化信息，严格按 JSON 格式返回。所有文本内容用中文输出。
@@ -53,7 +53,7 @@ analysis:
     methodology:
       enabled: true
       model: default
-      max_input_chars: 60000
+      max_input_chars: 240000
       max_context_equations: 20
       temperature: 0.2
       max_tokens: 6000
@@ -65,9 +65,9 @@ analysis:
           "analysis_points": [
             {
               "title": "评议条目标题（批判性问题，如：'离散化假设：便利背后的代价'）",
-              "analysis": "6-12句同行评议。每个论点必须有公式支撑。关键公式用 $$...$$ 独立成行，符号用 $...$。禁止全文无公式。",
-              "marginal_contribution": "相对基准模型的增量贡献分析（2-3句话，指定具体基准名称，引用对比数据）",
-              "practical_implication": "对量化从业者的实际含义（2-3句话，要具体到操作层面：改变什么决策、以什么频率、代价是什么）",
+              "analysis": "6-12句同行评议。仅在原文公式清晰时解释相关公式；不强求公式，缺损时说明无法确认。",
+              "marginal_contribution": "原文报告的增量贡献及比较依据，未报告则说明",
+              "practical_implication": "研究成立的条件及复现时待核验的内容，不编造交易建议",
               "related_formulas": [0, 1]
             }
           ],
@@ -147,7 +147,7 @@ analysis:
     assessment:
       enabled: true
       model: default
-      max_input_chars: 60000
+      max_input_chars: 240000
       temperature: 0.3
       max_tokens: 2500
       system_prompt: |
@@ -177,7 +177,7 @@ analysis:
           },
           "marginal_contribution_summary": "相对现有文献的增量贡献总评（2-3句话）",
           "practical_implications": [
-            "推论1：具体的操作变化、频率、潜在代价",
+            "复现或验证建议及原文条件",
             "推论2：..."
           ],
           "key_contributions": ["核心贡献1", "核心贡献2"]
@@ -186,7 +186,7 @@ analysis:
       user_prompt_template: |
         论文标题：{title}
 
-        论文内容（前 {max_chars} 字符）：
+        论文完整提取文本（共 {max_chars} 字符，按提取偏移分段）：
         {content}
 
         前面阶段的分析结果：

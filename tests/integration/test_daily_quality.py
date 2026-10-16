@@ -39,6 +39,26 @@ def test_pending_papers_never_fill_empty_focus_section():
     assert "全文获取失败" in brief
 
 
+def test_daily_does_not_select_old_score_after_abstract_changes():
+    from reportagent.services.paper_scoring import evidence_fingerprint, scoring_fingerprint
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    with factory() as session:
+        row = Report(title="Old score", source="arxiv", content_hash="stale",
+                     abstract="We evaluate dynamic portfolios and transaction costs.",
+                     published_date=datetime.now(timezone.utc), selection_relevance=9, is_selected=True)
+        row.selection_provenance_json = json.dumps({"fingerprint": scoring_fingerprint(), "status": "scored",
+                                                    "evidence_fingerprint": evidence_fingerprint(vars(row))})
+        row.abstract = "Updated abstract studies a different problem with new evidence."
+        session.add(row)
+        session.commit()
+    with patch.object(daily, "init_db"), patch.object(daily, "get_session_factory", return_value=factory):
+        result = daily.get_todays_papers()
+    assert result[0] == []
+    engine.dispose()
+
+
 def test_daily_template_edits_take_effect_without_another_model_call(tmp_path):
     from reportagent.services import report_briefing
     template = tmp_path / "briefing.md"

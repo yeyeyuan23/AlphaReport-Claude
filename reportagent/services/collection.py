@@ -67,12 +67,13 @@ async def collect_reports(options: CollectionOptions) -> dict:
     date_from = None
     date_to = None
     if options.date_from:
-        date_from = datetime.strptime(options.date_from, "%Y-%m-%d")
+        date_from = datetime.strptime(options.date_from, "%Y-%m-%d").replace(tzinfo=timezone.utc)
     elif options.days:
         from datetime import timedelta
         date_from = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=options.days)
     if options.date_to:
-        date_to = datetime.strptime(options.date_to, "%Y-%m-%d")
+        date_to = datetime.strptime(options.date_to, "%Y-%m-%d").replace(
+            hour=23, minute=59, second=59, microsecond=999999, tzinfo=timezone.utc)
 
     if date_from:
         logger.info(f"Date filter: from {date_from.strftime('%Y-%m-%d')}"
@@ -104,7 +105,6 @@ async def collect_reports(options: CollectionOptions) -> dict:
     # Init LLM-based classification and analysis
     llm_client = None
     llm_classifier = None
-    analysis_agent = None
     try:
         llm_client = LLMClient()
         llm_classifier = LLMClassifier(llm_client)
@@ -152,6 +152,7 @@ async def collect_reports(options: CollectionOptions) -> dict:
                                 classification = await llm_classifier.classify(title, abstract)
                             except Exception as error:
                                 logger.warning("Classification fallback: %s", type(error).__name__)
+                                errors.append(safe_source_error(error, "classification; rule fallback used"))
                                 classification = classifier.classify(title, abstract)
                         else:
                             classification = classifier.classify(title, abstract)
@@ -210,40 +211,46 @@ async def collect_reports(options: CollectionOptions) -> dict:
         finally:
             session.close()
 
-    # Step 4: Deep analysis (unless --no-analysis)
-    if not options.no_analysis and report_ids and llm_client:
-        logger.info(f"Starting analysis for {len(report_ids)} reports (depth: {options.analysis_depth})...")
-        from reportagent.agents.analysis_agent import AnalysisAgent
-        analysis_agent = AnalysisAgent(llm_client=llm_client)
+    # All entrypoints use the batch service's evidence, completeness and cache
+    # gates. A source row being stored is not evidence of successful analysis.
+    if not options.no_analysis and report_ids:
+        from reportagent.services import batch_analysis
+        from reportagent.models.database import Report
 
-        factory = get_session_factory()
-        session = factory()
-        try:
-            repo = ReportRepository(session)
-            from reportagent.models.database import Report
-            analyzed = 0
-            for i, rid in enumerate(report_ids):
-                report = session.query(Report).filter(Report.id == rid).first()
-                if not report:
-                    continue
-                try:
-                    full_text = report.full_text or report.abstract or ""
-                    result = await analysis_agent.analyze_report_directly(
-                        title=report.title,
-                        abstract=report.abstract or "",
-                        full_text=full_text,
-                        depth=options.analysis_depth,
-                    )
-                    analysis_json = result.model_dump_json(indent=2)
-                    repo.update_analysis(rid, analysis_json)
-                    analyzed += 1
-                    logger.info(f"  [{i+1}/{len(report_ids)}] Analyzed: {report.title[:50]}")
-                except Exception as e:
-                    logger.warning(f"  Analysis failed for '{report.title[:40]}': {e}")
-
-            storage_result["analyzed"] = analyzed
-        finally:
-            session.close()
+        logger.info("Starting shared analysis for %d reports (depth: %s)",
+                    len(report_ids), options.analysis_depth)
+        analysis_results = []
+        for rid in report_ids:
+            try:
+                audit = await batch_analysis.run_analysis(batch_analysis.AnalysisOptions(
+                    report_id=rid, depth=options.analysis_depth))
+                storage_result["analyzed"] += audit["analyzed"]
+                # Batch error strings may contain upstream request details. Keep
+                # public collection observations safe and identify the failed row.
+                safe_errors = {str(failed_id): "analysis failed shared validation or model call"
+                               for failed_id in audit["failed_ids"]}
+                if audit["failed_ids"]:
+                    storage_result["errors"].append(f"Analysis report {rid}: failed shared validation or model call")
+                if rid in audit["skipped_ids"]:
+                    # A skipped valid cache is success; a missing-material skip
+                    # remains visible to callers as incomplete collection work.
+                    with get_session_factory()() as session:
+                        report = session.get(Report, rid)
+                        cached = report is not None and batch_analysis._usable_cache(
+                            report.analysis_json,
+                            batch_analysis.analysis_cache_fingerprint(report, options.analysis_depth),
+                            options.analysis_depth)
+                    if not cached:
+                        message = f"Analysis report {rid}: skipped; no usable research text"
+                        storage_result["errors"].append(message)
+                        safe_errors[str(rid)] = message
+                analysis_results.append({**audit, "errors": safe_errors})
+            except Exception as error:
+                message = safe_source_error(error, f"analysis report {rid}")
+                storage_result["errors"].append(message)
+                analysis_results.append({"report_ids": [rid], "analyzed": 0,
+                                         "failed_ids": [rid], "errors": {str(rid): message}})
+        storage_result["analysis_results"] = analysis_results
 
     source_states = {item["status"] for item in source_statuses}
     if source_states <= {"ok", "empty"}:

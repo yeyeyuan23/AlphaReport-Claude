@@ -63,35 +63,22 @@ def test_collection_is_callable_without_processes_and_stores_real_rows():
         engine.dispose()
 
 
-@pytest.mark.parametrize("module, skill, filename, template, invoke", [
-    ("weekly_report", "weekly-report", "briefing.md",
-     "Weekly {week_start}/{week_end}, {total_count}: {papers_json}",
-     lambda service: service.generate_weekly_report([{"title": "Fixture paper"}], "2026-10-05", "2026-10-11")),
-])
-def test_delivery_generation_renders_the_current_shared_skill_resource(
-    tmp_path, module, skill, filename, template, invoke
-):
+def test_weekly_renders_current_shared_template_without_model_rewrite(tmp_path):
     from reportagent.skills import registry
-    service = importlib.import_module(f"reportagent.services.{module}")
-    bundle = tmp_path / "skills" / skill
-    bundle.mkdir(parents=True)
-    (bundle / "SKILL.md").write_text(f"---\nname: {skill}\ndescription: Test task\n---\nUse the shared resource.")
-    (bundle / filename).write_text(template)
-    prompts = []
-
-    def generate(command, **kwargs):
-        prompts.append(command[command.index("-p") + 1])
-        return subprocess.CompletedProcess(command, 0, "Generated report", "")
-
-    with patch.object(registry, "PROJECT_ROOT", tmp_path), patch(
-        "shutil.which", return_value="/fixture/claude"
-    ), patch.object(service.subprocess, "run", side_effect=generate):
-        assert invoke(service) == "Generated report"
-        (bundle / filename).write_text("UPDATED " + template)
-        assert invoke(service) == "Generated report"
-    assert "Fixture paper" in prompts[0]
-    assert "{papers_json}" not in prompts[0]
-    assert prompts[1].startswith("UPDATED ")
+    from reportagent.services import weekly_report
+    # Copy the other skills needed for evidence and rubric fingerprints.
+    import shutil
+    shutil.copytree(ROOT / "skills", tmp_path / "skills")
+    target = tmp_path / "skills/weekly-report/briefing.md"
+    target.write_text("Weekly {date_label}: {overview}\n{other_papers}")
+    papers = [{"id": 1, "title": "Fixture paper", "source": "arxiv"}]
+    with patch.object(registry, "PROJECT_ROOT", tmp_path):
+        before = weekly_report.generate_weekly_report(papers, "2026-10-05", "2026-10-11")
+        target.write_text("UPDATED " + target.read_text())
+        after = weekly_report.generate_weekly_report(papers, "2026-10-05", "2026-10-11")
+    assert "Fixture paper" in before
+    assert "重点推荐 0 篇" in before
+    assert after == "UPDATED " + before
 
 
 def test_sync_public_url_uses_last_tunnel_address_and_preserves_other_settings(tmp_path):
@@ -127,8 +114,8 @@ def test_scoring_reads_shared_templates_and_keeps_failed_batches_retryable(tmp_p
                 raise RuntimeError("temporary failure")
             return [{"index": 0, "score": 8.0, "reason": "Relevant"}]
 
-    papers = [{"title": "Portfolio paper", "abstract": "Test"},
-              {"title": "Retry paper", "abstract": "Test"}]
+    papers = [{"title": "Portfolio paper", "abstract": "We study portfolio allocation with risk constraints and compare forecasting models."},
+              {"title": "Retry paper", "abstract": "We study portfolio allocation with risk constraints and compare forecasting models."}]
     with patch.object(registry, "PROJECT_ROOT", tmp_path):
         results, failures = asyncio.run(scoring.score_papers_batch(OfflineModel(), papers, batch_size=1))
     assert len(results) == 1

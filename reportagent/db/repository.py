@@ -63,6 +63,11 @@ class ReportRepository:
                 existing.is_selected = False
             existing.title = sr.title
             existing.authors = json.dumps(sr.authors, ensure_ascii=False)
+            # Publication dates remain stable across reposts and revisions.
+            # Re-import only fills a previously unknown date; it never replaces
+            # a known date with a later page/revision timestamp or a missing value.
+            if sr.published_date is not None and existing.published_date is None:
+                existing.published_date = sr.published_date
             if revision_changed:
                 existing.arxiv_id = sr.arxiv_id
                 existing.source_url = sr.source_url
@@ -273,7 +278,12 @@ class ReportRepository:
                 provenance = json.loads(row.selection_provenance_json or "{}")
             except (TypeError, ValueError):
                 provenance = {}
-            if not isinstance(provenance, dict) or provenance.get("fingerprint") != scoring_fingerprint:
+            from reportagent.services.paper_scoring import evidence_fingerprint
+            stale_material = (isinstance(provenance, dict)
+                              and provenance.get("status") in ("scored", "pending_needs_material")
+                              and provenance.get("evidence_fingerprint") != evidence_fingerprint(row))
+            if (not isinstance(provenance, dict) or provenance.get("fingerprint") != scoring_fingerprint
+                    or provenance.get("status") == "retryable_model_failure" or stale_material):
                 results.append(row)
                 if len(results) >= limit:
                     break

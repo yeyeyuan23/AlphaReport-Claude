@@ -14,6 +14,7 @@ from reportagent.db.repository import ReportRepository
 from reportagent.models.database import Base, Report
 from reportagent.models.schemas import ClassifiedReport, ClassificationResult, SearchResult, SourceType
 from reportagent.services import daily_push as daily
+from reportagent.services.paper_scoring import evidence_fingerprint
 
 
 class DeliveryTests(unittest.TestCase):
@@ -44,10 +45,14 @@ class DeliveryTests(unittest.TestCase):
         for item in self.patches:
             item.start()
         with self.factory() as session:
-            session.add_all([Report(title=f"Paper {i}", source="arxiv", content_hash=f"hash-{i}",
-                                    published_date=datetime.now(timezone.utc), is_selected=True, selection_relevance=8,
-                                    selection_provenance_json=json.dumps({"fingerprint": daily.scoring_fingerprint()}))
-                             for i in range(1, 13)])
+            rows = [Report(title=f"Paper {i}", source="arxiv", content_hash=f"hash-{i}",
+                           abstract="We study portfolio allocation and compare rolling trading policies with transaction costs.",
+                           published_date=datetime.now(timezone.utc), is_selected=True, selection_relevance=8)
+                    for i in range(1, 13)]
+            for row in rows:
+                row.selection_provenance_json = json.dumps({"fingerprint": daily.scoring_fingerprint(),
+                    "status": "scored", "evidence_fingerprint": evidence_fingerprint(vars(row))})
+            session.add_all(rows)
             session.commit()
 
     def tearDown(self):
