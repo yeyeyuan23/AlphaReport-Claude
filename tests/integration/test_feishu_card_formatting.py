@@ -40,6 +40,8 @@ def test_report_card_formats_headings_without_changing_evidence_or_links(service
     assert '[原文](https://example.org/paper#abstract)' in markdown
     assert all(f'补充证据 {i}' in markdown for i in range(10))
     assert source == original  # Saved Markdown remains suitable for normal readers.
+    if service is daily_push:
+        assert '共收录' not in markdown
 
 
 @pytest.mark.parametrize('service', [daily_push, weekly_report])

@@ -24,6 +24,14 @@ from reportagent.utils.config import PROJECT_ROOT
 logger = logging.getLogger("llm_filter")
 
 
+def relevance_reason_text(reason: str | None) -> str:
+    """Read old decorated reasons without treating screening metadata as live status."""
+    return re.sub(
+        r"^(?:\[[^\]\n]+\]\s*)?\[(?:仅摘要相关性；全文质量待评审|材料不足待补全)\]\s*",
+        "", (reason or "").strip(),
+    ).strip()
+
+
 @dataclass(frozen=True)
 class ScoringOptions:
     days: int = 1
@@ -307,9 +315,8 @@ def apply_scores(
                 pending = item["status"] == "pending_needs_material"
                 is_selected = not pending and relevance >= threshold
                 direction = item["best_direction"]
-                reason = ("[材料不足待补全] " if pending else "[仅摘要相关性；全文质量待评审] ") + item["reason"]
-                if direction:
-                    reason = f"[{direction}] {reason}"
+                # Direction and screening scope/status already have structured fields.
+                reason = relevance_reason_text(item["reason"])
                 if dry_run:
                     logger.info("[%s] %s | %s", relevance, item["status"], _paper_value(paper, "title"))
                 else:

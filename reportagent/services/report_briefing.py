@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from reportagent.skills.registry import skill_resource
-from reportagent.services.paper_scoring import load_enabled_directions
+from reportagent.services.paper_scoring import load_enabled_directions, relevance_reason_text
 from reportagent.services.report_quality import pending_review, source_category, current_relevance
 
 
@@ -41,7 +41,7 @@ def evaluation_sections(evaluation: dict) -> dict[str, str]:
             f"{(evaluation.get('method') or {}).get('claim', '')} {findings}".strip(),
         "strengths": "待完成全文阅读评估。" if pending else strengths or "未记录独立优势。",
         "why_read": "待完成全文阅读评估。" if pending else
-            f"{evaluation.get('relevance_reason', '')} {strengths}".strip(),
+            f"{relevance_reason_text(evaluation.get('relevance_reason'))} {strengths}".strip(),
         "limitations": "；".join(evaluation.get("limitations", [])[:3]) or "未记录，需进一步核查。",
         "critical_concerns": "；".join(evaluation.get("critical_concerns", [])) or "未记录明确的关键疑虑。",
         "reading_advice": evaluation.get("reading_advice") or "核对原文后再判断。",
@@ -107,10 +107,10 @@ def render_briefing(papers: list[dict], date_label: str, *, source_statuses: lis
             screening = {}
         if isinstance(screening, dict) and screening.get("status") == "pending_needs_material":
             group, label = "待补全文或摘要", "材料不足，尚未判断相关性"
-            summary = p.get("selection_reason") or "补全有效摘要或正文后重评。"
+            summary = relevance_reason_text(p.get("selection_reason")) or "补全有效摘要或正文后重评。"
         elif pending and current_relevance(p) is not None and current_relevance(p) < 6:
             group, label = "方向相关性较低", "相关性较低；研究质量未评"
-            summary = p.get("selection_reason") or "仅依据摘要判断方向相关性，不代表论文质量低。"
+            summary = relevance_reason_text(p.get("selection_reason")) or "仅依据摘要判断方向相关性，不代表论文质量低。"
         remaining[group].append(f"- **{p['title']}** · {label} · {direction}\n  {summary}\n  {_links(p)}")
     others = "\n\n".join(f"## {label}\n" + "\n".join(items) for label, items in remaining.items() if items)
     if excluded:
@@ -118,9 +118,17 @@ def render_briefing(papers: list[dict], date_label: str, *, source_statuses: lis
     labels = {"ok": "正常", "empty": "无新内容", "partial": "部分成功", "error": "失败", "unavailable": "不可用"}
     coverage = "\n".join(f"- {s['source']}：{labels.get(s['status'], s['status'])}，有效 {s.get('valid', 0)} 篇"
                          + (f"；{'；'.join(s.get('errors', [])[:2])}" if s.get('errors') else "") for s in (source_statuses or []))
+    overview = (f"本期检查 {len(papers)} 篇库中候选，重点推荐 {len(focus)} 篇。"
+                "按阅读价值与相关性优先选读，局限随文列出。")
+    if source_statuses:
+        valid = sum(s.get('valid', 0) for s in source_statuses)
+        overview = (f"本次在线采集有效资料 {valid} 条（按来源合计）；"
+                    "本期候选可包含此前已收录、尚待送达的库中论文。\n\n" + overview)
+        if any(s['status'] in {'error', 'partial', 'unavailable'} for s in source_statuses):
+            overview += " 本次部分来源采集失败或不完整，最新资料覆盖可能不完整。"
     return skill_resource(template_skill, "briefing.md").read_text(encoding="utf-8").format(
         date_label=date_label,
-        overview=f"本期检查 {len(papers)} 篇候选，重点推荐 {len(focus)} 篇。按阅读价值与相关性优先选读，局限随文列出。",
+        overview=overview,
         focus="\n\n".join(details) or "暂无达到重点推荐标准的论文。",
         other_papers=others,
         source_status=coverage or "本次使用库中已有论文，未重新检查在线来源。",

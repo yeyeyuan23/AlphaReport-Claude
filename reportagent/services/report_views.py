@@ -1,5 +1,6 @@
 """Shared report serialization and analysis presentation."""
 import json
+from reportagent.services.paper_scoring import relevance_reason_text
 
 def report_to_dict(r) -> dict:
     custom_tags = [t.value for t in r.tags if t.dimension == "custom"] if r.tags else []
@@ -22,7 +23,7 @@ def report_to_dict(r) -> dict:
         "summary": r.summary,
         "selection_relevance": r.selection_relevance,
         "selection_direction": r.selection_direction,
-        "selection_reason": r.selection_reason,
+        "selection_reason": relevance_reason_text(r.selection_reason),
         "evaluation": read_evaluation(r.evaluation_json),
     }
 
@@ -32,6 +33,8 @@ def read_evaluation(value) -> dict | None:
         parsed = json.loads(value) if value else None
         if not isinstance(parsed, dict):
             return None
+        if 'relevance_reason' in parsed:
+            parsed['relevance_reason'] = relevance_reason_text(parsed['relevance_reason'])
         from reportagent.services.report_quality import SCHEMA_VERSION
         if parsed.get('schema_version') in range(1, SCHEMA_VERSION):
             return {**parsed, 'tier': 'pending', 'label': '待重新评估', 'status': 'pending',

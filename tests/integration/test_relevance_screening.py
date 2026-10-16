@@ -155,7 +155,7 @@ def test_apply_scores_persists_relevance_and_ignores_advisory_rejection(directio
         assert paper.selection_score == paper.selection_relevance == 8
         assert paper.selection_direction == "new_direction"
         assert paper.is_selected is True
-        assert "仅摘要相关性" in paper.selection_reason
+        assert paper.selection_reason == 'Core topic'
         provenance = json.loads(paper.selection_provenance_json)
         assert provenance["evidence_scope"] == "title_abstract"
         assert provenance["fingerprint"] == scoring.scoring_fingerprint()

@@ -95,6 +95,21 @@ def test_daily_quicklist_displays_configured_direction_name():
     assert "a_share_factor" not in brief
 
 
+def test_completed_review_does_not_repeat_legacy_screening_status_as_its_recommendation_reason():
+    saved = evaluation(relevance_reason='[portfolio_optimization] [仅摘要相关性；全文质量待评审] 与组合优化有关。')
+    sections = report_briefing.evaluation_sections(saved)
+    assert '与组合优化有关' in sections['why_read']
+    assert '已保存的优点' in sections['why_read']
+    assert 'portfolio_optimization' not in sections['why_read']
+    assert '全文质量待评审' not in sections['why_read']
+    assert saved['relevance_reason'].startswith('[portfolio_optimization]')
+
+
+def test_research_conditions_in_brackets_are_preserved_in_recommendation_reason():
+    saved = evaluation(relevance_reason='[条件 A] 参数需要处于给定范围，才可应用该结论。')
+    assert '[条件 A] 参数需要处于给定范围' in report_briefing.evaluation_sections(saved)['why_read']
+
+
 def test_daily_pending_quicklist_uses_validation_issues_instead_of_findings():
     paper = {"id": 1, "title": "Pending paper", "source": "arxiv", "evaluation": evaluation(
         tier="pending", label="待核验", status="needs_verification",

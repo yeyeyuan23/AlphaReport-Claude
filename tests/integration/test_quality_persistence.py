@@ -124,3 +124,13 @@ def test_legacy_quote_gate_is_shown_as_outdated_assessment_not_active_screening(
     assert '规则已更新' in ' '.join(shown['validation_issues'])
     assert '引文未能定位' not in ' '.join(shown['validation_issues'])
     assert legacy['validation_issues'] == ['引文未能定位：C005']
+
+
+def test_saved_completed_evaluation_exposes_readable_relevance_reason():
+    from reportagent.services.report_views import read_evaluation
+    from reportagent.services.report_quality import SCHEMA_VERSION
+    saved = {'schema_version': SCHEMA_VERSION, 'status': 'reviewed', 'tier': 'focus',
+             'relevance_reason': '[portfolio_optimization] [仅摘要相关性；全文质量待评审] 与组合优化有关。'}
+    shown = read_evaluation(json.dumps(saved))
+    assert shown['relevance_reason'] == '与组合优化有关。'
+    assert shown['status'] == 'reviewed' and shown['tier'] == 'focus'

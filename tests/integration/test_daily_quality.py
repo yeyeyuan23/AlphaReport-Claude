@@ -39,6 +39,31 @@ def test_pending_papers_never_fill_empty_focus_section():
     assert "全文获取失败" in brief
 
 
+def test_zero_current_source_results_can_feature_existing_library_paper_with_clear_counts():
+    from reportagent.services.report_briefing import render_briefing
+    p = evaluated_paper(1)
+    brief = render_briefing([p], 'fixture', source_statuses=[
+        {'source': 'arxiv', 'status': 'error', 'valid': 0, 'errors': ['HTTP 429']},
+        {'source': 'eastmoney', 'status': 'empty', 'valid': 0},
+        {'source': 'bigquant', 'status': 'empty', 'valid': 0},
+    ])
+    assert '本次在线采集有效资料 0 条' in brief
+    assert '本期检查 1 篇库中候选' in brief
+    assert '重点推荐 1 篇' in brief
+    assert '此前已收录' in brief
+    assert '覆盖可能不完整' in brief
+
+
+def test_valid_source_count_is_not_treated_as_selected_paper_count():
+    from reportagent.services.report_briefing import render_briefing
+    brief = render_briefing([evaluated_paper(1)], 'fixture', source_statuses=[
+        {'source': 'arxiv', 'status': 'ok', 'valid': 3},
+    ])
+    assert '本次在线采集有效资料 3 条' in brief
+    assert '本期检查 1 篇库中候选' in brief
+    assert '重点推荐 1 篇' in brief
+
+
 @pytest.mark.parametrize(('source', 'label'), [('arxiv', '学术论文'), ('eastmoney', '券商研报'), ('bigquant', '社区研究')])
 def test_reading_priority_features_sound_work_across_sources_and_discloses_limits(source, label):
     from reportagent.services.report_briefing import render_briefing

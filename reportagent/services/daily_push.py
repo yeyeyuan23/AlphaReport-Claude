@@ -386,7 +386,7 @@ def fallback_briefing(papers: list[dict], date_label: str = "") -> str:
     label = date_label or datetime.now().strftime("%Y-%m-%d")
     lines = [
         f"### 📊 概览（{label}）",
-        f"共收录 {len(papers)} 篇量化金融精选论文\n",
+        f"本期选入 {len(papers)} 篇库中论文\n",
     ]
     # Group by source
     sources = {}
@@ -478,7 +478,7 @@ def send_feishu_card(receive_id: str, briefing: str, papers: list[dict], date_la
     # Header
     elements.append({
         "tag": "markdown",
-        "content": f"**📊 量化研报日报 — {label}**\n共收录 {len(papers)} 篇论文"
+        "content": f"**📊 量化研报日报 — {label}**\n本期选入 {len(papers)} 篇库中论文"
     })
 
     # Native section breaks keep lists and the next heading visually separate.
