@@ -309,17 +309,3 @@ class LLMClient:
                 + "\n\nIMPORTANT: Respond with ONLY a valid JSON object, no markdown fences or extra text.",
             }
         return patched
-
-    # --- Shared ---
-
-    async def expand_queries(self, topics: list[str], keywords: list[str]) -> list[str]:
-        prompt = (
-            "Given these research topics and keywords, generate 3-5 expanded search queries "
-            "that would help find relevant academic papers and research reports. "
-            "Include both English and Chinese variants where applicable.\n\n"
-            f"Topics: {', '.join(topics)}\n"
-            f"Keywords: {', '.join(keywords)}\n\n"
-            "Return a JSON object with key 'queries' containing a list of search query strings."
-        )
-        result = await self.chat_json([{"role": "user", "content": prompt}])
-        return result.get("queries", topics)

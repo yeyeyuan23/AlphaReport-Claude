@@ -44,13 +44,3 @@ class PDFExtractor:
             file_size_bytes=file_size_bytes,
             first_page_text=text_parts[0] if text_parts else "",
         )
-
-    def batch_extract(self, directory: str | Path) -> list[PDFContent]:
-        directory = Path(directory)
-        results = []
-        for pdf_file in sorted(directory.rglob("*.pdf")):
-            try:
-                results.append(self.extract(pdf_file))
-            except Exception:
-                pass
-        return results

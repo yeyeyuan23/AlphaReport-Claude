@@ -117,40 +117,6 @@ class StorageResult(BaseModel):
     report_ids: list[int] = Field(default_factory=list)
 
 
-class ReportSummary(BaseModel):
-    id: int
-    title: str
-    authors: list[str]
-    abstract: Optional[str]
-    source: SourceType
-    source_url: Optional[str]
-    doi: Optional[str]
-    published_date: Optional[datetime]
-    has_full_text: bool
-    pdf_path: Optional[str]
-    markets: list[str]
-    asset_classes: list[str]
-    frequencies: list[str]
-    topics: list[str]
-    custom_tags: list[str]
-    content_hash: str
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-class CollectionTaskResponse(BaseModel):
-    task_id: str
-    status: str
-    phase: str
-    progress_message: str
-    results_count: int = 0
-    storage_result: Optional[StorageResult] = None
-    created_at: str
-    updated_at: str
-
-
 class DataInfo(BaseModel):
     market: str = ""
     instruments: list[str] = Field(default_factory=list)
@@ -242,35 +208,6 @@ class AnalysisResult(BaseModel):
     summary: str = ""
     depth: str = "standard"
     analyzed_at: str = ""
-
-
-class KnowledgeCard(BaseModel):
-    """Structured summary card for report detail page display.
-
-    Designed for the 6-section layout:
-    - summary: original paper overview
-    - highlights: key findings as bullet points
-    - methodology_steps: numbered methodology breakdown
-    - results: empirical results description
-    - marginal_contributions: what this paper adds beyond existing literature
-    - implications: practical implications for quant investment
-    """
-
-    summary: str = ""
-    highlights: list[str] = Field(default_factory=list)
-    methodology_steps: list[str] = Field(default_factory=list)
-    results: str = ""
-    marginal_contributions: str = ""
-    implications: list[str] = Field(default_factory=list)
-    topics: list[str] = Field(default_factory=list)
-    asset_classes: list[str] = Field(default_factory=list)
-    quality_score: Optional[float] = None
-    status: str = "pending"
-    quality_label: str = "待核验"
-    notice: str = ""
-    limitations: list[str] = Field(default_factory=list)
-    evidence: list[dict] = Field(default_factory=list)
-    provenance: dict = Field(default_factory=dict)
 
 
 class ReportListParams(BaseModel):

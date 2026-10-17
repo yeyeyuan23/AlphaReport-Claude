@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
 from typing import Optional
 
 from sqlalchemy import or_, desc, asc, func
 from sqlalchemy.orm import Session
 
-from reportagent.models.database import Report, Tag, SearchHistory
+from reportagent.models.database import Report, Tag
 from reportagent.classifiers.provenance import (
     classification_material,
     reusable_provenance,
@@ -511,52 +510,3 @@ class ReportRepository:
             "with_full_text": with_text,
             "without_full_text": total - with_text,
         }
-
-
-class SearchHistoryRepository:
-    def __init__(self, session: Session):
-        self.session = session
-
-    def create(self, task_id: str, criteria_json: str) -> SearchHistory:
-        record = SearchHistory(task_id=task_id, criteria_json=criteria_json)
-        self.session.add(record)
-        self.session.commit()
-        return record
-
-    def update_status(
-        self,
-        task_id: str,
-        status: str,
-        results_count: int = 0,
-        newly_added: int = 0,
-        errors: Optional[list[str]] = None,
-    ):
-        record = (
-            self.session.query(SearchHistory)
-            .filter(SearchHistory.task_id == task_id)
-            .first()
-        )
-        if record:
-            record.status = status
-            record.results_count = results_count
-            record.newly_added = newly_added
-            if errors:
-                record.errors_json = json.dumps(errors)
-            if status in ("completed", "failed"):
-                record.completed_at = datetime.utcnow()
-            self.session.commit()
-
-    def get(self, task_id: str) -> Optional[SearchHistory]:
-        return (
-            self.session.query(SearchHistory)
-            .filter(SearchHistory.task_id == task_id)
-            .first()
-        )
-
-    def list_recent(self, limit: int = 20) -> list[SearchHistory]:
-        return (
-            self.session.query(SearchHistory)
-            .order_by(desc(SearchHistory.created_at))
-            .limit(limit)
-            .all()
-        )
