@@ -1,15 +1,13 @@
 """Legacy analysis adapters retain source evidence across partial model replies."""
 
 import asyncio
-import json
 from copy import deepcopy
 from unittest.mock import AsyncMock
 
 import pytest
 
-from reportagent.agents.analysis_agent import AnalysisAgent, explain_equations
+from reportagent.agents.analysis_agent import explain_equations
 from reportagent.api.reports import _build_summary_from_analysis
-from reportagent.models.schemas import AnalysisResult
 
 
 def _explain(equations, responses, batch_size=3):
@@ -178,154 +176,6 @@ def test_empty_equation_input_does_not_call_model():
 
     assert result == []
     client.chat_json.assert_not_awaited()
-
-
-def test_equation_phase_preserves_global_indices_sources_and_configured_limit():
-    equations = [{"latex": f"x_{index}", "page_idx": index} for index in range(5)]
-    client = AsyncMock()
-    client.chat_json.side_effect = [
-        {
-            "equations": [
-                {"index": 1, "meaning": "解释1"},
-                {"index": 0, "meaning": "解释0"},
-            ]
-        },
-        {
-            "equations": [
-                {"index": 0, "meaning": "wrong batch"},
-                {"index": -1, "meaning": "negative index"},
-                {"index": True, "meaning": "boolean index"},
-                {"meaning": "missing index"},
-                None,
-                {"index": 3, "meaning": "解释3"},
-                {"index": 3, "meaning": "duplicate"},
-            ]
-        },
-    ]
-    agent = AnalysisAgent(client)
-    agent._config["analysis"]["phases"]["equations"].update(
-        max_formulas_per_batch=2, max_equations=4
-    )
-
-    result = asyncio.run(
-        agent._run_phase_equations(
-            "原论文标题", "原文", json.dumps(equations), AnalysisResult()
-        )
-    )
-
-    assert [equation.index for equation in result.equations] == [0, 1, 2, 3]
-    assert [equation.latex for equation in result.equations] == [
-        "x_0",
-        "x_1",
-        "x_2",
-        "x_3",
-    ]
-    assert [equation.meaning for equation in result.equations] == [
-        "解释0",
-        "解释1",
-        "",
-        "解释3",
-    ]
-    assert client.chat_json.await_count == 2
-
-
-def test_equation_phase_keeps_unexplained_formulas_when_model_fails_or_returns_invalid_fields():
-    client = AsyncMock()
-    client.chat_json.side_effect = [
-        RuntimeError("model unavailable"),
-        {"equations": [{"index": 1, "meaning": None, "symbols": {"x": None}}]},
-    ]
-    agent = AnalysisAgent(client)
-    agent._config["analysis"]["phases"]["equations"]["max_formulas_per_batch"] = 1
-
-    result = asyncio.run(
-        agent._run_phase_equations(
-            "原论文标题", "原文", '["x=y", "z=w"]', AnalysisResult()
-        )
-    )
-
-    assert [equation.index for equation in result.equations] == [0, 1]
-    assert [equation.latex for equation in result.equations] == ["x=y", "z=w"]
-    assert all(
-        equation.meaning == "" and equation.symbols == {}
-        for equation in result.equations
-    )
-
-
-@pytest.mark.parametrize(
-    "optional_fields",
-    [
-        {
-            "meaning": None,
-            "symbols": None,
-            "role_in_paper": None,
-            "is_key_formula": None,
-        },
-        {
-            "meaning": [],
-            "symbols": {"x": None},
-            "role_in_paper": {},
-            "is_key_formula": "false",
-        },
-    ],
-)
-def test_equation_phase_tolerates_invalid_optional_fields_in_saved_source(
-    optional_fields,
-):
-    client = AsyncMock()
-    client.chat_json.return_value = {}
-    agent = AnalysisAgent(client)
-
-    result = asyncio.run(
-        agent._run_phase_equations(
-            "原论文标题",
-            "原文",
-            json.dumps([{"latex": "x=y", "page_idx": 7, **optional_fields}]),
-            AnalysisResult(),
-        )
-    )
-
-    assert len(result.equations) == 1
-    assert result.equations[0].model_dump() == {
-        "index": 0,
-        "latex": "x=y",
-        "meaning": "",
-        "symbols": {},
-        "role_in_paper": "",
-        "is_key_formula": False,
-    }
-
-
-@pytest.mark.parametrize("source_latex", [None, 0, 42, False, [], {"bad": "formula"}])
-@pytest.mark.parametrize("model_fails", [False, True])
-def test_equation_phase_keeps_later_formulas_when_source_latex_is_not_text(
-    source_latex, model_fails
-):
-    equations = [
-        {"latex": source_latex, "page_idx": 7},
-        {"latex": "x=y", "page_idx": 8},
-    ]
-    original = deepcopy(equations)
-    client = AsyncMock()
-    if model_fails:
-        client.chat_json.side_effect = RuntimeError("model unavailable")
-    else:
-        client.chat_json.return_value = {
-            "equations": [{"index": 1, "meaning": "正确解释"}]
-        }
-    agent = AnalysisAgent(client)
-
-    result = asyncio.run(
-        agent._run_phase_equations(
-            "原论文标题", "原文", json.dumps(equations), AnalysisResult()
-        )
-    )
-
-    assert [equation.index for equation in result.equations] == [0, 1]
-    assert [equation.latex for equation in result.equations] == ["", "x=y"]
-    assert result.equations[0].meaning == ""
-    assert result.equations[1].meaning == ("" if model_fails else "正确解释")
-    assert equations == original
 
 
 def test_analysis_point_summary_preserves_report_title_and_top_level_analysis():

@@ -17,7 +17,6 @@ from reportagent.models.schemas import (
     AShareApplicability,
     BiasRisks,
     DataInfo,
-    EquationExplanation,
     FactorInfo,
     Methodology,
     ModelArchitecture,
@@ -101,7 +100,7 @@ async def explain_equations(
 
     Takes MinerU-extracted equations (latex + page_idx) and returns them
     enriched with meaning, symbol definitions, and role-in-paper.
-    Used by the /parse endpoint; shares source-preserving merging with Phase 3.
+    Used by the /parse endpoint; preserves extracted formulas and source metadata.
     """
     if not equations:
         return []
@@ -476,94 +475,6 @@ class AnalysisAgent:
 
         return result
 
-    # ---- Phase 3: Equations ----
-
-    async def _run_phase_equations(
-        self, title: str, full_text: str, equations_json: str, result: AnalysisResult
-    ) -> AnalysisResult:
-        try:
-            equations = json.loads(equations_json)
-        except (json.JSONDecodeError, TypeError):
-            return result
-
-        if not equations:
-            return result
-
-        # Normalize PDF extraction artifacts in formulas
-        from reportagent.processors.formula_normalizer import normalize_formulas
-
-        # Missing/non-text extraction is unknown, not a formula to stringify.
-        equations = [
-            {
-                **eq,
-                "latex": eq["latex"] if isinstance(eq.get("latex"), str) else "",
-            }
-            if isinstance(eq, dict)
-            else eq
-            for eq in equations
-        ]
-        equations = normalize_formulas(equations)
-
-        cfg = self._phase_config("equations")
-        batch_size = cfg.get("max_formulas_per_batch", 3)
-        eq_context_chars = cfg.get("max_context_chars", 8000)
-        max_equations = cfg.get("max_equations", 15)
-        all_explanations: list[EquationExplanation] = []
-
-        equations_to_process = equations[:max_equations]
-
-        for batch_start in range(0, len(equations_to_process), batch_size):
-            batch = equations_to_process[batch_start : batch_start + batch_size]
-            eq_list = []
-            for i, eq in enumerate(batch):
-                idx = batch_start + i
-                latex = eq.get("latex", "") if isinstance(eq, dict) else str(eq)
-                eq_list.append(f"公式 {idx}: {latex}")
-
-            prompt = cfg.get("user_prompt_template", "").format(
-                title=title,
-                context=full_text[:eq_context_chars],
-                equations="\n".join(eq_list),
-                count=len(batch),
-            )
-            prompt += (
-                "\nindex 必须使用公式列表中的原始编号，不要按本批次从 0 重新编号。"
-            )
-            schema = cfg.get("output_schema", "")
-            if schema:
-                prompt += (
-                    f"\n\n请严格按照以下 JSON Schema 返回，只返回 JSON：\n{schema}"
-                )
-
-            resp = None
-            try:
-                resp = await self._get_llm().chat_json(
-                    [
-                        {"role": "system", "content": cfg.get("system_prompt", "")},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=cfg.get("temperature", 0.1),
-                    max_tokens=cfg.get("max_tokens", 1500),
-                    model=self._phase_model(cfg),
-                )
-            except Exception:
-                logger.warning(
-                    "Phase 3 batch %d failed for '%s'", batch_start, title[:50]
-                )
-            for offset, eq in enumerate(
-                _merge_equation_explanations(batch, resp, batch_start)
-            ):
-                all_explanations.append(
-                    EquationExplanation(
-                        index=batch_start + offset,
-                        latex=eq.get("latex", ""),
-                        **_equation_explanation_fields(eq),
-                    )
-                )
-
-        result.equations = all_explanations
-        return result
-
     # ---- Phase 4: Assessment ----
 
     async def _run_phase_assessment(
@@ -646,103 +557,6 @@ class AnalysisAgent:
             logger.warning("Phase 4 (assessment) failed for '%s': %s", title[:50], e)
 
         return result
-
-    # ---- Merge equations into methodology ----
-
-    async def _merge_equations_into_methodology(
-        self, result: AnalysisResult, title: str
-    ) -> None:
-        """Merge formula explanations into methodology step descriptions.
-
-        Rewrites each step's description to naturally embed related formula
-        explanations, so formulas are not listed separately but explained in
-        the context of the methodology they belong to.
-        """
-        if not result.methodology or not result.methodology.analysis_points:
-            return
-        if not result.equations:
-            return
-
-        steps = result.methodology.analysis_points
-        equations = result.equations
-
-        # Collect all points that have related formulas, batch into one LLM call
-        merge_tasks: list[dict] = []
-        for i, point in enumerate(steps):
-            if not isinstance(point, dict):
-                continue
-            related = point.get("related_formulas", [])
-            if not related:
-                continue
-
-            eq_context_parts = []
-            for fi in related:
-                if fi < len(equations):
-                    eq = equations[fi]
-                    eq_context_parts.append(
-                        f"公式{fi}：$${eq.latex}$$\n"
-                        f"含义：{eq.meaning}\n"
-                        f"在论文中的作用：{eq.role_in_paper}"
-                    )
-
-            if eq_context_parts:
-                merge_tasks.append(
-                    {
-                        "step_idx": i,
-                        "title": point.get("title", ""),
-                        "analysis": point.get("analysis", ""),
-                        "formulas": "\n\n".join(eq_context_parts),
-                    }
-                )
-
-        if not merge_tasks:
-            return
-
-        # Build one batched prompt for all steps
-        sections = []
-        for i, task in enumerate(merge_tasks):
-            sections.append(
-                f"### 分析点{i + 1}：{task['title']}\n"
-                f"原分析：{task['analysis']}\n"
-                f"关联公式解读：\n{task['formulas']}"
-            )
-        batched = "\n\n---\n\n".join(sections)
-
-        prompt = (
-            "你是一位量化金融方法论专家。以下是论文方法步骤及其关联公式的解读。\n"
-            "请将每个步骤的公式解读**融入**到步骤描述中，形成连贯的叙述段落。\n\n"
-            "【强制格式要求 - 必须严格遵守】\n"
-            "- 完整公式用 $$...$$ 单独一行展示，变量符号用 $...$ 行内包裹。\n"
-            "- 严禁使用 \\(...\\) 或 \\[...\\] 格式。\n"
-            "- 每个步骤的描述应为 3-6 句的连贯叙述，公式作为描述的一部分自然呈现。\n"
-            "- 不要单独列出公式，公式及其含义应融入方法描述中。\n\n"
-            "【输出格式】用 JSON 返回，key 为步骤编号（step_idx），value 为融合后的描述文本：\n"
-            '{"descriptions": {"1": "融合后描述...", "2": "融合后描述..."}}\n\n'
-            f"论文标题：{title}\n\n"
-            f"{batched}"
-        )
-
-        try:
-            resp = await self._get_llm().chat_json(
-                [
-                    {
-                        "role": "system",
-                        "content": "你是量化金融方法论专家。所有输出用中文。严格按照 JSON 格式返回。",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.2,
-                max_tokens=3000,
-            )
-            desc_map = resp.get("descriptions", {})
-            for task in merge_tasks:
-                new_desc = desc_map.get(str(task["step_idx"]), "")
-                if new_desc:
-                    idx = task["step_idx"]
-                    if idx < len(steps) and isinstance(steps[idx], dict):
-                        steps[idx]["analysis"] = _normalize_latex_delimiters(new_desc)
-        except Exception as e:
-            logger.warning("Merge equations into methodology failed: %s", e)
 
     # ---- Output latexify ----
 
