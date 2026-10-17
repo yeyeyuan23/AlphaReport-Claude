@@ -35,6 +35,10 @@ function SectionCard({
 }
 
 export default function KnowledgeCard({ reportId }: { reportId: number }) {
+  return <KnowledgeCardContent key={reportId} reportId={reportId} />;
+}
+
+function KnowledgeCardContent({ reportId }: { reportId: number }) {
   const [data, setData] = useState<KnowledgeCardType | null>(null);
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
@@ -74,7 +78,11 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
     getKnowledgeCard(reportId)
       .then((res) => {
         if (requestId.current !== id) return;
-        setData(res.data);
+        if (res.success && res.data) {
+          setData(res.data);
+        } else {
+          setError((res as { error?: string }).error || 'Failed to load knowledge card');
+        }
         setLoading(false);
       })
       .catch((e: Error) => {

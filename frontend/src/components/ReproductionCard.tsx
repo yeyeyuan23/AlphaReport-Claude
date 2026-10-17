@@ -22,6 +22,10 @@ const statusLabels = {
 };
 
 export default function ReproductionCard({ reportId }: { reportId: number }) {
+  return <ReproductionCardContent key={reportId} reportId={reportId} />;
+}
+
+function ReproductionCardContent({ reportId }: { reportId: number }) {
   const [data, setData] = useState<Preparation | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -34,6 +38,7 @@ export default function ReproductionCard({ reportId }: { reportId: number }) {
     getReproductionCard(reportId)
       .then((res) => {
         if (id === requestId.current) {
+          if (!res.success || !res.data) throw new Error('Missing preparation result');
           setData(res.data);
           setLoading(false);
           setError('');
