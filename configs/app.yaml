@@ -18,13 +18,44 @@ sources:
     enabled: true
     rate_limit_seconds: 3
     download_pdfs: true
-    default_categories:
-      - "q-fin.TR"
-      - "q-fin.PM"
-      - "q-fin.RM"
-      - "q-fin.ST"
-      - "q-fin.CP"
-      - "q-fin.MF"
+    search_scope:
+      full_categories: ["q-fin"]  # 全部九个子类及跨分类公告，不加主题词限制
+      topic_groups:
+        - name: "ml_methods"
+          categories: ["cs.LG", "stat.ML"]
+          # 标题或摘要命中任意词组；不要求包含 finance。忽略大小写、连字符和换行。
+          keywords:
+            - "time series"
+            - "probabilistic forecasting"
+            - "probabilistic prediction"
+            - "quantile regression"
+            - "quantile forecasting"
+            - "distribution shift"
+            - "distributional shift"
+            - "concept drift"
+            - "online learning"
+            - "learning to rank"
+            - "cross sectional prediction"
+            - "stock ranking"
+            - "tabular learning"
+            - "tabular data"
+            - "tabular prediction"
+        - name: "portfolio_execution"
+          categories: ["math.OC"]
+          keywords:
+            - "portfolio optimization"
+            - "portfolio selection"
+            - "portfolio allocation"
+            - "asset allocation"
+            - "mean variance"
+            - "optimal execution"
+            - "transaction cost"
+            - "transaction costs"
+            - "turnover constraint"
+            - "turnover constraints"
+            - "robust portfolio"
+            - "risk constrained optimization"
+            - "risk constrained portfolio"
 
   eastmoney:
     enabled: true

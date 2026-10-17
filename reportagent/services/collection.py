@@ -466,6 +466,8 @@ async def collect_reports(
                 "screening": screening,
             }
         )
+        if getattr(source, "discovery_stats", None):
+            source_statuses[-1]["discovery"] = source.discovery_stats
         for error in errors:
             message = f"Source {source_name}: {error}"
             logger.warning(message)

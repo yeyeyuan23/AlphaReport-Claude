@@ -48,6 +48,9 @@ def build_sources(source_names: list[str] | None = None) -> list[BaseSource]:
                     download_pdfs=get_config(
                         "sources", name, "download_pdfs", default=True
                     ),
+                    search_scope=get_config(
+                        "sources", name, "search_scope", default=None
+                    ),
                 )
             )
         elif name == "eastmoney":

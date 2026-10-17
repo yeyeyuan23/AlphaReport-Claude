@@ -60,7 +60,7 @@ def main():
     parser.add_argument(
         "--broad",
         action="store_true",
-        help="Broad search: pull ALL q-fin papers without keyword filter (全量拉取)",
+        help="Search app.yaml full categories and category-specific title/abstract topics",
     )
     parser.add_argument(
         "--output",

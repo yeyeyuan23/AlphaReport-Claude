@@ -15,10 +15,9 @@ from reportagent.sources.arxiv_catalog import (
     requested_days,
 )
 from reportagent.sources.base import SourceParseError
+from reportagent.sources.arxiv_scope import ArxivSearchScope
 
 
-# The q-fin archive includes all nine q-fin subcategories and their cross-lists.
-ANNOUNCEMENT_CATEGORIES = ("q-fin",)
 logger = logging.getLogger(__name__)
 
 
@@ -27,6 +26,7 @@ class AnnouncementHTTP:
 
     def __init__(self, client, interval):
         self.client, self.interval, self.started = client, interval, False
+        self.requests = 0
 
     async def get(self, url, **kwargs):
         for attempt in range(3):
@@ -34,6 +34,7 @@ class AnnouncementHTTP:
                 await asyncio.sleep(self.interval)
             self.started = True
             try:
+                self.requests += 1
                 response = await self.client.get(url, **kwargs)
                 response.raise_for_status()
                 return response
@@ -127,23 +128,70 @@ async def _batch_entries(http, url, category, batch, snapshot, diagnostics):
 
 
 async def fetch_announcements(
-    criteria, *, diagnostics, partial_results, rate_limit_seconds
+    criteria,
+    *,
+    diagnostics,
+    partial_results,
+    rate_limit_seconds,
+    scope=None,
+    stats=None,
 ):
+    scope = scope or ArxivSearchScope.from_config()
+    stats = stats if stats is not None else {}
+    stats.update(
+        categories={},
+        unique_announcements=0,
+        metadata_loaded=0,
+        selected=0,
+        added_by_topics=0,
+        by_topic_group={group.name: 0 for group in scope.topic_groups},
+        selected_by_category={category: 0 for category in scope.categories},
+    )
     days = list(requested_days(criteria))
     timeout = httpx.Timeout(30.0, connect=15.0)
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         http = AnnouncementHTTP(client, rate_limit_seconds)
-        found = {}
-        for category in ANNOUNCEMENT_CATEGORIES:
+        found, listed = {}, {}
+        for category in scope.categories:
             try:
                 rows = await _category_announcements(http, category, days, diagnostics)
+                stats["categories"][category] = len(rows)
                 for entry in rows:
+                    listed.setdefault(entry[0], []).append(category)
                     previous = found.get(entry[0])
                     if previous is None or previous[1].day < entry[1].day:
                         found[entry[0]] = entry
+                logger.info(
+                    "arXiv category=%s listed=%d unique_so_far=%d",
+                    category,
+                    len(rows),
+                    len(found),
+                )
             except Exception as error:
+                stats["categories"][category] = None
                 diagnostics.record_error(error, f"announcements {category}")
-        await _fetch_abstracts(http, list(found.values()), partial_results, diagnostics)
+        stats["unique_announcements"] = len(found)
+        candidates = []
+        await _fetch_abstracts(http, list(found.values()), candidates, diagnostics)
+        stats["metadata_loaded"] = len(candidates)
+        for paper in candidates:
+            identifier = re.sub(r"v\d+$", "", paper.arxiv_id or "")
+            categories = list(dict.fromkeys(listed[identifier]))
+            decision = scope.match(categories, paper.title, paper.abstract)
+            if not decision:
+                continue
+            paper.raw_metadata["announcement_info"]["listed_categories"] = categories
+            paper.raw_metadata["arxiv_search_scope"] = decision
+            partial_results.append(paper)
+            for category in categories:
+                stats["selected_by_category"][category] = (
+                    stats["selected_by_category"].get(category, 0) + 1
+                )
+            stats["selected"] += 1
+            stats["added_by_topics"] += int(not decision["full_categories"])
+            for name in decision["topic_groups"]:
+                stats["by_topic_group"][name] = stats["by_topic_group"].get(name, 0) + 1
+        stats["http_requests"] = http.requests
     return partial_results
 
 
@@ -153,6 +201,12 @@ async def _fetch_abstracts(http, entries, results, diagnostics):
 
     for offset in range(0, len(entries), 100):
         chunk = entries[offset : offset + 100]
+        logger.info(
+            "arXiv abstract batch=%d/%d papers=%d",
+            offset // 100 + 1,
+            (len(entries) + 99) // 100,
+            len(chunk),
+        )
         expected = {entry[0]: entry for entry in chunk}
         papers = {}
         try:

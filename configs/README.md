@@ -25,6 +25,16 @@
 周五 09:00 日报和周报分别运行；已有外部周报调度应移除或关闭对应内置任务，避免重复发送。
 健康接口 `/api/v1/health` 返回周报的 `weekly_enabled` 与 `weekly_next_run`。
 
+`sources.arxiv.search_scope` 同时控制自动公告候选和手动 broad 检索范围：
+`full_categories: ["q-fin"]` 保留全部九个量化金融子分类及跨分类公告；
+`topic_groups` 分别为 `cs.LG/stat.ML` 的预测、分布漂移、在线学习、排序与表格学习主题，
+以及 `math.OC` 的组合构建、交易成本和最优执行主题。每组配置 `name`、`categories`、`keywords`，
+同组关键词按“或”匹配标题和摘要，不要求金融关键词，匹配会统一大小写、标点/连字符与空白。
+修改分类或词组后重启服务。自动采集仍完整枚举公告窗口且无数量上限，跨分类按 arXiv 编号去重；
+完整 q-fin 范围不受扩展主题词限制。旧的未生效 `default_categories` 已由此配置取代。
+候选预检命令为 `.venv/bin/python -m reportagent.cli.arxiv_candidates`；它只读公开元数据，
+不进行模型评分、下载或写库；统计及总耗时估计应区分元数据、分类和全文证据评估阶段。
+
 Web 的监听地址与端口由 `ALPHAREPORT_BIND_HOST`、`ALPHAREPORT_PORT` 环境变量控制。
 部署检查与运行时共用 `feishu.app_id_env`、`feishu.app_secret_env` 和 `llm.api_key_env` 的凭据配置；更换模型服务时不额外要求 DeepSeek 专属密钥。
 `push_directions.yaml` 中实际生效的 `push_settings` 包括：相关性阈值 `llm_filter_threshold`、

@@ -85,9 +85,18 @@ class ArxivSource(BaseSource):
         "text mining": ["q-fin.ST", "cs.CL"],
     }
 
-    def __init__(self, rate_limit_seconds: float = 3.0, download_pdfs: bool = True):
+    def __init__(
+        self,
+        rate_limit_seconds: float = 3.0,
+        download_pdfs: bool = True,
+        search_scope: dict | None = None,
+    ):
+        from reportagent.sources.arxiv_scope import ArxivSearchScope
+
         self.rate_limit_seconds = rate_limit_seconds
         self.download_pdfs = download_pdfs
+        self.search_scope = ArxivSearchScope.from_config(search_scope)
+        self.discovery_stats = {}
 
     @property
     def source_type(self) -> SourceType:
@@ -118,57 +127,11 @@ class ArxivSource(BaseSource):
         return await self._do_search(query, criteria)
 
     async def search_broad(self, criteria: UserCriteria) -> list[SearchResult]:
-        """Broad search: pull ALL papers from q-fin categories + ML/Stat/AI/OC cross-category.
-
-        No keyword restrictions — pulls everything in quant-finance arXiv categories
-        plus finance-relevant papers from stat.ML / cs.LG / cs.CL / cs.AI / math.OC.
-        Designed for "全量拉取 + LLM过滤" pipeline.
-
-        Reference: QuantPaper/LLMQuant monitors q-fin.* + cs.LG + cs.AI + stat.ML + math.OC
-        """
+        """Search the configured full categories and transferable-method topics."""
         if criteria.date_basis == "announcement":
             return await self.search_announcements(criteria)
         self._start_search()
-        # All 9 q-fin subcategories
-        qfin_cats = [
-            "q-fin.CP",
-            "q-fin.EC",
-            "q-fin.GN",
-            "q-fin.MF",
-            "q-fin.PM",
-            "q-fin.PR",
-            "q-fin.RM",
-            "q-fin.ST",
-            "q-fin.TR",
-        ]
-        cat_query = " OR ".join(f"cat:{c}" for c in qfin_cats)
-
-        # Cross-category: ML/Stat/CL/AI/OC papers with finance relevance
-        # cs.AI: 量化论文大量散落在 AI 分类（LLM-based trading, RL agent etc.）
-        # math.OC: 组合优化、最优执行等方法论论文常在优化控制分类
-        finance_terms = [
-            "finance",
-            "financial",
-            "stock",
-            "trading",
-            "portfolio",
-            "quantitative",
-            "market",
-            "volatility",
-            "option",
-            "risk",
-            "asset",
-            "equity",
-            "factor",
-        ]
-        fin_term_query = " OR ".join(f'all:"{t}"' for t in finance_terms)
-        cross_cats = ["stat.ML", "cs.LG", "cs.CL", "cs.AI", "math.OC"]
-        cross_cat_query = " OR ".join(f"cat:{c}" for c in cross_cats)
-        cross_query = f"({cross_cat_query}) AND ({fin_term_query})"
-
-        query = f"({cat_query}) OR ({cross_query})"
-        logger.info("Broad search query: %s", query[:200])
-        return await self._do_search(query, criteria)
+        return await self._do_search(self.search_scope.query(), criteria)
 
     async def search_announcements(self, criteria: UserCriteria) -> list[SearchResult]:
         """Read dated official announcement lists before relevance screening.
@@ -180,12 +143,15 @@ class ArxivSource(BaseSource):
 
         self._start_search()
         partial_results: list[SearchResult] = []
+        self.discovery_stats = {}
         try:
             await fetch_announcements(
                 criteria,
                 diagnostics=self.last_search,
                 partial_results=partial_results,
                 rate_limit_seconds=self.rate_limit_seconds,
+                scope=self.search_scope,
+                stats=self.discovery_stats,
             )
         except Exception as error:
             self.last_search.record_error(error, "announcements; coverage incomplete")
