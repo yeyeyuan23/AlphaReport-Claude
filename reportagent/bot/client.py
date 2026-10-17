@@ -1,17 +1,15 @@
 """Feishu SDK send/reply operations."""
 
 import logging
-import os
 
-import lark_oapi as lark
 
 logger = logging.getLogger(__name__)
-APP_ID = os.environ.get("FEISHU_APP_ID", "")
-APP_SECRET = os.environ.get("FEISHU_APP_SECRET", "")
 
 
 def _client():
-    return lark.Client.builder().app_id(APP_ID).app_secret(APP_SECRET).build()
+    from reportagent.services.feishu_transport import build_client
+
+    return build_client()
 
 
 def _send(text, receive_id, *, receive_type="chat_id", reply_to=None):

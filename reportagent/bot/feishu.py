@@ -3,6 +3,7 @@
 import json
 import asyncio
 import logging
+from dataclasses import dataclass
 import os
 import re
 import subprocess
@@ -292,63 +293,106 @@ def handle_cmd(text, chat_id, chat_type):
     return None
 
 
+@dataclass(frozen=True)
+class IncomingMessage:
+    message_id: str
+    chat_id: str
+    chat_type: str
+    sender_id: str
+    text: str
+
+
+def _incoming(*, message_id="", chat_id="", chat_type="private", sender_id="", text=""):
+    if not all(
+        isinstance(value, str)
+        for value in (message_id, chat_id, chat_type, sender_id, text)
+    ):
+        raise ValueError("Invalid incoming message fields")
+    return IncomingMessage(
+        message_id,
+        chat_id or sender_id,
+        "group" if chat_type == "group" else "p2p",
+        sender_id,
+        text,
+    )
+
+
+def _reply(event: IncomingMessage, text: str):
+    if event.chat_type == "group":
+        if event.message_id:
+            return reply_msg(event.message_id, text)
+        return send_chat(event.chat_id, text)
+    return send_text(event.sender_id, text)
+
+
+def handle_incoming_message(event: IncomingMessage):
+    """Authorization, command dispatch and conversation policy exist only here."""
+    if not sender_allowed(event.sender_id):
+        logger.warning(
+            "Ignored unauthorized sender: %s chat=%s", event.sender_id, event.chat_id
+        )
+        return
+    if not event.text.strip():
+        return
+    # Capture before any acknowledgement or worker scheduling can delay a clear.
+    session_snapshot = get_session_snapshot(event.chat_id)
+    logger.info("[%s] %s", event.chat_type, event.text[:80])
+    react(event.message_id, "THUMBSUP")
+    reply = handle_cmd(event.text, event.chat_id, event.chat_type)
+    if reply:
+        _reply(event, reply)
+        react(event.message_id, "OK")
+        return
+    _reply(event, "🤔 正在处理...")
+
+    def process():
+        answer = ask_claude(
+            event.text, event.chat_id, session_snapshot=session_snapshot
+        )
+        _reply(event, answer)
+
+    threading.Thread(target=process, daemon=True).start()
+
+
 def on_message(data):
+    """SDK transport adapter; all business handling uses the normalized event."""
     try:
-        msg = data.event.message
-        sender = data.event.sender
-        mid = msg.message_id or ""
-        cid = getattr(msg, "chat_id", "") or ""
-        ct = msg.chat_type or ""
-        text = json.loads(msg.content or "{}").get("text", "")
-        # open_id for private chats; chat_id for groups
-        open_id = sender.sender_id.open_id if sender and sender.sender_id else ""
-        if not sender_allowed(open_id):
-            logger.warning("Ignored unauthorized sender: %s chat=%s", open_id, cid)
-            return
-        if not text.strip():
-            return
+        msg, sender = data.event.message, data.event.sender
+        payload = json.loads(msg.content or "{}")
+        handle_incoming_message(
+            _incoming(
+                message_id=msg.message_id or "",
+                chat_id=getattr(msg, "chat_id", "") or "",
+                chat_type=msg.chat_type or "private",
+                sender_id=sender.sender_id.open_id
+                if sender and sender.sender_id
+                else "",
+                text=payload.get("text", ""),
+            )
+        )
+    except Exception:
+        logger.exception("Could not process Feishu SDK event")
 
-        # Capture before acknowledgements or worker scheduling can delay this message.
-        session_snapshot = get_session_snapshot(cid)
-        logger.info(f"[{ct}] {text[:80]}")
-        react(mid, "THUMBSUP")  # 👍 已收到
 
-        # Command?
-        reply = handle_cmd(text, cid, ct)
-        if reply:
-            if ct == "group":
-                if mid:
-                    reply_msg(mid, reply)
-                else:
-                    send_chat(cid, reply)
-            else:
-                send_text(open_id, reply)
-            react(mid, "OK")  # ✅ 完成
-            return
-
-        # Claude Code (async)
-        if ct == "group":
-            if mid:
-                reply_msg(mid, "🤔 正在处理...")
-            else:
-                send_chat(cid, "🤔 正在处理...")
-        else:
-            send_text(open_id, "🤔 正在处理...")
-
-        def process():
-            ans = ask_claude(text, cid, session_snapshot=session_snapshot)
-            if ct == "group":
-                if mid:
-                    reply_msg(mid, ans)
-                else:
-                    send_chat(cid, ans)
-            else:
-                send_text(open_id, ans)
-
-        threading.Thread(target=process, daemon=True).start()
-
-    except Exception as e:
-        logger.error(f"Handler: {e}", exc_info=True)
+def on_message_raw(message):
+    """HTTP inbox transport adapter for the same normalized event handler."""
+    try:
+        handle_incoming_message(
+            _incoming(
+                **{
+                    key: message.get(key, default)
+                    for key, default in (
+                        ("message_id", ""),
+                        ("chat_id", ""),
+                        ("chat_type", "private"),
+                        ("sender_id", ""),
+                        ("text", ""),
+                    )
+                }
+            )
+        )
+    except Exception:
+        logger.exception("Could not process Feishu inbox event")
 
 
 def make_inbox_request():
@@ -392,51 +436,6 @@ def main():
             except Exception:
                 pass
             time.sleep(1)
-
-    def on_message_raw(m):
-        """Process message from webhook inbox."""
-        mid = m.get("message_id", "")
-        cid = m.get("chat_id", "") or m.get("sender_id", "")
-        ct = m.get("chat_type", "private")
-        open_id = m.get("sender_id", "")
-        text = m.get("text", "")
-        if not sender_allowed(open_id):
-            return
-        if not text.strip():
-            return
-        session_snapshot = get_session_snapshot(cid)
-        react(mid, "THUMBSUP")
-        reply = handle_cmd(text, cid, ct)
-        if reply:
-            if ct == "group":
-                if mid:
-                    reply_msg(mid, reply)
-                else:
-                    send_chat(cid, reply)
-            else:
-                send_text(open_id, reply)
-            react(mid, "OK")
-            return
-        # Async Claude
-        if ct == "group":
-            if mid:
-                reply_msg(mid, "🤔 正在处理...")
-            else:
-                send_chat(cid, "🤔 正在处理...")
-        else:
-            send_text(open_id, "🤔 正在处理...")
-
-        def process():
-            ans = ask_claude(text, cid, session_snapshot=session_snapshot)
-            if ct == "group":
-                if mid:
-                    reply_msg(mid, ans)
-                else:
-                    send_chat(cid, ans)
-            else:
-                send_text(open_id, ans)
-
-        threading.Thread(target=process, daemon=True).start()
 
     if http_callback_enabled() and os.environ.get("FEISHU_INBOX_TOKEN"):
         threading.Thread(target=poll_webhook, daemon=True).start()

@@ -30,7 +30,7 @@ class OneReportTests(unittest.TestCase):
         response.success.return_value = False
         response.code = 999
         with patch(
-            "reportagent.services.feishu_service._build_client", return_value=client
+            "reportagent.services.feishu_transport.build_client", return_value=client
         ):
             with self.assertRaises(RuntimeError):
                 _send_to_chat("oc_private", "摘要", "test-request")

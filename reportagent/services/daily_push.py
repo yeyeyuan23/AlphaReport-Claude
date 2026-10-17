@@ -377,18 +377,12 @@ def ensure_paper_links(briefing: str, papers: list[dict]) -> str:
 
 
 def send_complete_text(receive_id: str, text: str, receive_type: str) -> bool:
-    """Send every part, and report failure if any part was rejected."""
-    remaining = text
-    while remaining:
-        boundary = 3000
-        if len(remaining) > boundary:
-            split = remaining.rfind("\n", 0, boundary)
-            if split > 0:
-                boundary = split + 1
-        if not send_feishu_text(receive_id, remaining[:boundary], receive_type):
-            return False
-        remaining = remaining[boundary:]
-    return True
+    """Send every byte-bounded part and preserve the public text-send adapter."""
+    from reportagent.services.feishu_transport import send_complete_text as send_parts
+
+    return send_parts(
+        text, lambda part: send_feishu_text(receive_id, part, receive_type)
+    )
 
 
 # ═══════════════════════════════════════════════════
@@ -397,37 +391,27 @@ def send_complete_text(receive_id: str, text: str, receive_type: str) -> bool:
 
 
 def send_feishu_text(receive_id: str, text: str, receive_type: str = "open_id"):
-    """Send a text message via Feishu API."""
-    import lark_oapi as lark
-    from lark_oapi.api.im.v1.model.create_message_request import CreateMessageRequest
-    from lark_oapi.api.im.v1.model.create_message_request_body import (
-        CreateMessageRequestBody,
+    """Boolean compatibility adapter for the shared SDK delivery primitive."""
+    from reportagent.services.feishu_transport import (
+        build_client,
+        send_payload,
+        send_complete_text as send_parts,
     )
 
-    client = lark.Client.builder().app_id(APP_ID).app_secret(APP_SECRET).build()
-    content = json.dumps({"text": text}, ensure_ascii=False)
-    request = (
-        CreateMessageRequest.builder()
-        .receive_id_type(receive_type)
-        .request_body(
-            CreateMessageRequestBody.builder()
-            .receive_id(receive_id)
-            .msg_type("text")
-            .content(content)
-            .build()
-        )
-        .build()
-    )
     try:
-        resp = client.im.v1.message.create(request)
-        if resp.success():
-            logger.info(f"Sent to {receive_id}")
-            return True
-        else:
-            logger.error(f"Send failed: {resp.code} {resp.msg}")
-            return False
-    except Exception as e:
-        logger.error(f"Send error: {e}")
+        client = build_client()
+        return send_parts(
+            text,
+            lambda part: send_payload(
+                client,
+                "text",
+                json.dumps({"text": part}, ensure_ascii=False),
+                receive_id,
+                receive_type=receive_type,
+            ),
+        )
+    except Exception:
+        logger.warning("Feishu text delivery failed")
         return False
 
 
@@ -480,38 +464,24 @@ def send_feishu_card(
         "elements": elements,
     }
 
-    import lark_oapi as lark
-    from lark_oapi.api.im.v1.model.create_message_request import CreateMessageRequest
-    from lark_oapi.api.im.v1.model.create_message_request_body import (
-        CreateMessageRequestBody,
+    from reportagent.services.feishu_transport import (
+        build_client,
+        send_card_with_fallback,
     )
 
-    client = lark.Client.builder().app_id(APP_ID).app_secret(APP_SECRET).build()
-    card_json = json.dumps(card, ensure_ascii=False)
-    request = (
-        CreateMessageRequest.builder()
-        .receive_id_type(receive_type)
-        .request_body(
-            CreateMessageRequestBody.builder()
-            .receive_id(receive_id)
-            .msg_type("interactive")
-            .content(card_json)
-            .build()
-        )
-        .build()
-    )
     try:
-        resp = client.im.v1.message.create(request)
-        if resp.success():
-            logger.info(f"Card sent to {receive_id}")
-            return True
-        else:
-            logger.error(f"Card send failed: {resp.code} {resp.msg}")
-            # Fall back to text
-            return send_complete_text(receive_id, briefing, receive_type)
-    except Exception as e:
-        logger.error(f"Card send error: {e}")
-        return send_complete_text(receive_id, briefing, receive_type)
+        client = build_client()
+        return send_card_with_fallback(
+            client,
+            card,
+            briefing,
+            receive_id,
+            receive_type=receive_type,
+            text_sender=lambda part: send_feishu_text(receive_id, part, receive_type),
+        )
+    except Exception:
+        logger.warning("Feishu daily card delivery failed")
+        return False
 
 
 # ═══════════════════════════════════════════════════

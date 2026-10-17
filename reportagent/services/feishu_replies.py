@@ -8,21 +8,11 @@ import uuid
 
 from reportagent.services.feishu_markdown import card_sections
 
-CHUNK_BYTES = 7000  # Conservative content budget, including CJK and emoji.
-
-
-def _chunks(text: str, limit: int = CHUNK_BYTES) -> list[str]:
-    chunks, current, size = [], [], 0
-    for char in text:
-        length = len(char.encode("utf-8"))
-        if size + length > limit:
-            chunks.append("".join(current))
-            current, size = [], 0
-        current.append(char)
-        size += length
-    if current:
-        chunks.append("".join(current))
-    return chunks
+from reportagent.services.feishu_transport import (
+    CHUNK_BYTES,
+    text_chunks as _chunks,
+    send_payload,
+)
 
 
 def _cells(line: str) -> list[str]:
@@ -196,52 +186,48 @@ def deliver_response(
     request_id=None,
     title="AlphaReport 回复",
 ) -> list[str]:
-    """Stop on a failed part; never report partial content as complete delivery."""
-    from lark_oapi.api.im.v1.model.create_message_request import CreateMessageRequest
-    from lark_oapi.api.im.v1.model.create_message_request_body import (
-        CreateMessageRequestBody,
-    )
-    from lark_oapi.api.im.v1.model.reply_message_request import ReplyMessageRequest
-    from lark_oapi.api.im.v1.model.reply_message_request_body import (
-        ReplyMessageRequestBody,
-    )
+    """Deliver all parts, with complete plain-text recovery after a card failure."""
 
-    ids = []
-    for index, (kind, content) in enumerate(response_payloads(text, title=title)):
-        if reply_to:
-            body = ReplyMessageRequestBody.builder().msg_type(kind).content(content)
-            request = (
-                ReplyMessageRequest.builder()
-                .message_id(reply_to)
-                .request_body(body.build())
-                .build()
-            )
-            response = client.im.v1.message.reply(request)
-        else:
-            body = (
-                CreateMessageRequestBody.builder()
-                .receive_id(receive_id)
-                .msg_type(kind)
-                .content(content)
-            )
+    def send(parts, *, fallback=False):
+        ids = []
+        for index, (kind, content) in enumerate(parts):
+            part_id = None
             if request_id:
-                body.uuid(
+                part_id = (
                     request_id
-                    if index == 0
+                    if index == 0 and not fallback
                     else str(
-                        uuid.uuid5(uuid.NAMESPACE_URL, request_id + ":" + str(index))
+                        uuid.uuid5(
+                            uuid.NAMESPACE_URL,
+                            request_id
+                            + (":fallback:" if fallback else ":")
+                            + str(index),
+                        )
                     )
                 )
-            request = (
-                CreateMessageRequest.builder()
-                .receive_id_type(receive_type)
-                .request_body(body.build())
-                .build()
+            ids.append(
+                send_payload(
+                    client,
+                    kind,
+                    content,
+                    receive_id,
+                    receive_type=receive_type,
+                    reply_to=reply_to,
+                    request_id=part_id,
+                )
             )
-            response = client.im.v1.message.create(request)
-        if not response.success() or not response.data or not response.data.message_id:
-            raise RuntimeError(
-                f"Feishu response part {index + 1} failed: code={getattr(response, 'code', 'unknown')}"
-            )
-        ids.append(response.data.message_id)
-    return ids
+        return ids
+
+    parts = response_payloads(text, title=title)
+    try:
+        return send(parts)
+    except Exception:
+        if not any(kind == "interactive" for kind, _ in parts):
+            raise
+        return send(
+            [
+                ("text", json.dumps({"text": part}, ensure_ascii=False))
+                for part in _chunks(text)
+            ],
+            fallback=True,
+        )

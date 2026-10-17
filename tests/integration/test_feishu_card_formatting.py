@@ -21,6 +21,7 @@ def test_report_card_formats_headings_without_changing_evidence_or_links(service
     original = source
     client = MagicMock()
     client.im.v1.message.create.return_value.success.return_value = True
+    client.im.v1.message.create.return_value.data.message_id = "om-card"
     builder = MagicMock()
     builder.app_id.return_value = builder
     builder.app_secret.return_value = builder
@@ -62,6 +63,7 @@ def test_coverage_has_a_section_break_after_pending_paper_links(service):
     )
     client = MagicMock()
     client.im.v1.message.create.return_value.success.return_value = True
+    client.im.v1.message.create.return_value.data.message_id = "om-card"
     builder = MagicMock()
     builder.app_id.return_value = builder
     builder.app_secret.return_value = builder

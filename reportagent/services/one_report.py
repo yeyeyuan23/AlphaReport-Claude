@@ -445,11 +445,11 @@ async def prepare_report(arxiv_id: str, *, force: bool = False) -> tuple[Path, d
 
 
 def _send_to_chat(chat_id: str, text: str, request_id: str) -> str:
-    from reportagent.services.feishu_service import _build_client
+    from reportagent.services.feishu_transport import build_client
     from reportagent.services.feishu_replies import deliver_response
 
     message_ids = deliver_response(
-        _build_client(), text, chat_id, request_id=request_id, title="单篇研报分析"
+        build_client(), text, chat_id, request_id=request_id, title="单篇研报分析"
     )
     if not message_ids:
         raise RuntimeError("Empty report cannot be delivered")

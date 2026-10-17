@@ -11,7 +11,6 @@ AlphaReport 在本机运行 Python 服务和 Claude Code 子进程，通过模�
 | 飞书机器人 | `reportagent.bot.feishu` | 接收消息、校验发送者、处理快捷命令和会话 |
 | 默认 Web | `reportagent.main:app` | 提供研报阅读 API 与前端静态文件 |
 | 命令行 | `reportagent.cli.*` | 解析参数、调用共享服务 |
-| 历史完整 Web | `reportagent.api.legacy_app:app` | 可选的 LangGraph 聊天与任务 API，需完整依赖 |
 
 ```text
 飞书普通聊天 → Claude Code 子进程 → 共享技能说明与工具
@@ -21,7 +20,7 @@ AlphaReport 在本机运行 Python 服务和 Claude Code 子进程，通过模�
 ```
 
 默认网页保留研报库、PDF、简报和知识卡片阅读功能。
-旧网页聊天、任务监控、Ask AI 和删除入口已移除；历史 API 的全部能力并未接入当前网页。
+旧网页聊天、任务监控、Ask AI、独立 Graph 业务节点和历史启动入口已删除。
 本地启动与 Docker 默认均使用 `reportagent.main:app`。
 
 ## 配置、技能与实现的边界
@@ -39,8 +38,7 @@ AlphaReport 在本机运行 Python 服务和 Claude Code 子进程，通过模�
 任务资源按用途归档：分析用的 YAML 跟随分析技能，端口和模型地址放运行配置。
 详细配置归属见 [configs/README.md](../configs/README.md)。
 
-内置技能只有根目录 `skills/` 一份来源。飞书 Claude Code、LangGraph ReAct 和
-Plan-Execute 都通过 registry 加载完整技能说明；CLI 和 `/api/v1/skills` 使用同一目录。
+内置技能只有根目录 `skills/` 一份来源。飞书 Claude Code 通过 registry 加载完整技能说明；CLI 和 `/api/v1/skills` 使用同一目录。
 用户自定义 YAML 位于 `data/user_skills/`，原中文技能名称保留为别名。
 资源解析必须限制在对应技能目录内，用户提供的名称不能直接成为文件路径。
 
@@ -85,7 +83,7 @@ PDF连字、安全英文断行和空白规范化保留原始字符位置，不�
 修改这些资源后按相应指纹刷新缓存；模型阅读不等于复现论文实验。
 
 知识卡片由 `services/knowledge_cards.py` 从当前有效的 `evaluation_json` 确定性生成，
-网页、旧 API 和批量 CLI 共用同一服务；无当前证据时只展示摘要和待核验状态。
+网页和批量 CLI 共用同一服务；无当前证据时只展示摘要和待核验状态。
 复现准备使用 `services/reproduction.py` 与 `skills/prepare-reproduction/`，
 原文事实仍必须逐项附可定位的连续引文；定位失败先尝试一次纠正，仍失败时不生成成功卡片。
 建议方案独立标注，成功卡片存入 `analysis_json.reproduction_preparation`。
@@ -121,8 +119,9 @@ arXiv 下载流程使用 PyMuPDF 提取全文，`cli.parse_pdf` 调用 MinerU �
 ```
 
 输出包含文本预览和公式、表格数量。回退解析不保证公式和表格结构；PDF 页眉、页脚和
-公式编号可能混入正文，需要与引文定位一并处理。`parse_pdf --save` 的持久化路径尚待
-修复核验，不作为可靠的入库方式；用户导入本地论文使用 `collect --sources local_pdf`。
+公式编号可能混入正文，需要与引文定位一并处理。`parse_pdf --report-id ID --save` 复用受限下载和原子缓存，
+保存前核对原始材料，完整替换正文/表格/公式并失效旧分析；失败或并发修改不覆盖原结果。
+`--pdf` 只预览，不接受 `--save`；用户导入本地论文使用启动扫描或 `collect --sources local_pdf`。
 
 ### 向量索引准备与重建
 
@@ -139,19 +138,17 @@ arXiv 下载流程使用 PyMuPDF 提取全文，`cli.parse_pdf` 调用 MinerU �
 `--clear` 会删除已有索引再重建。模型设置读取 `vector_store` 独立配置，配置好聊天模型
 不代表索引服务已就绪。论文更新或删除后，也需核对索引是否与库中版本一致。
 
-### 实验工具映射
+### 统一业务执行
 
-实验 API 的启动、功能用途和可用限制见 [README](../README.md#实验聊天与管理入口)。
-以下是 `reportagent/chat/tools.py` 保留的 LangGraph 工具，供开发与接口排查使用；
-它们没有直接注册为飞书 Claude Code 的同名工具。
+- 采集和启动导入共用 `collection` 的分类政策；定时、手动 CLI 共用同一在线预筛和入库。
+- `paper_scoring` 是唯一评分模型协议；`DirectionFilter` 仅将同一结果转换为方向明细。
+- `batch_analysis` 与 `one_report` 共用 `AnalysisAgent` 阶段引擎，`summary` 共用技能、生成及完整性检查。
+- PDF 字节/路径提取、MinerU fallback 和可选 Docling 合并由 `pdf_extraction` 提供；维护 CLI 共用下载政策和缓存。
+- 普通回复、单篇、日报、周报共用 `feishu_transport` 的 SDK 工厂、请求、消息 ID 校验和文本分片回退。
+- WS/HTTP inbox 只提取字段，统一交给 `handle_incoming_message` 处理鉴权、命令、快照和回复。
 
-| 工具 | 实现职责 |
-|---|---|
-| `collect_reports`、`search_reports`、`semantic_search_reports` | 收集资料、关键词与向量查询 |
-| `get_report`、`analyze_report`、`delete_reports` | 读取、分析和删除指定研报 |
-| `web_search`、`parse_document` | Tavily 网页搜索、PDF 增强解析 |
-| `list_skills`、`manage_skill` | 通过共享 registry 查询和管理用户技能 |
-| `brainstorm_research`、`recall_discussed_reports` | 研究思路讨论和已讨论文献回顾 |
+语义检索保留在 `vector_store`，研究创意在 `services.research_ideation` 与 `cli.ideation`，
+自定义技能在 `skills.registry` 与 `cli.skills`。旧 `chat`/LangGraph、旧任务 API 和 `legacy_app` 已移除。
 
 ## 修改与验证
 
@@ -161,7 +158,7 @@ arXiv 下载流程使用 PyMuPDF 提取全文，`cli.parse_pdf` 调用 MinerU �
 数据库查询和 PDF 命令复用 repository 与解析服务；历史固定 ID 补丁仅作维护用途。
 
 修改入口或文件位置时，同时检查 Shell、Docker、导入、技能说明与测试中的路径。
-保留 API URL、数据库、模型选择、中文别名、用户自定义技能和单篇阅读发送回执的兼容性。
+保留研报阅读 API URL、数据库、模型选择、中文别名、用户自定义技能和单篇阅读发送回执的兼容性。
 新库不创建日报逐篇发送标记；旧库的历史表/列不主动删除，但已不再读取或写入。
 干净 checkout 缺少 `frontend/dist` 时仍应能导入应用和运行后端测试。
 依赖研报 ID 的工具遇到缺失或多个候选时应停止，不能默认选择第一篇。

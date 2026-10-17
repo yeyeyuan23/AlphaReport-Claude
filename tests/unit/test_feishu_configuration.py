@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from reportagent.services import feishu_service
+from reportagent.services import feishu_transport
 
 
 @pytest.mark.parametrize(
@@ -15,16 +15,16 @@ from reportagent.services import feishu_service
 def test_configuration_requires_both_default_credentials(
     monkeypatch, app_id, app_secret, expected
 ):
-    monkeypatch.setattr(feishu_service, "get_config", lambda key, default: {})
+    monkeypatch.setattr(feishu_transport, "get_config", lambda key, default: {})
     monkeypatch.setenv("FEISHU_APP_ID", app_id)
     monkeypatch.setenv("FEISHU_APP_SECRET", app_secret)
 
-    assert feishu_service.is_configured() is expected
+    assert feishu_transport.is_configured() is expected
 
 
 def test_client_uses_configured_credential_names_at_build_time(monkeypatch):
     monkeypatch.setattr(
-        feishu_service,
+        feishu_transport,
         "get_config",
         lambda key, default: {
             "app_id_env": "CUSTOM_FEISHU_ID",
@@ -35,7 +35,7 @@ def test_client_uses_configured_credential_names_at_build_time(monkeypatch):
     monkeypatch.setenv("FEISHU_APP_SECRET", "unused default secret")
     monkeypatch.delenv("CUSTOM_FEISHU_ID", raising=False)
     monkeypatch.delenv("CUSTOM_FEISHU_SECRET", raising=False)
-    assert not feishu_service.is_configured()
+    assert not feishu_transport.is_configured()
 
     class Builder:
         def app_id(self, value):
@@ -56,10 +56,10 @@ def test_client_uses_configured_credential_names_at_build_time(monkeypatch):
     )
     monkeypatch.setenv("CUSTOM_FEISHU_ID", "configured id")
     monkeypatch.setenv("CUSTOM_FEISHU_SECRET", "configured secret")
-    assert feishu_service.is_configured()
-    first = feishu_service._build_client()
+    assert feishu_transport.is_configured()
+    first = feishu_transport.build_client()
     assert (first.app_id, first.app_secret) == ("configured id", "configured secret")
 
     monkeypatch.setenv("CUSTOM_FEISHU_SECRET", "rotated secret")
-    second = feishu_service._build_client()
+    second = feishu_transport.build_client()
     assert (second.app_id, second.app_secret) == ("configured id", "rotated secret")

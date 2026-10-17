@@ -343,36 +343,21 @@ def send_feishu_card(
         "elements": elements,
     }
 
-    import lark_oapi as lark
-    from lark_oapi.api.im.v1.model.create_message_request import CreateMessageRequest
-    from lark_oapi.api.im.v1.model.create_message_request_body import (
-        CreateMessageRequestBody,
+    from reportagent.services.feishu_transport import (
+        build_client,
+        send_card_with_fallback,
     )
 
-    client = lark.Client.builder().app_id(APP_ID).app_secret(APP_SECRET).build()
-    card_json = json.dumps(card, ensure_ascii=False)
-    request = (
-        CreateMessageRequest.builder()
-        .receive_id_type(receive_type)
-        .request_body(
-            CreateMessageRequestBody.builder()
-            .receive_id(receive_id)
-            .msg_type("interactive")
-            .content(card_json)
-            .build()
-        )
-        .build()
-    )
     try:
-        resp = client.im.v1.message.create(request)
-        if resp.success():
-            logger.info(f"Card sent to {receive_id}")
-            return True
-        else:
-            logger.error(f"Card send failed: {resp.code} {resp.msg}")
-            return False
-    except Exception as e:
-        logger.error(f"Card send error: {e}")
+        return send_card_with_fallback(
+            build_client(),
+            card,
+            report_text,
+            receive_id,
+            receive_type=receive_type,
+        )
+    except Exception:
+        logger.warning("Feishu weekly card delivery failed")
         return False
 
 

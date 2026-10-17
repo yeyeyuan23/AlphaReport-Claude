@@ -391,6 +391,7 @@ def test_card_footer_describes_rendered_saved_evaluations(monkeypatch):
 
     client = MagicMock()
     client.im.v1.message.create.return_value.success.return_value = True
+    client.im.v1.message.create.return_value.data.message_id = "om-card"
     requests = []
 
     def send(request):
