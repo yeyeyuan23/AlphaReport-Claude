@@ -176,6 +176,10 @@ def response_payloads(text: str, *, title="AlphaReport 回复") -> list[tuple[st
     return result
 
 
+class DeliveryCancelled(RuntimeError):
+    """The owning conversation was reset before an unsent response part."""
+
+
 def deliver_response(
     client,
     text: str,
@@ -184,6 +188,7 @@ def deliver_response(
     receive_type="chat_id",
     reply_to=None,
     request_id=None,
+    should_send=None,
     title="AlphaReport 回复",
 ) -> list[str]:
     """Deliver all parts, with complete plain-text recovery after a card failure."""
@@ -191,6 +196,8 @@ def deliver_response(
     def send(parts, *, fallback=False):
         ids = []
         for index, (kind, content) in enumerate(parts):
+            if should_send is not None and not should_send():
+                raise DeliveryCancelled("Conversation reset before delivery")
             part_id = None
             if request_id:
                 part_id = (
@@ -221,6 +228,8 @@ def deliver_response(
     parts = response_payloads(text, title=title)
     try:
         return send(parts)
+    except DeliveryCancelled:
+        raise
     except Exception:
         if not any(kind == "interactive" for kind, _ in parts):
             raise

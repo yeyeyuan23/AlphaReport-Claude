@@ -42,30 +42,31 @@ def test_ws_and_http_use_the_same_message_handler(monkeypatch, kind, command):
     assert observed[0] == observed[1]
 
 
-def test_common_handler_captures_revision_before_any_acknowledgement(monkeypatch):
+def test_common_handler_captures_generation_before_any_acknowledgement(monkeypatch):
+    from reportagent.bot import sessions
+
     events = []
-    snapshot = ("session", "summary", 5)
+    generation = sessions.get_reset_generation("oc_chat")
     monkeypatch.setattr(bot, "sender_allowed", lambda _: True)
-    monkeypatch.setattr(
-        bot, "get_session_snapshot", lambda _: events.append("snapshot") or snapshot
-    )
-    monkeypatch.setattr(bot, "react", lambda *args: events.append("react"))
-    monkeypatch.setattr(bot, "handle_cmd", lambda *args: None)
-    monkeypatch.setattr(bot, "send_text", lambda *args: events.append("send"))
 
-    def answer(text, cid, *, session_snapshot):
-        assert session_snapshot is snapshot
-        events.append("model")
-        return "reply"
+    def react(*args):
+        events.append("react")
+        sessions.del_session("oc_chat")
 
-    monkeypatch.setattr(bot, "ask_claude", answer)
+    monkeypatch.setattr(bot, "react", react)
+    monkeypatch.setattr(bot, "send_text", lambda *args, **kwargs: ["om-ack"])
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Cancelled generation reached the model")
+
+    monkeypatch.setattr(bot, "ask_claude_outcome", forbidden)
 
     class Thread:
-        def __init__(self, target, **kwargs):
-            self.target = target
+        def __init__(self, target, args=(), **kwargs):
+            self.target, self.args = target, args
 
         def start(self):
-            self.target()
+            self.target(*self.args)
 
     monkeypatch.setattr(bot.threading, "Thread", Thread)
     bot.on_message_raw(
@@ -77,7 +78,8 @@ def test_common_handler_captures_revision_before_any_acknowledgement(monkeypatch
             "text": "question",
         }
     )
-    assert events == ["snapshot", "react", "send", "model", "send"]
+    assert events == ["react"]
+    assert sessions.get_reset_generation("oc_chat") == generation + 1
 
 
 @pytest.mark.parametrize("text,allowed", [("", True), ("question", False)])
@@ -87,8 +89,8 @@ def test_common_handler_drops_empty_or_unauthorized_events(monkeypatch, text, al
     def forbidden(*args, **kwargs):
         raise AssertionError("Rejected event reached session or model")
 
-    monkeypatch.setattr(bot, "get_session_snapshot", forbidden)
-    monkeypatch.setattr(bot, "ask_claude", forbidden)
+    monkeypatch.setattr(bot, "reserve_message", forbidden)
+    monkeypatch.setattr(bot, "ask_claude_outcome", forbidden)
     bot.on_message_raw(
         {
             "message_id": "m",
@@ -110,10 +112,17 @@ def test_real_report_commands_keep_private_chat_authorization(
 
     replies, jobs = [], []
     monkeypatch.setattr(bot, "sender_allowed", lambda _: True)
-    monkeypatch.setattr(bot, "get_session_snapshot", lambda _: (None, "", 0))
     monkeypatch.setattr(bot, "react", lambda *args: None)
-    monkeypatch.setattr(bot, "send_text", lambda _, text: replies.append(text))
-    monkeypatch.setattr(bot, "reply_msg", lambda _, text: replies.append(text))
+    monkeypatch.setattr(
+        bot,
+        "send_text",
+        lambda _, text, **kwargs: replies.append(text) or ["om-delivered"],
+    )
+    monkeypatch.setattr(
+        bot,
+        "reply_msg",
+        lambda _, text, **kwargs: replies.append(text) or ["om-delivered"],
+    )
     monkeypatch.setattr(bot, "_report_lock", Lock())
 
     class Thread:

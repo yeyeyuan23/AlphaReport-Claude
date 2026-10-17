@@ -44,3 +44,12 @@ def offline_boundaries(request, monkeypatch):
         return popen(args, *positional, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", offline_process)
+
+
+@pytest.fixture(autouse=True)
+def isolated_bot_state(monkeypatch, tmp_path):
+    """No offline bot check may read a real session store or inherit active turns."""
+    from reportagent.bot import feishu, sessions
+
+    monkeypatch.setattr(sessions, "SESSION_DB", tmp_path / "bot-sessions.db")
+    monkeypatch.setattr(feishu, "_dispatcher", feishu.MessageDispatcher())

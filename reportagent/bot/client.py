@@ -12,28 +12,50 @@ def _client():
     return build_client()
 
 
-def _send(text, receive_id, *, receive_type="chat_id", reply_to=None):
+def _send(
+    text,
+    receive_id,
+    *,
+    receive_type="chat_id",
+    reply_to=None,
+    request_id=None,
+    should_send=None,
+):
     from reportagent.services.feishu_replies import deliver_response
 
     try:
         return deliver_response(
-            _client(), text, receive_id, receive_type=receive_type, reply_to=reply_to
+            _client(),
+            text,
+            receive_id,
+            receive_type=receive_type,
+            reply_to=reply_to,
+            request_id=request_id,
+            should_send=should_send,
         )
     except Exception:
         logger.exception("Feishu reply was not fully delivered")
         return []
 
 
-def send_text(open_id, text):
-    return _send(text, open_id, receive_type="open_id")
+def send_text(open_id, text, *, request_id=None, should_send=None):
+    return _send(
+        text,
+        open_id,
+        receive_type="open_id",
+        request_id=request_id,
+        should_send=should_send,
+    )
 
 
-def reply_msg(message_id, text):
-    return _send(text, "", reply_to=message_id)
+def reply_msg(message_id, text, *, request_id=None, should_send=None):
+    return _send(
+        text, "", reply_to=message_id, request_id=request_id, should_send=should_send
+    )
 
 
-def send_chat(chat_id, text):
-    return _send(text, chat_id)
+def send_chat(chat_id, text, *, request_id=None, should_send=None):
+    return _send(text, chat_id, request_id=request_id, should_send=should_send)
 
 
 def react(message_id, emoji="OK"):

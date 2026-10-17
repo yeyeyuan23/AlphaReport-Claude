@@ -70,11 +70,13 @@ def send_payload(
     )
 
     if reply_to:
-        body = ReplyMessageRequestBody.builder().msg_type(kind).content(content).build()
+        body = ReplyMessageRequestBody.builder().msg_type(kind).content(content)
+        if request_id:
+            body.uuid(request_id)
         request = (
             ReplyMessageRequest.builder()
             .message_id(reply_to)
-            .request_body(body)
+            .request_body(body.build())
             .build()
         )
         response = client.im.v1.message.reply(request)

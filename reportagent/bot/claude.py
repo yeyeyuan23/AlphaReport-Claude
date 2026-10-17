@@ -5,9 +5,16 @@ import os
 import shutil
 import subprocess
 import uuid
+from dataclasses import dataclass
+from typing import Literal
 
 from reportagent.utils.config import PROJECT_ROOT
-from reportagent.bot.sessions import get_session_snapshot, save_session, del_session
+from reportagent.bot.sessions import (
+    get_session_snapshot,
+    get_reset_generation,
+    save_session,
+    del_session,
+)
 from reportagent.skills.registry import format_skills_context, load_all_skills
 
 logger = logging.getLogger(__name__)
@@ -37,15 +44,31 @@ def claude_environment():
     return env
 
 
+@dataclass(frozen=True)
+class ModelOutcome:
+    status: Literal["success", "retryable", "cancelled"]
+    text: str
+
+
 def ask_claude(msg, chat_id, *, session_snapshot=None):
+    """Compatibility adapter for callers that expect the original string result."""
+    return ask_claude_outcome(msg, chat_id, session_snapshot=session_snapshot).text
+
+
+def ask_claude_outcome(msg, chat_id, *, session_snapshot=None, generation=None):
     claude = shutil.which("claude")
     if not claude:
-        return "Claude Code 未安装"
+        return ModelOutcome("retryable", "Claude Code 未安装")
 
+    if generation is None:
+        generation = get_reset_generation(chat_id)
     current_snapshot = get_session_snapshot(chat_id)
     stale_reply = "会话已清除或更新，请重新发送问题。"
-    if session_snapshot is not None and session_snapshot[2] != current_snapshot[2]:
-        return stale_reply
+    cancelled = ModelOutcome("cancelled", stale_reply)
+    if get_reset_generation(chat_id) != generation or (
+        session_snapshot is not None and session_snapshot[2] != current_snapshot[2]
+    ):
+        return cancelled
     sid, summary, revision = (
         current_snapshot if session_snapshot is None else session_snapshot
     )
@@ -62,6 +85,8 @@ def ask_claude(msg, chat_id, *, session_snapshot=None):
     # Carry the same revision through compaction and resume recovery. Never
     # restart from a fresh snapshot, which could turn a cancelled request new.
     while True:
+        if get_reset_generation(chat_id) != generation:
+            return cancelled
         if not new:
             sf = session_dir / f"{sid}.jsonl"
             if sf.exists() and sf.stat().st_size > 50 * 1024:
@@ -71,10 +96,14 @@ def ask_claude(msg, chat_id, *, session_snapshot=None):
                 new_summary = _compact_session(sid, summary, session_dir)
                 new_sid = str(uuid.uuid4())
                 next_revision = save_session(
-                    chat_id, new_sid, new_summary, expected_revision=revision
+                    chat_id,
+                    new_sid,
+                    new_summary,
+                    expected_revision=revision,
+                    expected_generation=generation,
                 )
                 if next_revision is None:
-                    return stale_reply
+                    return cancelled
                 revision, sid, summary, new = next_revision, new_sid, new_summary, True
 
         prompt = f"[历史摘要]\n{summary}\n\n---\n当前问题：{msg}" if summary else msg
@@ -107,20 +136,31 @@ def ask_claude(msg, chat_id, *, session_snapshot=None):
             out = r.stdout.strip()
             if r.returncode == 0 and out:
                 if (
-                    save_session(chat_id, sid, summary, expected_revision=revision)
+                    save_session(
+                        chat_id,
+                        sid,
+                        summary,
+                        expected_revision=revision,
+                        expected_generation=generation,
+                    )
                     is None
                 ):
-                    return stale_reply
-                return out
+                    return cancelled
+                return ModelOutcome("success", out)
             if not new and "session" in r.stderr.lower():
-                next_revision = del_session(chat_id, expected_revision=revision)
+                next_revision = del_session(
+                    chat_id,
+                    expected_revision=revision,
+                    expected_generation=generation,
+                    reset=False,
+                )
                 if next_revision is None:
-                    return stale_reply
+                    return cancelled
                 revision, sid, summary, new = next_revision, str(uuid.uuid4()), "", True
                 continue
-            return f"出错: {r.stderr[:200]}"
+            return ModelOutcome("retryable", f"出错: {r.stderr[:200]}")
         except Exception as e:
-            return f"失败: {e}"
+            return ModelOutcome("retryable", f"失败: {e}")
 
 
 def _compact_session(sid, old_summary, session_dir):

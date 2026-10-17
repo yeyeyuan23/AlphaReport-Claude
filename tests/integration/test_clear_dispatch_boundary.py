@@ -19,12 +19,18 @@ def chat_boundary(monkeypatch, tmp_path):
     monkeypatch.setattr(feishu, "react", lambda *args: None)
     state = SimpleNamespace(threads=[], replies=[], model_calls=[])
     monkeypatch.setattr(
-        feishu, "send_text", lambda recipient, text: state.replies.append(text)
+        feishu,
+        "send_text",
+        lambda recipient, text, **kwargs: state.replies.append(text)
+        or ["om-delivered"],
     )
 
     class HeldThread:
-        def __init__(self, target, **kwargs):
-            state.threads.append(target)
+        def __init__(self, target, args=(), **kwargs):
+            if args:
+                state.threads.append(lambda: target(*args))
+            else:
+                state.threads.append(target)
 
         def start(self):
             pass
@@ -40,13 +46,16 @@ def chat_boundary(monkeypatch, tmp_path):
 
 @pytest.fixture(params=["websocket", "webhook"])
 def dispatch(request, monkeypatch, chat_boundary):
+    from itertools import count
+
+    incoming_ids = count()
     if request.param == "websocket":
 
         def send(text):
             data = SimpleNamespace(
                 event=SimpleNamespace(
                     message=SimpleNamespace(
-                        message_id="offline-message",
+                        message_id=f"offline-message-{next(incoming_ids)}",
                         chat_id="chat",
                         chat_type="p2p",
                         content=json.dumps({"text": text}),
@@ -103,7 +112,7 @@ def dispatch(request, monkeypatch, chat_boundary):
                 {
                     "data": [
                         {
-                            "message_id": "offline-message",
+                            "message_id": f"offline-message-{next(incoming_ids)}",
                             "chat_id": "chat",
                             "chat_type": "p2p",
                             "sender_id": "offline-user",

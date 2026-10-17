@@ -3,6 +3,7 @@
 import json
 import asyncio
 import logging
+from collections import deque
 from dataclasses import dataclass
 import os
 import re
@@ -10,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 
 from lark_oapi.ws import Client as WSClient
 from lark_oapi.event import dispatcher_handler as dh
@@ -18,8 +20,14 @@ from reportagent.services.public_url import get_web_base_url
 from reportagent.db.engine import init_db
 from reportagent.services.feishu_security import http_callback_enabled, sender_allowed
 from reportagent.bot.client import send_text, send_chat, reply_msg, react
-from reportagent.bot.claude import ask_claude
-from reportagent.bot.sessions import del_session, get_session_snapshot
+from reportagent.bot.claude import ask_claude_outcome
+from reportagent.bot.sessions import (
+    del_session,
+    get_reset_generation,
+    reserve_message,
+    finish_message,
+    clear_message,
+)
 
 logger = logging.getLogger(__name__)
 APP_ID = os.environ.get("FEISHU_APP_ID", "")
@@ -159,11 +167,39 @@ def _report_list(reports, total, title):
     return "\n\n".join(entries)
 
 
-def handle_cmd(text, chat_id, chat_type):
+def normalize_command(text):
     text = re.sub(r"<at[^>]*>.*?</at>", "", text.strip())
-    text = re.sub(r"@\S+\s*", "", text).strip()
+    return re.sub(r"@\S+\s*", "", text).strip()
 
-    if text in ("/help", "/start"):
+
+def command_name(text):
+    """Classify normalized commands without changing ordinary slash-prefixed text."""
+    if text in {
+        "/help",
+        "/start",
+        "/stats",
+        "/recent",
+        "/chatid",
+        "/clear",
+        "/daily",
+        "/search",
+        "/report",
+    }:
+        return text
+    if text.startswith("/search "):
+        return "/search"
+    if text.startswith("/report "):
+        return "/report"
+    if re.match(r"^/weekly(?:\s|$)", text):
+        return "/weekly"
+    return None
+
+
+def handle_cmd(text, chat_id, chat_type):
+    text = normalize_command(text)
+    command = command_name(text)
+
+    if command in ("/help", "/start"):
         return (
             "📊 AlphaReport 指令\n\n"
             "/report <arXiv编号或链接>：分析单篇论文并推送到当前私聊\n"
@@ -178,7 +214,7 @@ def handle_cmd(text, chat_id, chat_type):
             "💬 直接发问题，也可以讨论论文。"
         )
 
-    if re.match(r"^/weekly(?:\s|$)", text):
+    if command == "/weekly":
         if chat_type != "p2p":
             return "请在机器人私聊中使用 /weekly。"
         if text != "/weekly":
@@ -194,7 +230,7 @@ def handle_cmd(text, chat_id, chat_type):
             raise
         return "开始生成上一完整 UTC 周的周报：使用库中资料，刷新相关性并评估符合条件的论文，完成后推送到当前私聊。"
 
-    if text == "/daily":
+    if command == "/daily":
         if chat_type != "p2p":
             return "请在机器人私聊中使用 /daily。"
         if not _report_lock.acquire(blocking=False):
@@ -206,7 +242,7 @@ def handle_cmd(text, chat_id, chat_type):
             raise
         return "开始生成日报：使用库中近期资料，刷新相关性并评估符合条件的论文，完成后推送到当前私聊。"
 
-    if text == "/report" or text.startswith("/report "):
+    if command == "/report":
         if chat_type != "p2p":
             return "请在机器人私聊中使用 /report。"
         from reportagent.services.one_report import normalize_arxiv_id
@@ -228,7 +264,7 @@ def handle_cmd(text, chat_id, chat_type):
             f"开始采集和分析 arXiv:{arxiv_id}，完成后推送到当前私聊，通常需要几分钟。"
         )
 
-    if text == "/stats":
+    if command == "/stats":
         try:
             from reportagent.db.engine import get_session_factory
             from reportagent.db.repository import ReportRepository
@@ -241,7 +277,7 @@ def handle_cmd(text, chat_id, chat_type):
             logger.exception("Report query failed")
             return "查询失败，请稍后重试。"
 
-    if text == "/search" or text.startswith("/search "):
+    if command == "/search":
         q = text.removeprefix("/search").strip()
         if not q:
             return "用法：/search <关键词>"
@@ -262,7 +298,7 @@ def handle_cmd(text, chat_id, chat_type):
             logger.exception("Report search failed")
             return "搜索失败，请稍后重试。"
 
-    if text == "/recent":
+    if command == "/recent":
         try:
             from reportagent.db.engine import get_session_factory
             from reportagent.db.repository import ReportRepository
@@ -280,11 +316,11 @@ def handle_cmd(text, chat_id, chat_type):
             logger.exception("Report query failed")
             return "查询失败，请稍后重试。"
 
-    if text == "/chatid":
+    if command == "/chatid":
         t = "群聊" if chat_type == "group" else "对话"
         return f"📋 当前{t} ID\n\n{chat_id}"
 
-    if text == "/clear":
+    if command == "/clear":
         del_session(chat_id)
         return "🧹 已清除会话记忆"
 
@@ -315,12 +351,206 @@ def _incoming(*, message_id="", chat_id="", chat_type="private", sender_id="", t
     )
 
 
-def _reply(event: IncomingMessage, text: str):
+def _reply(event: IncomingMessage, text: str, *, request_id=None, should_send=None):
     if event.chat_type == "group":
         if event.message_id:
-            return reply_msg(event.message_id, text)
-        return send_chat(event.chat_id, text)
-    return send_text(event.sender_id, text)
+            return reply_msg(
+                event.message_id, text, request_id=request_id, should_send=should_send
+            )
+        return send_chat(
+            event.chat_id, text, request_id=request_id, should_send=should_send
+        )
+    return send_text(
+        event.sender_id, text, request_id=request_id, should_send=should_send
+    )
+
+
+class MessageDispatcher:
+    """One-process FIFO per reset generation, with durable result replay receipts.
+
+    The short lock only protects admission, active IDs and queue ownership.
+    Network/model work never holds it, so a reset can immediately admit a fresh
+    generation while old subprocesses wind down. It does not kill subprocesses.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._active = set()
+        self._queues = {}
+
+    def submit(self, event):
+        message_id = event.message_id or "anonymous:" + str(uuid.uuid4())
+        text = normalize_command(event.text)
+        with self._lock:
+            receipt = reserve_message(message_id, event)
+            if message_id in self._active or receipt["state"] in {
+                "delivered",
+                "cancelled",
+            }:
+                return
+            if receipt["generation"] != get_reset_generation(event.chat_id):
+                finish_message(message_id, "cancelled")
+                return
+            if text == "/clear" and receipt["state"] == "retryable":
+                answer = "🧹 已清除会话记忆"
+                generation = clear_message(message_id, answer)
+                if generation is None:
+                    return
+                receipt.update(generation=generation, answer=answer, state="completed")
+            self._active.add(message_id)
+            entry = (event, receipt)
+            # Commands keep their immediate dispatch behavior. Unknown slash text
+            # is still an ordinary model question and goes through the FIFO.
+            command = command_name(text)
+            immediate = receipt["state"] == "completed" or command is not None
+            if not immediate:
+                key, start = self._enqueue(entry)
+        if immediate:
+            try:
+                if receipt["state"] == "completed":
+                    self._deliver(entry)
+                elif self._current(entry):
+                    answer = handle_cmd(event.text, event.chat_id, event.chat_type)
+                    if answer is None:
+                        raise RuntimeError(
+                            "Recognized command did not produce a result"
+                        )
+                    self._complete(entry, answer)
+            except Exception:
+                logger.exception(
+                    "Feishu command failed; incoming message remains retryable"
+                )
+            finally:
+                with self._lock:
+                    self._active.discard(message_id)
+        elif start:
+            self._start(key)
+
+    def _enqueue(self, entry):
+        event, receipt = entry
+        key = (event.chat_id, receipt["generation"])
+        start = key not in self._queues
+        self._queues.setdefault(key, deque()).append(entry)
+        return key, start
+
+    def _start(self, key):
+        # If startup fails, make the affected head retryable and still try to
+        # drain any followers admitted while Thread.start was in progress.
+        while True:
+            try:
+                threading.Thread(target=self._drain, args=(key,), daemon=True).start()
+                return
+            except Exception:
+                logger.exception(
+                    "Could not start Feishu worker; message can be retried"
+                )
+                with self._lock:
+                    queue = self._queues[key]
+                    _, receipt = queue.popleft()
+                    self._active.discard(receipt["message_id"])
+                    if not queue:
+                        del self._queues[key]
+                        return
+
+    def _drain(self, key):
+        while True:
+            with self._lock:
+                queue = self._queues[key]
+                if not queue:
+                    del self._queues[key]
+                    return
+                entry = queue.popleft()
+            try:
+                self._process(entry)
+            except Exception:
+                logger.exception(
+                    "Feishu worker failed; incoming message remains retryable"
+                )
+                try:
+                    if self._current(entry):
+                        self._send(entry, "处理失败，请稍后重试。", "error")
+                except Exception:
+                    logger.exception("Could not report failed Feishu worker")
+            finally:
+                with self._lock:
+                    self._active.discard(entry[1]["message_id"])
+
+    @staticmethod
+    def _current(entry):
+        event, receipt = entry
+        if receipt["generation"] == get_reset_generation(event.chat_id):
+            return True
+        finish_message(receipt["message_id"], "cancelled")
+        return False
+
+    @staticmethod
+    def _react(event, emoji):
+        try:
+            react(event.message_id, emoji)
+        except Exception:
+            logger.exception("Feishu reaction failed")
+
+    @staticmethod
+    def _send(entry, text, phase):
+        event, receipt = entry
+        request_id = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL, "alphareport:" + receipt["message_id"] + ":" + phase
+            )
+        )
+        try:
+            return _reply(
+                event,
+                text,
+                request_id=request_id,
+                should_send=lambda: MessageDispatcher._current(entry),
+            )
+        except Exception:
+            logger.exception("Feishu reply failed; cached result can be redelivered")
+            return []
+
+    def _process(self, entry):
+        event, receipt = entry
+        if not self._current(entry):
+            return
+        self._react(event, "THUMBSUP")
+        self._send(entry, "🤔 正在处理...", "ack")
+        # Dequeue-time state is used by the model adapter, while the original
+        # reset generation is retained across compaction and resume recovery.
+        if not self._current(entry):
+            return
+        outcome = ask_claude_outcome(
+            event.text, event.chat_id, generation=receipt["generation"]
+        )
+        if outcome.status == "success":
+            self._complete(entry, outcome.text)
+        elif outcome.status == "cancelled":
+            finish_message(receipt["message_id"], "cancelled")
+        elif self._current(entry):
+            self._send(entry, outcome.text, "error")
+
+    def _complete(self, entry, answer):
+        _, receipt = entry
+        state = finish_message(receipt["message_id"], "completed", answer=answer)
+        receipt.update(state=state, answer=answer)
+        if state == "completed":
+            self._deliver(entry)
+
+    def _deliver(self, entry):
+        event, receipt = entry
+        if not self._current(entry):
+            return
+        ids = self._send(entry, receipt["answer"], "result")
+        if (
+            isinstance(ids, list)
+            and ids
+            and all(isinstance(mid, str) and mid.strip() for mid in ids)
+        ):
+            finish_message(receipt["message_id"], "delivered", delivery_ids=ids)
+            self._react(event, "OK")
+
+
+_dispatcher = MessageDispatcher()
 
 
 def handle_incoming_message(event: IncomingMessage):
@@ -332,24 +562,8 @@ def handle_incoming_message(event: IncomingMessage):
         return
     if not event.text.strip():
         return
-    # Capture before any acknowledgement or worker scheduling can delay a clear.
-    session_snapshot = get_session_snapshot(event.chat_id)
     logger.info("[%s] %s", event.chat_type, event.text[:80])
-    react(event.message_id, "THUMBSUP")
-    reply = handle_cmd(event.text, event.chat_id, event.chat_type)
-    if reply:
-        _reply(event, reply)
-        react(event.message_id, "OK")
-        return
-    _reply(event, "🤔 正在处理...")
-
-    def process():
-        answer = ask_claude(
-            event.text, event.chat_id, session_snapshot=session_snapshot
-        )
-        _reply(event, answer)
-
-    threading.Thread(target=process, daemon=True).start()
+    _dispatcher.submit(event)
 
 
 def on_message(data):
