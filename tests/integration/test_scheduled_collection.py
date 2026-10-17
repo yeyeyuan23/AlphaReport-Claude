@@ -10,7 +10,14 @@ def test_scheduled_collection_saves_source_results_without_generating_reports(
     tmp_path, monkeypatch, outcome
 ):
     from reportagent.services import scheduled_collection as jobs
-    from reportagent.services import collection
+    from reportagent.services import collection, collection_reviews
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(
+        collection_reviews,
+        "prepare_collection_reviews",
+        AsyncMock(return_value={"review_ids": [], "failures": []}),
+    )
 
     monkeypatch.setattr(jobs, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
@@ -60,3 +67,37 @@ def test_scheduled_collection_saves_source_results_without_generating_reports(
         )
         == result
     )
+
+
+def test_scheduled_collection_reviews_after_ingestion_and_persists_failure(
+    tmp_path, monkeypatch
+):
+    from reportagent.services import scheduled_collection as jobs, collection
+    from reportagent.services import collection_reviews
+
+    monkeypatch.setattr(jobs, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(jobs, "get_config", lambda *a, **kw: {"sources": ["arxiv"]})
+    events = []
+
+    async def collect(*args, **kwargs):
+        events.append("ingested")
+        return {
+            "status": "ok",
+            "source_statuses": [],
+            "storage": {"added": 2},
+            "report_ids": [1, 2],
+        }
+
+    async def review(**kwargs):
+        assert events == ["ingested"]
+        events.append("reviewed")
+        return {"review_ids": [1, 2], "failures": [{"id": 2}], "deferred_ids": []}
+
+    monkeypatch.setattr(collection, "collect_reports", collect)
+    monkeypatch.setattr(collection_reviews, "prepare_collection_reviews", review)
+    result = jobs.run_scheduled_collection()
+    assert events == ["ingested", "reviewed"]
+    assert result["status"] == "partial" and result["storage"]["added"] == 2
+    assert result["review"]["failures"] == [{"id": 2}]
+    assert result["review"]["elapsed_ms"] >= 0
+    assert jobs.read_latest_collection() == result

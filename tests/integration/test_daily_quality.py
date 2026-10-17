@@ -178,7 +178,7 @@ def test_daily_template_edits_take_effect_without_another_model_call(tmp_path):
         )
 
 
-def test_daily_reviews_before_render_and_dry_run_never_records_delivery(
+def test_daily_reads_saved_reviews_before_render_and_dry_run_never_delivers(
     tmp_path, memory_session_factory
 ):
     factory = memory_session_factory
@@ -199,8 +199,8 @@ def test_daily_reviews_before_render_and_dry_run_never_records_delivery(
     # Do not nest asyncio.run in the fake model boundary.
     evaluation = evaluated_paper(1)["evaluation"]
 
-    async def review(ids, **kwargs):
-        events.append("review")
+    def review(ids, **kwargs):
+        events.append("read")
         with factory() as session:
             row = session.get(Report, 1)
             evaluation["fingerprint"] = module().review_fingerprint(
@@ -222,14 +222,14 @@ def test_daily_reviews_before_render_and_dry_run_never_records_delivery(
         patch.object(daily, "init_db"),
         patch.object(daily, "get_session_factory", return_value=factory),
         patch.object(daily, "sync_public_url"),
-        patch.object(daily, "review_report_ids", side_effect=review),
+        patch.object(daily, "read_saved_reviews", side_effect=review),
         patch.object(daily, "render_briefing", side_effect=render),
         patch.object(daily, "send_feishu_card") as send,
     ):
         result = daily.run_daily_push(
             daily.DailyPushOptions(report_ids="1", dry_run=True)
         )
-    assert events == ["review", "render"]
+    assert events == ["read", "render"]
     assert result["status"] == "preview"
     send.assert_not_called()
 

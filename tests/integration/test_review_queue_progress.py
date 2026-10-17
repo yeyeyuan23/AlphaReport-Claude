@@ -15,6 +15,7 @@ from reportagent.services import (
     daily_push as daily,
     weekly_report as weekly,
     one_report,
+    collection_reviews,
 )
 from reportagent.services import report_quality as quality
 from tests.support.report_fixtures import Model, paper, response
@@ -33,7 +34,7 @@ class QueueModel(Model):
 @pytest.fixture
 def queue_library(tmp_path, monkeypatch, memory_session_factory):
     factory = memory_session_factory
-    for service in (daily, weekly, database):
+    for service in (daily, weekly, database, collection_reviews):
         monkeypatch.setattr(service, "get_session_factory", lambda: factory)
     for service in (daily, weekly):
         monkeypatch.setattr(service, "init_db", lambda: None)
@@ -75,28 +76,25 @@ def queue_library(tmp_path, monkeypatch, memory_session_factory):
     yield factory, model, fetch
 
 
-@pytest.mark.parametrize("flow", ["weekly", "daily"])
-def test_missing_material_and_current_caches_do_not_starve_two_review_runs(
-    queue_library, flow
+def test_missing_material_and_current_caches_do_not_starve_collection_reviews(
+    queue_library,
 ):
     factory, model, _ = queue_library
     for expected_last_id in (25, 37):
         before = len(model.requests)
-        if flow == "weekly":
-            papers = weekly.get_weekly_papers(
-                datetime(2020, 1, 1), datetime(2030, 1, 1)
-            )
-            asyncio.run(weekly.prepare_weekly_evidence(papers, max_reviews=12))
-        else:
-            daily.run_daily_push(daily.DailyPushOptions(dry_run=True, max_reviews=12))
+        asyncio.run(collection_reviews.prepare_collection_reviews(max_reviews=12))
         assert len(model.requests) - before == 12
         with factory() as session:
             for rid in range(1, 13):
-                evaluation = json.loads(session.get(Report, rid).evaluation_json)
-                assert evaluation["tier"] == "pending"
+                assert (
+                    json.loads(session.get(Report, rid).evaluation_json)["tier"]
+                    == "pending"
+                )
             for rid in range(13, expected_last_id + 1):
-                evaluation = json.loads(session.get(Report, rid).evaluation_json)
-                assert evaluation["status"] == "reviewed", rid
+                assert (
+                    json.loads(session.get(Report, rid).evaluation_json)["status"]
+                    == "reviewed"
+                )
             assert session.get(Report, expected_last_id + 1).evaluation_json is None
 
 
@@ -132,81 +130,47 @@ def test_cache_without_current_complete_material_is_not_reused(
     assert len(model.requests) == 1
 
 
-@pytest.mark.parametrize("flow", ["weekly", "daily"])
-@pytest.mark.parametrize("configured_budget", [None, 2, 20])
-def test_reporting_budget_defaults_to_all_and_explicit_limits_accept_more_than_twelve(
-    queue_library, monkeypatch, flow, configured_budget
-):
-    from reportagent.services import paper_scoring
-
+@pytest.mark.parametrize("budget", [None, 2, 20])
+def test_collection_review_budget_defaults_to_all_and_resumes(queue_library, budget):
     factory, model, _ = queue_library
-    config = paper_scoring._load_scoring_config()
-    config["push_settings"]["max_reviews"] = configured_budget
-    monkeypatch.setattr(paper_scoring, "_load_scoring_config", lambda: config)
-    monkeypatch.setattr(daily, "_load_push_settings", lambda: config["push_settings"])
-    monkeypatch.setattr(
-        weekly,
-        "get_weekly_range",
-        lambda *args: (
-            datetime(2020, 1, 1),
-            datetime(2030, 1, 1),
-            "2020-01-01",
-            "2030-01-01",
-        ),
+    result = asyncio.run(
+        collection_reviews.prepare_collection_reviews(max_reviews=budget)
     )
-    expected = 25 if configured_budget is None else configured_budget
-    if flow == "weekly":
-        result = weekly.run_weekly_report(weekly.WeeklyReportOptions(dry_run=True))
-        audit = result["preparation"]
-    else:
-        result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
-        audit = result["stages"]["review"]
+    expected = 25 if budget is None else budget
     assert len(model.requests) == expected
-    assert len(audit["review_ids"]) == expected
-    assert result["review_budget"] == configured_budget
-    assert len(audit["deferred_ids"]) == 25 - expected
-    with factory() as db:
-        assert all(
-            db.get(Report, rid).evaluation_json for rid in range(13, 14 + expected)
-        )
-    if configured_budget is None:
-        # Repeating a fully reviewed report must not launch any new model call.
-        if flow == "weekly":
-            weekly.run_weekly_report(weekly.WeeklyReportOptions(dry_run=True))
-        else:
-            daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
+    assert len(result["review_ids"]) == expected
+    assert len(result["deferred_ids"]) == 25 - expected
+    if budget is None:
+        asyncio.run(collection_reviews.prepare_collection_reviews())
         assert len(model.requests) == 25
 
 
 @pytest.mark.parametrize("flow", ["weekly", "daily"])
-def test_cli_review_budget_overrides_configured_limit(queue_library, monkeypatch, flow):
-    from reportagent.services import paper_scoring
-
-    _, model, _ = queue_library
-    config = paper_scoring._load_scoring_config()
-    config["push_settings"]["max_reviews"] = 1
-    monkeypatch.setattr(paper_scoring, "_load_scoring_config", lambda: config)
-    monkeypatch.setattr(daily, "_load_push_settings", lambda: config["push_settings"])
+def test_reports_never_download_or_review_and_preserve_library(
+    queue_library, monkeypatch, flow
+):
+    factory, model, fetch = queue_library
     monkeypatch.setattr(
         weekly,
         "get_weekly_range",
-        lambda *args: (
+        lambda *a: (
             datetime(2020, 1, 1),
             datetime(2030, 1, 1),
             "2020-01-01",
             "2030-01-01",
         ),
     )
+    with factory() as db:
+        before = {r.id: r.evaluation_json for r in db.query(Report)}
     if flow == "weekly":
-        result = weekly.run_weekly_report(
-            weekly.WeeklyReportOptions(dry_run=True, max_reviews=20)
-        )
+        result = weekly.run_weekly_report(weekly.WeeklyReportOptions(dry_run=True))
     else:
-        result = daily.run_daily_push(
-            daily.DailyPushOptions(dry_run=True, max_reviews=20)
-        )
-    assert len(model.requests) == 20
-    assert result["review_budget"] == 20
+        result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
+    assert not model.requests
+    fetch.assert_not_awaited()
+    with factory() as db:
+        assert {r.id: r.evaluation_json for r in db.query(Report)} == before
+    assert result["status"] == "preview"
 
 
 def test_default_candidate_ordering_does_not_truncate_after_twelve():
@@ -235,13 +199,10 @@ def test_daily_query_keeps_more_than_two_hundred_current_candidates(queue_librar
     assert len(daily.get_todays_papers()[0]) == 241
 
 
-def test_daily_reuses_screening_and_keeps_optional_fulltext_budget(
-    queue_library, monkeypatch
-):
+def test_daily_reuses_screening(queue_library, monkeypatch):
     def forbidden(*args, **kwargs):
         pytest.fail("Report generation must not launch a relevance scoring subprocess")
 
     monkeypatch.setattr(subprocess, "run", forbidden)
-    result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True, max_reviews=1))
+    result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
     assert result["stages"]["relevance"]["status"] == "not_run"
-    assert result["review_budget"] == 1

@@ -28,7 +28,6 @@
 Web 的监听地址与端口由 `ALPHAREPORT_BIND_HOST`、`ALPHAREPORT_PORT` 环境变量控制。
 部署检查与运行时共用 `feishu.app_id_env`、`feishu.app_secret_env` 和 `llm.api_key_env` 的凭据配置；更换模型服务时不额外要求 DeepSeek 专属密钥。
 `push_directions.yaml` 中实际生效的 `push_settings` 包括：相关性阈值 `llm_filter_threshold`、
-日报评分批量 `llm_batch_size`、日/周报共用的新全文评估预算 `max_reviews` 和日报重点推荐数 `max_featured`。
-`max_reviews` 省略或为 `null` 时，日/周报默认评估所有符合条件且需更新的论文；
-正整数只限制新发起的全文评估，命中有效缓存不占预算。各 CLI 的 `--max-reviews N` 优先于配置，
-不限最大值；0、负数、布尔值和字符串均不接受。
+摘要筛选批量 `llm_batch_size`、并发 `screening_concurrency` 和日报重点推荐数 `max_featured`。
+全文评估预算配置在 `app.yaml` 的 `daily_collection.max_reviews`：省略或 `null` 表示不限，正整数只限制采集阶段的新模型调用，有效缓存不占预算，缺材料不堵住后续候选。
+失败或超出预算的条目由后续采集处理。0、负数、布尔值和字符串均不接受；日/周报不再提供模型评估参数。

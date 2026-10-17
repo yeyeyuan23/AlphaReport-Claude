@@ -79,6 +79,9 @@ def library(monkeypatch, memory_session_factory):
     factory = memory_session_factory
     monkeypatch.setattr(weekly, "init_db", lambda: None)
     monkeypatch.setattr(weekly, "get_session_factory", lambda: factory)
+    from reportagent.services import collection_reviews
+
+    monkeypatch.setattr(collection_reviews, "get_session_factory", lambda: factory)
     yield factory
 
 
@@ -170,17 +173,14 @@ def test_no_llm_preview_does_not_call_models_or_send(library, tmp_path, monkeypa
     send = MagicMock(side_effect=AssertionError("No sending in preview"))
     monkeypatch.setattr(weekly, "send_feishu_card", send)
     result = weekly.run_weekly_report(
-        weekly.WeeklyReportOptions(
-            dry_run=True, no_llm=True, output=str(tmp_path / "week.md")
-        )
+        weekly.WeeklyReportOptions(dry_run=True, output=str(tmp_path / "week.md"))
     )
     assert result["status"] == "preview"
-    assert result["model_refresh"] is False
     assert "待核验" in (tmp_path / "week.md").read_text()
     send.assert_not_called()
 
 
-def test_native_weekly_prepares_shared_evidence_instead_of_claude(
+def test_weekly_only_renders_saved_evidence(
     library, tmp_path, monkeypatch
 ):
     with library() as session:
@@ -205,17 +205,18 @@ def test_native_weekly_prepares_shared_evidence_instead_of_claude(
         ),
     )
     prepare = AsyncMock(return_value={"screened": 0, "review_ids": [], "failures": []})
-    monkeypatch.setattr(weekly, "prepare_weekly_evidence", prepare, raising=False)
+    from reportagent.services import report_quality
+
+    monkeypatch.setattr(report_quality, "review_report_ids", prepare)
     result = weekly.run_weekly_report(
         weekly.WeeklyReportOptions(dry_run=True, output=str(tmp_path / "week.md"))
     )
-    prepare.assert_awaited_once()
-    assert result["model_refresh"] is True
+    prepare.assert_not_awaited()
     assert result["sent"] == 0
 
 
-def test_weekly_review_budget_advances_past_current_cached_papers(library, monkeypatch):
-    from reportagent.services import report_quality
+def test_collection_review_budget_advances_past_current_cached_papers(library, monkeypatch):
+    from reportagent.services import report_quality, collection_reviews
 
     with library() as session:
         for rid in range(1, 14):
@@ -236,13 +237,12 @@ def test_weekly_review_budget_advances_past_current_cached_papers(library, monke
         session.commit()
     review = AsyncMock(return_value={13: {"tier": "browse", "status": "reviewed"}})
     monkeypatch.setattr(report_quality, "review_report_ids", review)
-    papers = weekly.get_weekly_papers(datetime(2026, 10, 5), datetime(2026, 10, 12))
-    result = asyncio.run(weekly.prepare_weekly_evidence(papers, max_reviews=12))
+    result = asyncio.run(collection_reviews.prepare_collection_reviews(max_reviews=12))
     assert result["review_ids"] == [13]
     review.assert_awaited_once_with([13], force=False, max_reviews=12, audit={})
 
 
-def test_weekly_does_not_rescore_stale_relevance(library, monkeypatch):
+def test_collection_review_does_not_rescore_stale_relevance(library, monkeypatch):
     from reportagent.services import paper_scoring, report_quality
 
     with library() as session:
@@ -260,6 +260,8 @@ def test_weekly_does_not_rescore_stale_relevance(library, monkeypatch):
 
     monkeypatch.setattr(paper_scoring, "score_papers_batch", forbidden)
     monkeypatch.setattr(report_quality, "review_report_ids", forbidden)
-    result = asyncio.run(weekly.prepare_weekly_evidence([values]))
-    assert result["screened"] == 0
+    from reportagent.services import collection_reviews
+
+    result = asyncio.run(collection_reviews.prepare_collection_reviews())
+    assert result["unreviewed_candidates"] == 0
     assert result["review_ids"] == []

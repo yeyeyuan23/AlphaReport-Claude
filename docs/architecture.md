@@ -116,16 +116,17 @@ arXiv 公告模式由 `arxiv_catalog` 解析官网 `/list/<category>/recent` 的
   缺全文或超限保持待核验。引文供查阅，逐字匹配不参与推荐或展示判断；
   文本块编号是提取偏移，不是 PDF 页码。模型评估不代表复现实验。
 - **日报**：`daily_push` 按来源 `announced_at` 读取报告当天北京时间 08:00 前 24 小时公开发布的在线资料，复用采集时保存的有效相关性评分，按方向轮流处理候选；
-  复用有效评估，默认评估全部符合条件且需更新的论文，
-  缺全文项不占预算。随后按 `daily-report/briefing.md` 渲染，最多重点推荐 5 篇。
+  只读取已保存且当前有效的全文评估，缺失或过期显示待评估；随后按 `daily-report/briefing.md` 渲染，最多重点推荐 5 篇。
   来源覆盖读取最近定时采集记录，不能说成本次在线检查；过程锁和 `ReportRun` 记录本次运行。
-- **周报**：`weekly_report` 按同一来源 `announced_at` 查询报告当天北京时间 08:00 前 168 小时公开发布的库中在线资料，复用采集筛选结果并默认完成全部符合条件的新全文评估，使用 `weekly-report/briefing.md` 分层排版。
-  有效缓存不占预算，未完成评估的条目保留待核验；`--no-llm` 只读取缓存。
-- **可选评估预算**：日/周报共用 `push_settings.max_reviews`，省略或 `null` 表示不限，
-  正整数只计新全文评估；CLI `--max-reviews` 优先。预算由 `report_quality.resolve_review_budget`
-  统一校验，报告说明超出预算的候选数量。相关性筛选在采集阶段完成，报告不重新评分；候选查询不设固定条数上限。`report_periods` 统一以报告当天北京时间 08:00 为截止点生成 24/168 小时窗口并转换为 UTC 查询，均使用 `[start, end)`；入库日期维护查询单独使用自然日边界；标题为报告当天，每篇分别保留公告时间与原始提交/发表日期。整批筛选和机器人报告任务不设固定总时限；
-  单篇全文评估保留 240 秒时限，下载、解析和模型请求保留各自的超时保护。
-- **报告投递**：日/周报不采集新条目；已在库中的 arXiv 资料缺全文时可补取 PDF。
+- **周报**：`weekly_report` 按同一来源 `announced_at` 查询报告当天北京时间 08:00 前 168 小时公开发布的库中在线资料，复用采集筛选和已保存全文评估，使用 `weekly-report/briefing.md` 分层排版。
+  不调用模型或补取全文，未完成评估的条目保留待核验。
+- **采集后全文评估**：`scheduled_collection` 在入库后调用 `collection_reviews`，
+  处理当前相关性达标的在线论文；有效评估直接复用，缺失、失败、过期或此前预算未覆盖的条目在后续采集中继续处理。
+  单篇失败不回滚已入库论文，也不阻塞其余论文。来源采集与全文评估分别记录状态与耗时，评估不完整不冒充来源覆盖不足。
+  `daily_collection.max_reviews` 省略或 `null` 时不限，正整数只计新模型调用；缺全文项不占预算。
+  日/周报均不调用模型或补下载，缺失评估显示待核验。`report_periods` 以北京时间08:00为截止点生成24/168小时的 `[start, end)` 窗口。
+  单篇全文评估保留240秒时限，下载、解析和模型请求各有超时保护。
+- **报告投递**：日/周报只读已保存资料和评估，不采集或补下载。
   日/周报每次执行都按本期资料生成内容，重复执行会再次发送。
   单篇阅读按产物和目标会话保存发送回执，用于避免重复投递。
   普通回复、单篇、日报、周报共用 `feishu_transport` 的客户端、请求和消息 ID 校验；
@@ -214,24 +215,23 @@ Web 中三项定时任务独立配置：`daily_collection` 默认每天北京时
 ### 采集补跑与报告预览
 
 默认自动采集与日报由 Web 调度，CLI 用于部署者补跑或聊天按需调用；
-`--dry-run` 只控制投递/保存范围，不保证免费或完全只读。
+日/周报的 `--dry-run` 不调用模型，仅生成已保存资料的预览；其他分析类维护命令仍可能消耗模型额度。
 
 ```bash
-# 按当前部署配置补跑同一采集任务；会联网、分类和更新资料
+# 按当前部署配置补跑同一采集任务；会联网、筛选、分类、下载入库并完成全文评估
 .venv/bin/python -m reportagent.cli.scheduled_collect
 .venv/bin/python -m reportagent.cli.collect --topics '因子模型,高频交易' --sources arxiv,eastmoney,bigquant --days 7 --max 15 --no-analysis
 # 单篇产物不指定目标时仅生成；已有产物可在明确授权目标后投递
 .venv/bin/python -m reportagent.cli.report --arxiv-id 2005.13665
 .venv/bin/python -m reportagent.cli.report --artifact data/one_reports/2005.13665v3.json --chat-id oc_your_chat_id
-# 日报预览会刷新全文评估、保存运行记录，不发送
+# 日报只读预览并保存运行记录，不调用模型或发送
 .venv/bin/python -m reportagent.cli.daily_feishu_push --dry-run --output data/daily-preview.md
 # 周报仅读缓存的模板预览；weeks-ago 每增加1，将7天窗口前移7天
-.venv/bin/python -m reportagent.cli.weekly_report --dry-run --no-llm --output data/weekly-preview.md
+.venv/bin/python -m reportagent.cli.weekly_report --dry-run --output data/weekly-preview.md
 .venv/bin/python -m reportagent.cli.weekly_report --weeks-ago 1 --dry-run
 ```
 
-`--force-review` 用于日/周报强制更新评估，`--max-reviews N` 覆盖共享的可选评估预算，
-默认不限。日报的 `--report-ids` 是显式检查已选论文，仅跳过摘要相关性候选限制，仍须满足报告当天北京时间 08:00 前 24 小时的来源公告窗口，
+日报的 `--report-ids` 是显式检查已选论文，仅跳过摘要相关性候选限制，仍须满足报告当天北京时间 08:00 前 24 小时的来源公告窗口，
 不用于自动采集。单篇产物文件名以实际版本为准，成功投递回执保留；产物中的旧评估不能覆盖库中当前有效的评估。
 
 ## 修改与验证

@@ -34,8 +34,7 @@ Text chunk IDs are extraction offsets, not PDF page numbers. All available text 
 The library and daily digest render this saved assessment without another model call.
 Single-paper summaries use the deterministic [single-brief.md](single-brief.md) template;
 incomplete assessments explain missing material or unfinished evaluation rather than presenting completed findings.
-Changed prompt/model/content fingerprints invalidate cached assessments. Batch analysis caches also distinguish quick, standard and deep reading; a quick result cannot satisfy a standard request, and a failed force refresh preserves a previously saved successful result. Use CLI `report --force`
-or `daily_feishu_push --force-review` for an explicit refresh; existing delivery receipts survive.
+Changed prompt/model/content fingerprints invalidate cached assessments. Batch analysis caches also distinguish quick, standard and deep reading; a quick result cannot satisfy a standard request, and a failed force refresh preserves a previously saved successful result. Use CLI `report --force` for an explicit single-paper refresh; scheduled collections refresh unfinished or stale library assessments; existing delivery receipts survive.
 
 Web and batch knowledge cards use `reportagent.services.knowledge_cards` and
 [knowledge-card.md](knowledge-card.md). They render the same saved current reading assessment,

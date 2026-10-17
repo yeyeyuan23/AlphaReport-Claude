@@ -11,7 +11,7 @@ metadata:
 请帮我从 arXiv 和 BigQuant 收集最新的量化金融研报，
 主题包括：量化策略、因子模型。
 每个数据源最多获取 {max_results} 篇。
-收集完成后请简要总结收集到的研报情况。只有用户明确要求收集时才执行；`/daily` 和 `/weekly` 只生成报告，不能调用这个采集工作流。自动多来源采集由 Web 中独立的 `daily_collection` 定时任务负责。
+收集完成后请简要总结收集到的研报情况。只有用户明确要求收集时才执行；`/daily` 和 `/weekly` 只生成报告，不能调用这个采集工作流。自动多来源采集由服务中的 `daily_collection` 定时任务负责，最后完成达标论文的全文质量评估并保存，失败或延期项在后续采集时继续处理。手动执行同一流程可用 `.venv/bin/python scripts/collect.py`。
 
 Use the shared Python tools/services for execution. The task template above is a workflow, not permission to send messages.
 

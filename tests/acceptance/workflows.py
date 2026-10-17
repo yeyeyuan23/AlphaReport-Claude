@@ -176,9 +176,7 @@ def weekly(args):
     papers = get_weekly_papers(start, end)
     save(args.run_dir, f"{args.label}-input.json", papers)
     preview = args.run_dir / f"{args.label}.md"
-    options = WeeklyReportOptions(
-        dry_run=True, output=str(preview), no_llm=not args.llm_weekly
-    )
+    options = WeeklyReportOptions(dry_run=True, output=str(preview))
     with redirect_stdout(io.StringIO()):
         audit = run_weekly_report(options)
     papers = get_weekly_papers(start, end)
@@ -190,10 +188,9 @@ def weekly(args):
         "paper_ids": [p["id"] for p in papers],
         "sources": Counter(p["source"] for p in papers),
         "collects_sources": False,
-        "llm_requested": args.llm_weekly,
+        "llm_requested": False,
         "explicit_deepseek_environment": False,
         "audit": audit,
-        "fallback": not args.llm_weekly,
         "renderer": "saved_evidence",
         "empty": not papers,
         "preview_chars": len(text),
@@ -222,11 +219,6 @@ async def main():
         "--review",
         action="store_true",
         help="Review every relevant library paper against full text",
-    )
-    parser.add_argument(
-        "--llm-weekly",
-        action="store_true",
-        help="Refresh weekly evidence with configured Python model API",
     )
     args = parser.parse_args()
     args.label = args.label or args.stage

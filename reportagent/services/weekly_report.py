@@ -6,7 +6,6 @@ from dataclasses import dataclass
 import json
 import logging
 import os
-import asyncio
 from datetime import datetime
 from pathlib import Path
 
@@ -22,7 +21,6 @@ from reportagent.services.report_quality import (
     pending_review,
     review_fingerprint,
     cached_review_is_current,
-    resolve_review_budget,
 )
 from reportagent.services.feishu_markdown import card_sections
 from reportagent.services.report_periods import (
@@ -50,9 +48,6 @@ class WeeklyReportOptions:
     receive_ids: str = ""
     receive_type: str = ""
     output: str | None = None
-    no_llm: bool = False
-    max_reviews: int | None = None
-    force_review: bool = False
 
 
 # ═══════════════════════════════════════════════════
@@ -170,79 +165,6 @@ def generate_weekly_report(
     )
 
 
-async def prepare_weekly_evidence(
-    papers: list[dict], *, max_reviews: int | None = None, force_review: bool = False
-) -> dict:
-    """Reuse collection screening and complete full-text reviews as daily does."""
-    from reportagent.services.paper_scoring import (
-        screening_is_current,
-        _load_scoring_config,
-        _configured_threshold,
-    )
-    from reportagent.services.report_quality import review_report_ids, select_candidates
-
-    max_reviews = resolve_review_budget(max_reviews)
-    audit = {
-        "screened": 0,
-        "pending_needs_material": 0,
-        "review_ids": [],
-        "failures": [],
-    }
-    # Only current, saved collection decisions can qualify for full-text review.
-    from reportagent.models.database import Report
-
-    with get_session_factory()() as session:
-        ids = [p["id"] for p in papers]
-        rows = session.query(Report).filter(Report.id.in_(ids)).all()
-        threshold = _configured_threshold(_load_scoring_config())
-        candidates = []
-        for row in rows:
-            if (
-                not screening_is_current(row)
-                or row.selection_relevance is None
-                or row.selection_relevance < threshold
-            ):
-                continue
-            snapshot = dict(vars(row))
-            try:
-                cached = json.loads(row.evaluation_json or "null")
-            except (ValueError, TypeError):
-                cached = None
-            if not force_review and cached_review_is_current(
-                snapshot, cached, get_llm_model()
-            ):
-                continue  # Saved reviews remain visible without consuming new-review budget.
-            candidates.append(snapshot)
-    audit["unreviewed_candidates"] = len(candidates)
-    selected = select_candidates(candidates, max_reviews=len(candidates))
-    review_audit = {}
-    reviewed = (
-        await review_report_ids(
-            [p["id"] for p in selected],
-            force=force_review,
-            max_reviews=max_reviews,
-            audit=review_audit,
-        )
-        if selected
-        else {}
-    )
-    audit.update(review_audit)
-    audit["review_ids"] = review_audit.get("review_ids", list(reviewed))
-    audit["review_tiers"] = {
-        str(rid): result.get("tier") for rid, result in reviewed.items()
-    }
-    for rid, result in reviewed.items():
-        if result.get("status") != "reviewed":
-            audit["failures"].append(
-                {
-                    "stage": "review",
-                    "id": rid,
-                    "reason": result.get("validation_issues", []),
-                }
-            )
-    return audit
-
-
 # ═══════════════════════════════════════════════════
 # Send to Feishu
 # ═══════════════════════════════════════════════════
@@ -318,11 +240,6 @@ def send_feishu_card(
 
 
 def run_weekly_report(options: WeeklyReportOptions) -> dict:
-    from reportagent.services.paper_scoring import _load_scoring_config
-
-    max_reviews = resolve_review_budget(
-        options.max_reviews, _load_scoring_config().get("push_settings", {})
-    )
     week_start, week_end, start_label, end_label = get_weekly_range(options.weeks_ago)
     weekly_ids = os.environ.get("FEISHU_WEEKLY_PUSH_IDS", "").strip()
     configured_ids = weekly_ids or os.environ.get("FEISHU_DAILY_PUSH_IDS", "")
@@ -340,28 +257,12 @@ def run_weekly_report(options: WeeklyReportOptions) -> dict:
             "Set FEISHU_WEEKLY_PUSH_IDS or FEISHU_DAILY_PUSH_IDS before delivery"
         )
     papers = get_weekly_papers(week_start, week_end)
-    preparation = {}
-    if papers and not options.no_llm:
-        preparation = asyncio.run(
-            prepare_weekly_evidence(
-                papers,
-                max_reviews=max_reviews,
-                force_review=options.force_review,
-            )
-        )
-        papers = get_weekly_papers(week_start, week_end)
     text = generate_weekly_report(
         papers,
         start_label,
         end_label,
         publication_window=format_publication_window(week_start, week_end),
     )
-    failures = preparation.get("failures", [])
-    if failures:
-        text += f"\n\n本期有 {len(failures)} 项筛选或全文阅读评估未完成；相关条目保留待核验，可重试。"
-    unattempted = len(preparation.get("deferred_ids", []))
-    if unattempted > 0:
-        text += f"\n\n本次全文评估预算为 {max_reviews} 篇，另有 {unattempted} 篇候选尚未评估；重跑可继续处理。"
     if options.output:
         output = Path(options.output)
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -380,9 +281,6 @@ def run_weekly_report(options: WeeklyReportOptions) -> dict:
         "week_start": start_label,
         "week_end": end_label,
         "paper_ids": [p["id"] for p in papers],
-        "model_refresh": not options.no_llm,
-        "preparation": preparation,
-        "review_budget": max_reviews,
         "sent": 0,
         "failed_recipients": [],
     }
@@ -399,6 +297,4 @@ def run_weekly_report(options: WeeklyReportOptions) -> dict:
             result["failed_recipients"].append(rid)
     if result["failed_recipients"]:
         result["status"] = "partial" if result["sent"] else "failed"
-    elif failures:
-        result["status"] = "partial"
     return result

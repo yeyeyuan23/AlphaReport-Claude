@@ -24,19 +24,6 @@ def main():
         help="接收者类型",
     )
     parser.add_argument("--output", type=str, default=None, help="将周报输出到文件")
-    parser.add_argument(
-        "--no-llm",
-        action="store_true",
-        help="不刷新模型评估；过期或缺失的证据显示待核验",
-    )
-
-    parser.add_argument(
-        "--max-reviews",
-        type=int,
-        default=None,
-        help="可选的新全文评估预算，正整数；优先于配置，未配置时评估全部符合条件的论文",
-    )
-    parser.add_argument("--force-review", action="store_true", help="强制刷新全文评估")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s")

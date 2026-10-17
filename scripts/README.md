@@ -5,7 +5,7 @@
 
 | 工具 | 作用 |
 |---|---|
-| `collect.py` | 手动执行与定时任务相同的采集流程，含 DS 筛选、达标下载入库与耗时回执，不发报告 |
+| `collect.py` | 手动执行与定时任务相同的采集流程，含 DS 筛选、达标下载入库、全文质量评估与耗时回执，不发报告 |
 | `ops/run_bot.sh` | 只启动飞书机器人，可从其他目录调用 |
 | `ops/keepalive.sh` | 检查 `data/alphareport.pid`，需要时后台启动 Web + 机器人，输出到 `data/bot.log` |
 | `ops/sync_public_url.sh` | 从本机隧道日志更新 `.env` 中的公开网址，调用 `reportagent.cli.sync_public_url` |

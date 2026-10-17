@@ -205,7 +205,6 @@ directions:
 # ── 推送设置 ────────────────────────────────────────────────
 push_settings:
   screening_concurrency: 4  # 摘要相关性评分并发批次数；1=串行
-  max_reviews: null  # 日报/周报的新全文评估预算；null 或省略表示不限，正整数表示限量
   max_featured: 5
   # 每次推送各方向最多展示论文数
   max_papers_per_direction: 5

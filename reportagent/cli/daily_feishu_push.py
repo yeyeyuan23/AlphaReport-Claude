@@ -26,16 +26,6 @@ def main():
         default="",
         help="指定库中论文 ID（逗号分隔），仍须满足日报公开时间窗口且有来源时间证据",
     )
-    parser.add_argument(
-        "--max-reviews",
-        type=int,
-        default=None,
-        help="可选的新全文评估预算，正整数；优先于配置，未配置时评估全部符合条件的论文",
-    )
-    parser.add_argument(
-        "--force-review", action="store_true", help="刷新已缓存的全文质量评估"
-    )
-
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(message)s")

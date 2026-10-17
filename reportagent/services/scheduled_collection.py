@@ -95,6 +95,9 @@ def collection_notice(collection: dict | None) -> str | None:
         )
     if collection.get("error"):
         details.append(_collection_error_label(collection["error"]))
+    review = collection.get("review", {})
+    if review.get("status") in {"partial", "failed"}:
+        details.append("部分全文评估尚未完成，后续后台任务继续处理；报告展示已保存结果")
     if not details:
         details.append("记录未提供具体失败阶段")
     if coverage_incomplete:
@@ -128,8 +131,42 @@ def _save(path: Path, result: dict):
     temporary.replace(path)
 
 
-def run_scheduled_collection() -> dict:
+async def _collect_and_review(criteria, config, result):
     from reportagent.services.collection import collect_reports
+    from reportagent.services.collection_reviews import prepare_collection_reviews
+    from reportagent.services.report_quality import resolve_review_budget
+
+    budget = resolve_review_budget(settings=config)
+    response = await collect_reports(criteria, no_analysis=True, broad=True)
+    if not isinstance(response, dict) or response.get("status") not in {
+        "ok",
+        "partial",
+        "failed",
+    }:
+        raise ValueError("Collector returned no verifiable outcome")
+    result.update(response)
+    started = monotonic()
+    logger.info("Collection full-text review started")
+    try:
+        review = await prepare_collection_reviews(max_reviews=budget)
+        review["status"] = (
+            "partial" if review.get("failures") or review.get("deferred_ids") else "ok"
+        )
+    except Exception as error:
+        logger.warning("Collection full-text review failed: %s", type(error).__name__)
+        review = {"status": "failed", "error": type(error).__name__}
+    review["elapsed_ms"] = round((monotonic() - started) * 1000)
+    logger.info(
+        "Collection full-text review finished: status=%s elapsed_ms=%s",
+        review["status"],
+        review["elapsed_ms"],
+    )
+    result["review"] = review
+    if review["status"] != "ok" and result["status"] == "ok":
+        result["status"] = "partial"
+
+
+def run_scheduled_collection() -> dict:
     from reportagent.models.schemas import UserCriteria, SourceType
     from reportagent.services.report_periods import get_daily_range
 
@@ -170,22 +207,20 @@ def run_scheduled_collection() -> dict:
                 date_to_exclusive=True,
                 max_results_per_source=None,
             )
-            response = asyncio.run(
-                collect_reports(criteria, no_analysis=True, broad=True)
-            )
-            if not isinstance(response, dict) or response.get("status") not in {
-                "ok",
-                "partial",
-                "failed",
-            }:
-                raise ValueError("Collector returned no verifiable outcome")
-            result.update(response)
+            asyncio.run(_collect_and_review(criteria, config, result))
         except Exception as error:
             result.update(status="failed", error=type(error).__name__)
             logger.error("Scheduled collection failed: %s", type(error).__name__)
         finally:
             result["completed_at"] = datetime.now(timezone.utc).isoformat()
             result["elapsed_ms"] = round((monotonic() - started) * 1000)
+            if result.get("timing"):
+                result["timing"].update(
+                    completed_at=result["completed_at"], elapsed_ms=result["elapsed_ms"]
+                )
+                result["timing"]["stages_ms"]["full_text_review"] = result.get(
+                    "review", {}
+                ).get("elapsed_ms", 0)
             _save(directory / f"{result['run_id']}.json", result)
             _save(directory / "latest.json", result)
         logger.info("Scheduled collection %s: %s", result["run_id"], result["status"])

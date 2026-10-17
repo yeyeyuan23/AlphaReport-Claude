@@ -29,7 +29,7 @@ class DeliveryTests(unittest.TestCase):
         (root / "configs").mkdir()
         (root / "configs/push_directions.yaml").write_text("push_settings: {}")
 
-        async def reviews(ids, **kwargs):
+        def reviews(ids, **kwargs):
             from reportagent.services.report_quality import review_fingerprint
 
             results = {}
@@ -55,7 +55,7 @@ class DeliveryTests(unittest.TestCase):
             patch.object(daily, "init_db"),
             patch.object(daily, "get_session_factory", return_value=self.factory),
             patch.object(daily, "PROJECT_ROOT", root),
-            patch.object(daily, "review_report_ids", side_effect=reviews),
+            patch.object(daily, "read_saved_reviews", side_effect=reviews),
         ]
         for item in self.patches:
             item.start()

@@ -38,10 +38,10 @@ def offline_daily(tmp_path, monkeypatch, memory_session_factory):
     monkeypatch.setattr(daily, "send_feishu_card", lambda *args, **kwargs: True)
     monkeypatch.delenv("FEISHU_DAILY_PUSH_IDS", raising=False)
 
-    async def review(ids, **kwargs):
+    def review(ids, **kwargs):
         assessments = {}
         with factory() as session:
-            for rid in ids[: kwargs.get("max_reviews")]:
+            for rid in ids:
                 assessment = {
                     "tier": "browse",
                     "label": "值得浏览",
@@ -54,7 +54,7 @@ def offline_daily(tmp_path, monkeypatch, memory_session_factory):
                 assessments[rid] = assessment
         return assessments
 
-    monkeypatch.setattr(daily, "review_report_ids", review)
+    monkeypatch.setattr(daily, "read_saved_reviews", review)
     yield factory, tmp_path
 
 
@@ -348,7 +348,7 @@ def test_render_refreshes_candidate_metadata_without_refiltering_explicit_ids(
         "limitations": ["New revision assessed"],
     }
 
-    async def review(ids, **kwargs):
+    def review(ids, **kwargs):
         with factory() as session:
             row = session.get(Report, 1)
             row.title = "New revision title"
@@ -365,7 +365,7 @@ def test_render_refreshes_candidate_metadata_without_refiltering_explicit_ids(
             save_offline_assessment(session, row, marker)
         return {1: marker}
 
-    monkeypatch.setattr(daily, "review_report_ids", review)
+    monkeypatch.setattr(daily, "read_saved_reviews", review)
     result = daily.run_daily_push(daily.DailyPushOptions(report_ids="1", dry_run=True))
     saved = json.loads(
         Path(
@@ -418,7 +418,7 @@ def test_card_footer_describes_rendered_saved_evaluations(monkeypatch):
     assert "已保存评估" in footer
 
 
-def test_configured_review_budget_limits_candidates_and_explicit_option_overrides(
+def test_unreviewed_candidates_are_kept_in_saved_report(
     offline_daily,
 ):
     factory, root = offline_daily
@@ -435,17 +435,10 @@ def test_configured_review_budget_limits_candidates_and_explicit_option_override
             )
         )
         session.commit()
-    (root / "configs/push_directions.yaml").write_text(
-        "push_settings:\n  max_reviews: 1\n"
-    )
     result = daily.run_daily_push(
         daily.DailyPushOptions(report_ids="1,2", dry_run=True)
     )
-    assert result["paper_count"] == 1
-    override = daily.run_daily_push(
-        daily.DailyPushOptions(report_ids="1,2", max_reviews=2, dry_run=True)
-    )
-    assert override["paper_count"] == 2
+    assert result["paper_count"] == 2
 
 
 def test_recipient_brief_uses_same_configured_featured_limit(
@@ -484,7 +477,7 @@ def test_review_of_later_paper_cannot_mix_new_metadata_with_earlier_stale_conclu
         )
         session.commit()
 
-    async def review(ids, **kwargs):
+    def review(ids, **kwargs):
         stale = {
             "tier": "focus",
             "label": "重点阅读",
@@ -516,7 +509,7 @@ def test_review_of_later_paper_cannot_mix_new_metadata_with_earlier_stale_conclu
             session.commit()
         return {1: stale}
 
-    monkeypatch.setattr(daily, "review_report_ids", review)
+    monkeypatch.setattr(daily, "read_saved_reviews", review)
     result = daily.run_daily_push(
         daily.DailyPushOptions(report_ids="1,2", dry_run=True)
     )

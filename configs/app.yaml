@@ -73,7 +73,8 @@ feishu:
 daily_collection:
   enabled: true
   timezone: "Asia/Shanghai"
-  schedule_cron: "08:00"  # 每天，含周末；只采集、分类和入库
+  schedule_cron: "08:00"  # 每天，含周末；采集、筛选、下载入库和全文质量评估
+  max_reviews: null  # 新全文评估预算；null 或省略表示不限，失败项在后续采集时重试
   sources: [arxiv, eastmoney, bigquant]
   # 自动采集固定使用日报08:00截止点之前24小时的来源公告，不设候选数量上限。
 

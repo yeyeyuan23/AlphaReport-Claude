@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import asyncio
 import uuid
 import fcntl
 from contextlib import contextmanager
@@ -21,13 +20,12 @@ from reportagent.db.engine import init_db, get_session_factory
 from reportagent.utils.config import PROJECT_ROOT
 from reportagent.services.public_url import sync_public_url, get_web_base_url
 from reportagent.services.report_quality import (
-    review_report_ids,
     select_candidates,
     pending_review,
     review_fingerprint,
-    resolve_review_budget,
 )
 from reportagent.services.report_briefing import render_briefing
+from reportagent.services.report_views import read_saved_reviews
 from reportagent.services.feishu_markdown import card_sections
 from reportagent.services.paper_scoring import (
     scoring_fingerprint as scoring_fingerprint,
@@ -62,8 +60,6 @@ class DailyPushOptions:
     dry_run: bool = False
     output: str | None = None
     report_ids: str = ""
-    max_reviews: int | None = None
-    force_review: bool = False
 
 
 def _load_push_settings() -> dict:
@@ -405,8 +401,7 @@ def save_run_record(result: dict) -> None:
 
 
 def run_daily_push(options: DailyPushOptions) -> dict:
-    """One recorded workflow; analysis always precedes delivery."""
-    resolve_review_budget(options.max_reviews)
+    """Render saved evidence and record delivery without initiating analysis."""
     with daily_run_lock():
         result = {
             "run_id": str(uuid.uuid4()),
@@ -448,8 +443,6 @@ def run_daily_push(options: DailyPushOptions) -> dict:
 def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
     global UI_BASE_URL, PUSH_SETTINGS
     PUSH_SETTINGS = _load_push_settings()
-    max_reviews = resolve_review_budget(options.max_reviews, PUSH_SETTINGS)
-    run["review_budget"] = max_reviews
     period_start, period_end, report_date, _ = get_daily_range()
     run["publication_window"] = {
         "start": period_start.isoformat(),
@@ -503,24 +496,15 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
         )
     candidates = select_candidates(papers, len(papers), list(load_enabled_directions()))
     run["report_ids"] = [p["id"] for p in candidates]
-    review_audit = {}
-    assessments = (
-        asyncio.run(
-            review_report_ids(
-                run["report_ids"],
-                force=options.force_review,
-                max_reviews=max_reviews,
-                audit=review_audit,
-            )
-        )
-        if candidates
-        else {}
-    )
-    run["stages"]["review"] = review_audit
-    candidates = [p for p in candidates if p["id"] in assessments]
-    run["report_ids"] = [p["id"] for p in candidates]
+    run["stages"]["review"] = {
+        "status": "not_run",
+        "reason": "use_saved_collection_reviews",
+    }
+    assessments = read_saved_reviews(run["report_ids"])
     for p in candidates:
-        p["evaluation"] = assessments.get(p["id"], pending_review(p, "全文评估未完成"))
+        p["evaluation"] = assessments.get(
+            p["id"], pending_review(p, "后台全文评估尚未完成。")
+        )
     candidates = _refresh_candidate_metadata(candidates, report_date=report_date)
     run["report_ids"] = [p["id"] for p in candidates]
     run["papers"] = candidates
@@ -534,11 +518,8 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
             source_checked_at=checked_at,
             publication_window=format_publication_window(period_start, period_end),
         )
-        deferred = len(review_audit.get("deferred_ids", []))
-        if deferred:
-            text += f"\n\n本次全文评估预算为 {max_reviews} 篇，另有 {deferred} 篇候选尚未评估；重跑可继续处理。"
         if ids:
-            text += "\n\n本次为指定论文评估，仍限于报告当天北京时间 08:00 前 24 小时公开发布且有来源时间证据的论文。"
+            text += "\n\n本次展示指定论文的已保存评估，仍限于报告当天北京时间 08:00 前 24 小时公开发布且有来源时间证据的论文。"
         if not papers:
             text += "\n\n本期 24 小时窗口内暂无有来源公开时间证据、且通过当前相关性筛选的论文。"
         if run["warnings"]:

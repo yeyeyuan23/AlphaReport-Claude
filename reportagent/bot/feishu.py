@@ -229,7 +229,7 @@ def handle_cmd(text, chat_id, chat_type):
         except Exception:
             _report_lock.release()
             raise
-        return "开始生成当天北京时间08:00前168小时的周报：使用库中资料，复用采集时的相关性筛选结果，评估符合条件的论文，完成后推送到当前私聊。"
+        return "开始生成当天北京时间08:00前168小时的周报：使用库中资料，读取采集时保存的筛选与全文评估结果，完成后推送到当前私聊。"
 
     if command == "/daily":
         if chat_type != "p2p":
@@ -241,7 +241,7 @@ def handle_cmd(text, chat_id, chat_type):
         except Exception:
             _report_lock.release()
             raise
-        return "开始生成日报：使用库中当天北京时间08:00前24小时公开发布且有来源时间证据的资料，复用采集时的相关性筛选结果，评估符合条件的论文，完成后推送到当前私聊。"
+        return "开始生成日报：使用库中当天北京时间08:00前24小时公开发布且有来源时间证据的资料，读取采集时保存的筛选与全文评估结果，完成后推送到当前私聊。"
 
     if command == "/report":
         if chat_type != "p2p":

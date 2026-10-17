@@ -38,12 +38,11 @@
 .venv/bin/python -m tests.acceptance.workflows score --run-dir data/acceptance/my-run --review
 # 周报只查询库中报告当天北京时间 08:00 前 168 小时有来源公告证据的资料，不会自动补采；默认先验证模板
 .venv/bin/python -m tests.acceptance.workflows weekly --run-dir data/acceptance/my-run --label weekly-template
-.venv/bin/python -m tests.acceptance.workflows weekly --run-dir data/acceptance/my-run --label weekly-model --llm-weekly
 ```
 
 `score` 不受近期日期或默认 200 条限制，也会重评已有分数。它验证的是摘要相关性；`--review` 才执行有全文依据的质量评估。数据量大时先查看库规模，避免一次触发过多调用。`batch --topic` 使用完整分类标签匹配；`evidence_scope` 区分全文与摘要分析，不能把摘要分析称为全文精读。
 
-周报验收通过 `--llm-weekly` 请求配置的 Python 模型 API 复用采集相关性结果并刷新全文评估，再以保存证据排版；省略该参数则只检查缓存与模板，不调用模型，缺失或过期评估显示待核验。结果记录刷新审计、来源、文章 ID 与预览状态。BigQuant 和东方财富取得可访问的正文或 PDF，附件失效时记录错误；仅有更新时间的条目仍可能缺发表日期。来源连通不能代表已穷尽所有近期论文，摘要相关性也不代表研究质量。
+周报验收只读取已保存的相关性与全文评估并检查排版和日期窗口，不调用模型；缺失或过期评估显示待核验。全文评估应在采集或显式后台评估阶段完成。BigQuant 和东方财富取得可访问的正文或 PDF，附件失效时记录错误；仅有更新时间的条目仍可能缺发表日期。来源连通不能代表已穷尽所有近期论文，摘要相关性也不代表研究质量。
 
 ## 如何评阅内容
 

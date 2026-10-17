@@ -102,14 +102,12 @@ def test_weekly_delivery_uses_recipient_type(
         side_effect=AssertionError("No model refresh in recipient tests")
     )
     send = MagicMock(return_value=True)
-    monkeypatch.setattr(weekly, "prepare_weekly_evidence", prepare)
     monkeypatch.setattr(weekly, "send_feishu_card", send)
     output = tmp_path / "weekly.md"
 
     if cli_args is None:
         result = weekly.run_weekly_report(
             weekly.WeeklyReportOptions(
-                no_llm=True,
                 output=str(output),
             )
         )
@@ -122,7 +120,6 @@ def test_weekly_delivery_uses_recipient_type(
             "argv",
             [
                 "weekly_report",
-                "--no-llm",
                 "--output",
                 str(output),
                 *cli_args,

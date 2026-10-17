@@ -319,3 +319,18 @@ def map_analysis_to_briefing_sections(analysis: dict) -> list[dict]:
         sections.append({"title": "总结", "icon": "📌", "content": analysis["summary"]})
 
     return sections
+
+
+def read_saved_reviews(report_ids: list[int]) -> dict[int, dict]:
+    """Read current stored assessments without model calls or material fetching."""
+    from reportagent.db.engine import get_session_factory
+    from reportagent.models.database import Report
+    from reportagent.services.report_quality import pending_review
+
+    with get_session_factory()() as session:
+        rows = session.query(Report).filter(Report.id.in_(report_ids)).all()
+        return {
+            row.id: read_evaluation(row.evaluation_json, paper=vars(row))
+            or pending_review(vars(row), "后台全文评估尚未完成。")
+            for row in rows
+        }
