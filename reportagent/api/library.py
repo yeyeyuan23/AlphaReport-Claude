@@ -2,7 +2,6 @@
 
 import json
 import logging
-from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Query, HTTPException, Depends
@@ -10,6 +9,8 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from reportagent.db.engine import get_db
 from reportagent.services.report_views import read_current_analysis
+from reportagent.services import report_pdf
+from reportagent.sources.content_fetch import get_pdf_policy
 from reportagent.db.repository import ReportRepository
 from reportagent.models.schemas import ReportListParams
 from reportagent.utils.config import PROJECT_ROOT
@@ -100,39 +101,24 @@ def get_report_pdf(report_id: int, db: Session = Depends(get_db)):
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    # Serve local PDF if exists
-    if report.pdf_path and Path(report.pdf_path).exists():
-        return FileResponse(
-            report.pdf_path,
-            media_type="application/pdf",
-            filename=f"report_{report_id}.pdf",
-            content_disposition_type="inline",
-        )
-
-    # Fallback: fetch from arXiv
-    if report.source == "arxiv" and report.source_url:
-        arxiv_id = report.arxiv_id or report.source_url.split("/abs/")[-1]
-        pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
-        import httpx
-
-        try:
-            resp = httpx.get(pdf_url, timeout=60, follow_redirects=True)
-            resp.raise_for_status()
-            pdf_dir = PROJECT_ROOT / "data" / "pdfs"
-            pdf_dir.mkdir(parents=True, exist_ok=True)
-            safe_name = arxiv_id.replace("/", "_").replace("\\", "_")
-            local_path = pdf_dir / f"{safe_name}.pdf"
-            local_path.write_bytes(resp.content)
-            report.pdf_path = str(local_path)
-            db.commit()
+    try:
+        path = report_pdf.cached_pdf_path(report)
+        if path is None and report.source == "arxiv" and report.source_url:
+            policy = get_pdf_policy()
+            snapshot = report_pdf.pdf_snapshot(report)
+            data = report_pdf.download_pdf_sync(snapshot, policy)
+            path = report_pdf.save_pdf(
+                db, snapshot, data, PROJECT_ROOT / "data" / "pdfs"
+            )
+        if path is not None:
             return FileResponse(
-                str(local_path),
+                path,
                 media_type="application/pdf",
                 filename=f"report_{report_id}.pdf",
                 content_disposition_type="inline",
             )
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     raise HTTPException(status_code=404, detail="No PDF available for this report")
 

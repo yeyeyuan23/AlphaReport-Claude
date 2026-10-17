@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from reportagent.api.deps import get_db
 from reportagent.services.report_views import read_current_analysis
+from reportagent.services import report_pdf
+from reportagent.sources.content_fetch import get_pdf_policy
 from reportagent.db.repository import ReportRepository
 from reportagent.models.schemas import ReportListParams
 
@@ -589,45 +591,21 @@ async def ask_paper(
 
 @router.get("/{report_id}/pdf")
 async def get_report_pdf(report_id: int, db: Session = Depends(get_db)):
-    from pathlib import Path
+    from reportagent.utils.config import PROJECT_ROOT
 
-    repo = ReportRepository(db)
-    report = repo.get_report(report_id)
+    report = ReportRepository(db).get_report(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    if report.pdf_path and Path(report.pdf_path).exists():
+    path = report_pdf.cached_pdf_path(report)
+    if path is None and report.source == "arxiv" and report.source_url:
+        policy = get_pdf_policy()
+        snapshot = report_pdf.pdf_snapshot(report)
+        data = await report_pdf.download_pdf(snapshot, policy)
+        path = report_pdf.save_pdf(db, snapshot, data, PROJECT_ROOT / "data" / "pdfs")
+    if path is not None:
         return FileResponse(
-            report.pdf_path,
-            media_type="application/pdf",
-            filename=f"report_{report_id}.pdf",
-            content_disposition_type="inline",
-        )
-
-    if report.source == "arxiv" and report.source_url:
-        arxiv_id = report.arxiv_id or report.source_url.split("/abs/")[-1]
-        pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
-
-        import httpx
-
-        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-            resp = await client.get(pdf_url)
-            resp.raise_for_status()
-            pdf_bytes = resp.content
-
-        from reportagent.utils.config import PROJECT_ROOT
-
-        pdf_dir = PROJECT_ROOT / "data" / "pdfs"
-        pdf_dir.mkdir(parents=True, exist_ok=True)
-        safe_name = arxiv_id.replace("/", "_").replace("\\", "_")
-        local_path = pdf_dir / f"{safe_name}.pdf"
-        local_path.write_bytes(pdf_bytes)
-
-        report.pdf_path = str(local_path)
-        db.commit()
-
-        return FileResponse(
-            str(local_path),
+            path,
             media_type="application/pdf",
             filename=f"report_{report_id}.pdf",
             content_disposition_type="inline",

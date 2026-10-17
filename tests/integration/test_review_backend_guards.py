@@ -160,12 +160,14 @@ def test_first_remote_pdf_and_cached_pdf_have_identical_inline_headers(
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(library, "PROJECT_ROOT", tmp_path)
     payload = b"%PDF-1.4\nfixture"
+    async_client = httpx.AsyncClient
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(200, content=payload)
+    )
     monkeypatch.setattr(
         httpx,
-        "get",
-        lambda url, **kwargs: httpx.Response(
-            200, content=payload, request=httpx.Request("GET", url)
-        ),
+        "AsyncClient",
+        lambda **kwargs: async_client(transport=transport, **kwargs),
     )
     try:
         with factory() as db:
