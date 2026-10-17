@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import asyncio
 from datetime import datetime, timezone, timedelta
 import hashlib
 import json
@@ -290,25 +291,130 @@ def _normalize_assessment(item: dict, directions: dict[str, dict]) -> dict:
     }
 
 
+def _batch_assessment(item, paper, index, offset, provenance):
+    return {
+        **item,
+        "index": index,
+        "_paper": paper,
+        "_batch_offset": offset,
+        "_provenance": {
+            **provenance,
+            "status": item["status"],
+            "evidence_fingerprint": evidence_fingerprint(paper),
+            **(
+                {"direction_scores": item["direction_scores"]}
+                if "direction_scores" in item
+                else {}
+            ),
+        },
+    }
+
+
+def _missing_material(paper, index, offset, provenance):
+    return _batch_assessment(
+        {
+            "status": "pending_needs_material",
+            "score": None,
+            "relevance": None,
+            "best_direction": None,
+            "reason": "材料不足：缺少可用研究摘要，需补全正文或摘要后再评估",
+        },
+        paper,
+        index,
+        offset,
+        provenance,
+    )
+
+
+def _validate_batch_response(response, eligible, directions):
+    if isinstance(response, dict):
+        response = response.get("papers", response.get("results"))
+    if not isinstance(response, list):
+        raise ValueError("Expected an assessment list or a papers/results list")
+    indexed, errors, valid = {}, [], []
+    for item in response:
+        index = item.get("index") if isinstance(item, dict) else None
+        if type(index) is not int or index not in eligible:
+            errors.append("Invalid or out-of-range paper index")
+        else:
+            indexed.setdefault(index, []).append(item)
+    for index in eligible:
+        items = indexed.get(index, [])
+        if len(items) != 1:
+            errors.append(f"Paper {index}: {'duplicate' if items else 'missing'} index")
+            continue
+        try:
+            valid.append((index, _normalize_assessment(items[0], directions)))
+        except ValueError as error:
+            errors.append(f"Paper {index}: {error}")
+    return valid, errors
+
+
+async def _score_one_batch(
+    llm_client, batch, offset, context, system_prompt, provenance
+):
+    directions, _, user_template, _ = context
+    eligible = {i: p for i, p in enumerate(batch) if has_screening_material(p)}
+    valid = [
+        _missing_material(p, i, offset, provenance)
+        for i, p in enumerate(batch)
+        if i not in eligible
+    ]
+    if not eligible:
+        return valid, []
+    user_prompt = user_template.format(
+        papers_text=_format_papers_for_llm(list(eligible.values()), eligible),
+        direction_ids=", ".join(directions),
+    )
+    try:
+        response = await llm_client.chat_json(
+            [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
+            max_tokens=4000,
+        )
+        assessed, errors = _validate_batch_response(response, eligible, directions)
+        valid.extend(
+            _batch_assessment(item, batch[i], i, offset, provenance)
+            for i, item in assessed
+        )
+        pending = len(batch) - len(valid)
+        failures = [(offset, pending, "; ".join(errors)[:200])] if pending else []
+        if errors and not pending:
+            logger.warning("Ignored invalid extra assessments: %s", "; ".join(errors))
+        logger.info(
+            "Scored %s/%s papers in batch at %s", len(valid), len(batch), offset
+        )
+        return sorted(valid, key=lambda item: item["index"]), failures
+    except Exception as error:
+        logger.error("Batch scoring failed; papers remain retryable: %s", error)
+        return valid, [(offset, len(eligible), str(error)[:200])]
+
+
 async def score_papers_batch(
     llm_client: LLMClient | None,
     papers: list,
     batch_size: int = 10,
+    *,
+    concurrency: int | None = None,
 ) -> tuple[list[dict], list[tuple]]:
-    """Return valid relevance assessments and (batch offset, retryable count, error).
-
-    A duplicate index invalidates all its assessments. Missing or invalid papers are
-    never returned as scored; valid siblings remain usable. No database writes occur.
-    """
-    if (
-        isinstance(batch_size, bool)
-        or not isinstance(batch_size, int)
-        or batch_size <= 0
-    ):
+    """Bound concurrent model batches; preserve paper identity and input ordering."""
+    if type(batch_size) is not int or batch_size <= 0:
         raise ValueError("batch_size must be a positive integer")
     if not papers:
         return [], []
-    directions, system_template, user_template, fingerprint = _scoring_context()
+    if concurrency is None:
+        concurrency = (
+            _load_scoring_config()
+            .get("push_settings", {})
+            .get("screening_concurrency", 4)
+        )
+    if type(concurrency) is not int or concurrency <= 0:
+        raise ValueError("screening_concurrency must be a positive integer")
+    context = _scoring_context()
+    directions, system_template, _, fingerprint = context
     if not directions:
         raise ValueError("No enabled research directions; nothing can be screened")
     system_prompt = system_template.format(
@@ -319,112 +425,30 @@ async def score_papers_batch(
         "fingerprint": fingerprint,
         "evidence_scope": "title_abstract",
     }
-    all_results = []
-    failed_batches = []
+    semaphore = asyncio.Semaphore(concurrency)
 
-    for batch_start in range(0, len(papers), batch_size):
-        batch = papers[batch_start : batch_start + batch_size]
-        eligible = {
-            index: paper
-            for index, paper in enumerate(batch)
-            if has_screening_material(paper)
-        }
-        valid = []
-        for index, paper in enumerate(batch):
-            if index not in eligible:
-                valid.append(
-                    {
-                        "index": index,
-                        "status": "pending_needs_material",
-                        "score": None,
-                        "relevance": None,
-                        "best_direction": None,
-                        "reason": "材料不足：缺少可用研究摘要，需补全正文或摘要后再评估",
-                        "_paper": paper,
-                        "_batch_offset": batch_start,
-                        "_provenance": {
-                            **provenance,
-                            "status": "pending_needs_material",
-                            "evidence_fingerprint": evidence_fingerprint(paper),
-                        },
-                    }
-                )
-        if not eligible:
-            all_results.extend(valid)
-            continue
-        user_prompt = user_template.format(
-            papers_text=_format_papers_for_llm(list(eligible.values()), eligible),
-            direction_ids=", ".join(directions),
-        )
-        try:
-            response = await llm_client.chat_json(
-                [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.2,
-                max_tokens=4000,
+    async def run(offset):
+        async with semaphore:
+            return await _score_one_batch(
+                llm_client,
+                papers[offset : offset + batch_size],
+                offset,
+                context,
+                system_prompt,
+                provenance,
             )
-            if isinstance(response, dict):
-                response = response.get("papers", response.get("results"))
-            if not isinstance(response, list):
-                raise ValueError("Expected an assessment list or a papers/results list")
 
-            indexed = {}
-            errors = []
-            for item in response:
-                index = item.get("index") if isinstance(item, dict) else None
-                if type(index) is not int or index not in eligible:
-                    errors.append("Invalid or out-of-range paper index")
-                    continue
-                indexed.setdefault(index, []).append(item)
-
-            for index in eligible:
-                items = indexed.get(index, [])
-                if len(items) != 1:
-                    errors.append(
-                        f"Paper {index}: {'duplicate' if items else 'missing'} index"
-                    )
-                    continue
-                try:
-                    item = _normalize_assessment(items[0], directions)
-                except ValueError as error:
-                    errors.append(f"Paper {index}: {error}")
-                    continue
-                item.update(
-                    _paper=batch[index],
-                    _batch_offset=batch_start,
-                    _provenance={
-                        **provenance,
-                        "status": item["status"],
-                        "evidence_fingerprint": evidence_fingerprint(batch[index]),
-                        **(
-                            {"direction_scores": item["direction_scores"]}
-                            if "direction_scores" in item
-                            else {}
-                        ),
-                    },
-                )
-                valid.append(item)
-            all_results.extend(sorted(valid, key=lambda item: item["index"]))
-            pending = len(batch) - len(valid)
-            if pending:
-                failed_batches.append((batch_start, pending, "; ".join(errors)[:200]))
-            elif errors:
-                logger.warning(
-                    "Ignored invalid extra assessments: %s", "; ".join(errors)
-                )
-            logger.info(
-                "Scored %s/%s papers in batch at %s",
-                len(valid),
-                len(batch),
-                batch_start,
-            )
-        except Exception as error:
-            logger.error("Batch scoring failed; papers remain retryable: %s", error)
-            all_results.extend(valid)
-            failed_batches.append((batch_start, len(eligible), str(error)[:200]))
-    return all_results, failed_batches
+    logger.info(
+        "Screening %s papers: batch_size=%s concurrency=%s",
+        len(papers),
+        batch_size,
+        concurrency,
+    )
+    batches = await asyncio.gather(*(run(i) for i in range(0, len(papers), batch_size)))
+    return (
+        [item for results, _ in batches for item in results],
+        [failure for _, failures in batches for failure in failures],
+    )
 
 
 def apply_scores(

@@ -359,3 +359,49 @@ def test_unlimited_scoring_reads_all_window_candidates(
         )
     )
     assert len(seen) == 205
+
+
+def test_concurrent_batches_keep_paper_identity_when_reordered_and_one_fails(
+    direction_config,
+):
+    import re
+
+    papers = [
+        {
+            "title": f"Concurrent paper {i}",
+            "abstract": "We study financial portfolio allocation and compare out-of-sample risk forecasts.",
+        }
+        for i in range(6)
+    ]
+
+    class Model:
+        active = 0
+        peak = 0
+
+        async def chat_json(self, messages, **kwargs):
+            index = int(re.search(r"Concurrent paper (\d+)", messages[1]["content"])[1])
+            self.active += 1
+            self.peak = max(self.peak, self.active)
+            try:
+                await asyncio.sleep((6 - index) * 0.002)
+                if index == 2:
+                    raise RuntimeError("retry this batch")
+                return [{"index": 0, "score": 8, "reason": f"paper {index}"}]
+            finally:
+                self.active -= 1
+
+    model = Model()
+    results, failures = asyncio.run(
+        scoring.score_papers_batch(model, papers, batch_size=1, concurrency=3)
+    )
+    assert model.peak == 3 and model.active == 0
+    assert [r["_batch_offset"] for r in results] == [0, 1, 3, 4, 5]
+    assert all(r["_paper"] is papers[r["_batch_offset"]] for r in results)
+    assert [r["reason"] for r in results] == [
+        "paper 0",
+        "paper 1",
+        "paper 3",
+        "paper 4",
+        "paper 5",
+    ]
+    assert failures == [(2, 1, "retry this batch")]
