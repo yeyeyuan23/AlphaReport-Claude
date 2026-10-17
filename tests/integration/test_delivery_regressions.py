@@ -104,15 +104,7 @@ class DeliveryTests(unittest.TestCase):
                 "run",
                 return_value=subprocess.CompletedProcess([], 0, "", ""),
             ),
-            patch.object(
-                daily,
-                "analyze_with_claude",
-                side_effect=lambda papers, label: daily.fallback_briefing(
-                    papers, label
-                ),
-            ),
             patch.object(daily, "send_feishu_card", side_effect=send),
-            patch.object(daily, "deep_analyze_selected"),
         ):
             daily.run_daily_push(
                 daily.DailyPushOptions(no_collect=True, receive_ids="A,B")
@@ -140,18 +132,6 @@ class DeliveryTests(unittest.TestCase):
         self.run_daily(second)
         self.assertEqual(deliveries, [("A", 12), ("B", 12)])
 
-    def test_fallback_includes_all_paper_links(self):
-        papers = [
-            {
-                "id": i,
-                "title": f"Paper {i}",
-                "ui_url": f"https://fixture.test/library/{i}",
-            }
-            for i in range(1, 21)
-        ]
-        brief = daily.fallback_briefing(papers, "fixture")
-        self.assertEqual(brief.count("[📄 查看]"), 20)
-
     def test_optional_url_sync_failure_does_not_stop_daily_delivery(self):
         deliveries = []
         failures = [
@@ -164,18 +144,10 @@ class DeliveryTests(unittest.TestCase):
                 patch.object(daily, "sync_public_url", side_effect=error),
                 patch.object(
                     daily,
-                    "analyze_with_claude",
-                    side_effect=lambda papers, label: daily.fallback_briefing(
-                        papers, label
-                    ),
-                ),
-                patch.object(
-                    daily,
                     "send_feishu_card",
                     side_effect=lambda recipient, *args: deliveries.append(recipient)
                     or True,
                 ),
-                patch.object(daily, "deep_analyze_selected"),
             ):
                 daily.run_daily_push(
                     daily.DailyPushOptions(no_collect=True, receive_ids=f"A{index}")
@@ -197,7 +169,7 @@ class DeliveryTests(unittest.TestCase):
             }
             for i in range(1, 21)
         ]
-        briefing = daily.fallback_briefing(papers, "fixture")
+        briefing = daily.render_briefing(papers, "fixture")
 
         def send(rid, text, receive_type):
             sent.append(text)

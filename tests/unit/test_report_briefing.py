@@ -212,3 +212,19 @@ def test_daily_unverified_status_is_pending_regardless_of_saved_tier(tier, label
     assert "旧版引文匹配筛查已停用" in brief
     assert paper["evaluation"]["validation_issues"] == ["引文未能定位：C001"]
     assert "已保存的研究发现" not in brief
+
+
+def test_daily_briefing_includes_every_paper_detail_link():
+    papers = [
+        {
+            "id": i,
+            "title": f"Paper {i}",
+            "ui_url": f"https://fixture.test/library/{i}",
+        }
+        for i in range(1, 21)
+    ]
+    brief = report_briefing.render_briefing(papers, "fixture")
+
+    assert brief.count("[网页详情]") == 20
+    for paper in papers:
+        assert f"[网页详情]({paper['ui_url']})" in brief

@@ -60,9 +60,10 @@ Plan-Execute 都通过 registry 加载完整技能说明；CLI 和 `/api/v1/skil
   私聊 `/daily`、CLI 与启用后的 Feishu 调度复用
   [daily_push.py](../reportagent/services/daily_push.py)，进程锁阻止重叠运行，运行结果写入数据库。
 - **共享全文评估**：[report_quality.py](../reportagent/services/report_quality.py)
-  校验研究问题、方法、发现、优势、局限与原文引文。内容、模型、提示词和相关性
-  共同决定缓存指纹，结果存为 `evaluation_json`。缺少全文、输入截断或引文失配时
-  保留待核验状态；文本块编号不是 PDF 页码，引文匹配不代表复现实验。
+  校验研究问题、方法、发现、优势和局限；原文引文与文本块编号可选，供用户回看。
+  内容、模型、提示词和相关性共同决定缓存指纹，结果存为 `evaluation_json`。
+  缺少全文或输入超限时保留待核验状态；可选引文缺失或无法逐字定位不会阻止评估、
+  推荐或卡片展示。文本块编号不是 PDF 页码，模型阅读也不代表结论已独立验证或实验已复现。
 - **单篇研报**：固定 arXiv 版本 → PDF 全文 → 分阶段分析与同一套全文评估 →
   保存产物及研报库 → 按授权目标投递。用户指定阅读未完成方向初筛时不显示相关性分数。
   [one_report.py](../reportagent/services/one_report.py) 按 PDF、模型和技能资源指纹复用缓存，
@@ -86,7 +87,8 @@ PDF连字、安全英文断行和空白规范化保留原始字符位置，不�
 知识卡片由 `services/knowledge_cards.py` 从当前有效的 `evaluation_json` 确定性生成，
 网页、旧 API 和批量 CLI 共用同一服务；无当前证据时只展示摘要和待核验状态。
 复现准备使用 `services/reproduction.py` 与 `skills/prepare-reproduction/`，
-原文事实逐项定位，建议方案独立标注，成功卡片存入 `analysis_json.reproduction_preparation`。
+原文事实仍必须逐项附可定位的连续引文；定位失败先尝试一次纠正，仍失败时不生成成功卡片。
+建议方案独立标注，成功卡片存入 `analysis_json.reproduction_preparation`。
 模型调用前后核对源资料，失败或过期结果不覆盖成功缓存。
 研究创意使用 `services/research_ideation.py`；检索由程序执行，模型仅生成有范围声明的候选假设，
 不再声称具备生成阶段未接入的工具能力。
