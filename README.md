@@ -57,7 +57,7 @@
 
 | 报告 | 资料范围 | 运行方式 |
 |---|---|---|
-| 日报 | 北京时间当天首次入库的资料，以 `created_at` 为准；旧记录更新不算新增 | 私聊 `/daily`；Web 默认每天 09:00 自动发送 |
+| 日报 | 北京时间当天首次入库的资料，以 `created_at` 为准；旧记录更新不算新增 | 私聊 `/daily`；服务持续运行时，默认每天北京时间 09:00 通过飞书机器人自动推送 |
 | 周报 | 最近 7 个北京时间日期（含当天）发表的全部库中资料，以真实发表日期为准 | 私聊 `/weekly`；定时发送需配置外部调度 |
 
 报告读取已有论文库，不触发新一轮搜索采集；库中 arXiv 条目缺正文时可尝试补取 PDF。日报同时展示最近定时采集的完成时间、来源状态与库中候选数；采集异常和本次投递结果分别说明。每篇显示真实发表日期，未知时明确标注，不把延迟入库当作当天发表。
@@ -166,14 +166,14 @@ ALPHAREPORT_BASE_URL=https://your-report-site.example
 
 ### 常驻与定时任务
 
-Web 的两项独立调度默认开启，时区均为 `Asia/Shanghai`，周末也执行：
+服务持续运行时，后台的两项独立调度默认开启，时区均为 `Asia/Shanghai`，周末也执行。日报通过飞书机器人推送到配置的会话，不需要打开网页：
 
 | 配置 | 默认时间 | 工作 |
 |---|---|---|
 | `daily_collection` | 每天 08:00 | 从 arXiv、东方财富、BigQuant 采集、分类、筛选和入库，不发报告 |
-| `daily_report` | 每天 09:00 | 从论文库生成日报并推送，不触发采集 |
+| `daily_report` | 每天 09:00 | 从论文库生成日报，通过飞书机器人推送，不触发采集 |
 
-在 `configs/app.yaml` 修改 `schedule_cron`（格式 `HH:MM`）或 `enabled` 后重启 Web。两项任务可分别关闭；手动 `/daily`、`/weekly` 不依赖定时开关。只保留一个承载调度的 Web 进程，自动日报需有推送目标。采集状态保存在 `data/collections/`，`latest.json` 是最近一次完成的记录。
+在 `configs/app.yaml` 修改 `schedule_cron`（格式 `HH:MM`）或 `enabled` 后重启后端服务。两项任务可分别关闭；手动 `/daily`、`/weekly` 不依赖定时开关。只保留一个承载调度的后端进程，自动日报需有推送目标。采集状态保存在 `data/collections/`，`latest.json` 是最近一次完成的记录。
 
 需要持续开机的主机，并让运行账户能访问飞书、来源和模型接口、找到 `claude`。服务守护可使用：
 
@@ -191,7 +191,7 @@ PATH=/home/your-user/.local/bin:/usr/local/bin:/usr/bin:/bin
 30 9 * * 1 cd /absolute/path/to/AlphaReport-Claude && .venv/bin/python -m reportagent.cli.weekly_report >> data/cron-weekly.log 2>&1
 ```
 
-如用外部调度替代采集或日报，应关闭对应内置任务并重启 Web，避免重复执行；只定时发送周报无需关闭内置任务。手动补跑、报告预览及可选预算命令见 [后台处理与维护工具](docs/architecture.md#后台处理与维护工具)。报告的 `--dry-run` 不投递，但可能调用模型、更新评分与评估；日报还会保存运行记录。
+如用外部调度替代采集或日报，应关闭对应内置任务并重启后端服务，避免重复执行；只定时发送周报无需关闭内置任务。手动补跑、报告预览及可选预算命令见 [后台处理与维护工具](docs/architecture.md#后台处理与维护工具)。报告的 `--dry-run` 不投递，但可能调用模型、更新评分与评估；日报还会保存运行记录。
 
 ### Docker 部署
 
