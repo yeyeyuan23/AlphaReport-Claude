@@ -1,6 +1,11 @@
 """Render saved evidence assessments without asking a model to re-rank or invent text."""
 
 from __future__ import annotations
+from reportagent.services.document_metadata import (
+    material_type,
+    metadata_dict,
+    has_publication_date,
+)
 import json
 
 from reportagent.skills.registry import skill_resource
@@ -11,13 +16,21 @@ from reportagent.services.paper_scoring import (
 )
 from reportagent.services.report_quality import (
     pending_review,
-    source_category,
     current_relevance,
 )
 
 
 def _publication_date(paper: dict) -> str:
-    return f"原始发表日期：{str(paper.get('published_date') or '未知')[:10]}"
+    if paper.get("published_date"):
+        return f"原始发表日期：{str(paper['published_date'])[:10]}"
+    info = metadata_dict(paper.get("publication_date_info"))
+    if has_publication_date(paper):
+        if info.get("precision") == "year":
+            return f"原始发表日期：{info['year']}（仅年份）"
+        if info.get("precision") == "month":
+            return f"原始发表日期：{info['year']}-{info['month']:02d}（仅年月）"
+        return f"原始发表日期：{info['year']}-{info['month']:02d}-{info['day']:02d}"
+    return "原始发表日期：未知"
 
 
 def _links(paper: dict) -> str:
@@ -128,12 +141,13 @@ def render_briefing(
     for i, p in enumerate(focus, 1):
         e = p["evaluation"]
         sections = evaluation_sections(e)
-        category = source_category(p.get("source", ""))
+        category = material_type(p)
         source_label = {
             "academic": "学术论文",
             "broker": "券商研报",
             "community": "社区研究",
             "other": "其他材料",
+            "unknown": "类型未知",
         }[category]
         details.append(
             f"### {i}. {p['title']}\n"
@@ -163,7 +177,7 @@ def render_briefing(
         if e["tier"] == "exclude" and not pending:
             excluded += 1
             continue
-        category = source_category(p.get("source", ""))
+        category = material_type(p)
         group = (
             "待核验"
             if pending

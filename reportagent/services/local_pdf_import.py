@@ -16,6 +16,10 @@ from reportagent.llm.client import LLMClient
 from reportagent.models.database import LocalPDFImport, Report
 from reportagent.models.schemas import UserCriteria
 from reportagent.services.collection import classify_for_storage
+from reportagent.services.document_metadata import (
+    METADATA_VERSION,
+    merge_document_metadata,
+)
 from reportagent.sources.base import SourceParseError, safe_source_error
 from reportagent.sources.local_pdf import LocalPDFSource, pdf_files
 from reportagent.utils.config import PROJECT_ROOT, get_config, get_db_path
@@ -51,7 +55,7 @@ async def _scan(root: Path, result: dict):
                     if known and known.report_id
                     else None
                 )
-                if (
+                unchanged_content = (
                     known
                     and known.file_sha256 == fingerprint
                     and (
@@ -61,12 +65,47 @@ async def _scan(root: Path, result: dict):
                             and known_report.content_hash == known.report_content_hash
                         )
                     )
+                )
+                if unchanged_content and (
+                    known.status == "filtered"
+                    or known.metadata_version == METADATA_VERSION
                 ):
                     result["unchanged"] += 1
                     continue
+                metadata_only_id = (
+                    known_report.id
+                    if unchanged_content and known_report is not None
+                    else None
+                )
             sr = await asyncio.to_thread(source._process_pdf, path, criteria)
             if sr is None:
                 raise SourceParseError("PDF produced no research material")
+            if metadata_only_id is not None:
+                if await asyncio.to_thread(_file_hash, path) != fingerprint:
+                    raise SourceParseError(
+                        "PDF changed during metadata upgrade; retry on next startup"
+                    )
+                with factory() as session:
+                    # Serialize with collectors as well as startup imports, then
+                    # merge against fresh metadata instead of a stale ORM snapshot.
+                    session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+                    row = session.get(Report, metadata_only_id)
+                    imported = session.get(LocalPDFImport, file_path)
+                    if (
+                        row is None
+                        or imported is None
+                        or imported.file_sha256 != fingerprint
+                        or row.content_hash != imported.report_content_hash
+                    ):
+                        raise SourceParseError(
+                            "PDF library record changed during metadata upgrade; retry"
+                        )
+                    merge_document_metadata(row, sr)
+                    imported.metadata_version = METADATA_VERSION
+                    session.commit()
+                result["updated"] += 1
+                result["report_ids"].append(metadata_only_id)
+                continue
             if not llm_initialized:
                 llm_initialized = True
                 try:
@@ -109,6 +148,7 @@ async def _scan(root: Path, result: dict):
                                 Report, report_id
                             ).content_hash,
                             status="imported",
+                            metadata_version=METADATA_VERSION,
                         )
                     )
                     session.commit()

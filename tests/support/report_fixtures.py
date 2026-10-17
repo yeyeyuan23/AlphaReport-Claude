@@ -65,6 +65,12 @@ def paper(**extra):
         "selection_reason": "与组合优化有关",
         **extra,
     }
+    if "material_type" not in extra:
+        result["material_type"] = {
+            "arxiv": "academic",
+            "eastmoney": "broker",
+            "bigquant": "community",
+        }.get(result["source"], "unknown")
     if "selection_provenance_json" not in extra:
         result["selection_provenance_json"] = json.dumps(
             {

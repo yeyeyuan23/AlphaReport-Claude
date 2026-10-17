@@ -53,6 +53,7 @@ class MetadataExtractor:
         date, date_source = self._publication_date(meta, first_page)
         date_info = self._publication_info(meta, first_page, date, date_source)
 
+        material_type, material_info = self._material_type(first_page)
         result = {
             "title": title,
             "authors": authors,
@@ -65,6 +66,8 @@ class MetadataExtractor:
             "date_source": date_source,
             "pdf_creation_date": meta.get("creation_date"),
             "publication_date_info": date_info,
+            "material_type": material_type,
+            "material_type_info": material_info,
         }
         if fallback_text.strip() and fallback_text.strip() != first_page.strip():
             fallback = self.extract(PDFContent(text=fallback_text, page_count=1))
@@ -91,6 +94,13 @@ class MetadataExtractor:
         for key in ("title", "doi", "arxiv_id"):
             if not result[key]:
                 result[key] = fallback[key]
+
+        if (
+            result["material_type"] == "unknown"
+            and fallback["material_type"] != "unknown"
+        ):
+            result["material_type"] = fallback["material_type"]
+            result["material_type_info"] = fallback["material_type_info"]
 
         native_info = native["publication_date_info"]
         fallback_info = fallback["publication_date_info"]
@@ -123,6 +133,38 @@ class MetadataExtractor:
                 },
             }
         return result
+
+    def _material_type(self, first_page: str) -> tuple[str, dict]:
+        # Header labels only: ordinary prose and references are not document type evidence.
+        front = self._FRONTMATTER_END.split(first_page, maxsplit=1)[0]
+        rules = (
+            (
+                "broker",
+                r"^(?:证券研究报告|券商研究报告|证券公司研究报告|securities research report)(?:\s|$|[|｜:：])",
+            ),
+            (
+                "community",
+                r"^(?:BigQuant|聚宽|JoinQuant)\s*(?:社区研究|community research)(?:\s|$|[|｜:：])",
+            ),
+            (
+                "academic",
+                r"^(?:arXiv:\s*\d{4}\.\d{4,5}(?:v\d+)?\b|published as a (?:conference|workshop) paper\b|proceedings of\b)",
+            ),
+        )
+        for kind, pattern in rules:
+            for line in front.splitlines():
+                line = re.sub(r"^\s*#{1,6}\s+", "", line).strip()
+                if re.search(pattern, line, re.I):
+                    return kind, {"source": "document_header", "evidence": line}
+        # Rotated standalone arXiv stamps may be extracted below the abstract.
+        imprint = self._REFERENCES_START.split(first_page, maxsplit=1)[0]
+        stamp = self._ARXIV_REVISION_STAMP.search(imprint)
+        if stamp and self._parse_date(stamp["date"]):
+            return "academic", {
+                "source": "document_imprint",
+                "evidence": stamp.group(0).strip(),
+            }
+        return "unknown", {"source": "unknown"}
 
     def _extract_title_from_text(self, text: str) -> str:
         lines = []

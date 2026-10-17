@@ -185,6 +185,11 @@ def test_reimport_local_pdf_repairs_legacy_creation_date_and_fake_abstract(
         _, rid = repo.upsert_report(
             local(datetime(2026, 1, 2), "Title authors and arbitrary leading text")
         )
+        # Provenance identifies this as a legacy file-creation timestamp.
+        session.get(
+            Report, rid
+        ).publication_date_info_json = '{"source": "pdf_creation_date"}'
+        session.commit()
         repo.upsert_report(local(new_date, None, checked=True))
         row = session.get(Report, rid)
         assert row.published_date == new_date

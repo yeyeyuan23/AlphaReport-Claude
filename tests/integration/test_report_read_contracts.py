@@ -41,6 +41,8 @@ BASE_FIELDS = {
 }
 CURRENT_FIELDS = {
     "publication_date_info",
+    "material_type",
+    "material_type_info",
     "classification_provenance",
     "summary",
     "selection_relevance",

@@ -209,6 +209,8 @@ class LocalPDFSource(BaseSource):
                 "publication_date_source": meta.get("date_source", "unknown"),
                 "pdf_creation_date": meta.get("pdf_creation_date"),
                 "publication_date_info": meta.get("publication_date_info", {}),
+                "material_type": meta.get("material_type", "unknown"),
+                "material_type_info": meta.get("material_type_info", {}),
             },
             tables_json=tables_json_str,
             equations_json=equations_json_str,

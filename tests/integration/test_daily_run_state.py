@@ -449,7 +449,15 @@ def test_configured_review_budget_limits_candidates_and_explicit_option_override
     factory, root = offline_daily
     insert_paper(factory)
     with factory() as session:
-        session.add(Report(id=2, title="Second", source="arxiv", content_hash="two"))
+        session.add(
+            Report(
+                id=2,
+                title="Second",
+                source="arxiv",
+                content_hash="two",
+                published_date=datetime(2024, 2, 3),
+            )
+        )
         session.commit()
     (root / "configs/push_directions.yaml").write_text(
         "push_settings:\n  max_reviews: 1\n"

@@ -35,6 +35,10 @@ def _report_to_dict(r) -> dict:
         "authors": json.loads(r.authors) if r.authors else [],
         "abstract": r.abstract,
         "source": r.source,
+        "material_type": r.material_type or "unknown",
+        "material_type_info": json.loads(r.material_type_info_json)
+        if r.material_type_info_json
+        else {},
         "source_url": r.source_url,
         "doi": r.doi,
         "arxiv_id": r.arxiv_id,

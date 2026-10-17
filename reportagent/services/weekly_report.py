@@ -81,6 +81,10 @@ def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
                     "abstract": r.abstract or "",
                     "full_text": r.full_text or "",
                     "source": r.source or "",
+                    "material_type": r.material_type or "unknown",
+                    "publication_date_info": json.loads(r.publication_date_info_json)
+                    if r.publication_date_info_json
+                    else {},
                     "source_url": r.source_url or "",
                     "arxiv_id": r.arxiv_id or "",
                     "doi": r.doi or "",

@@ -41,6 +41,7 @@ from reportagent.services.scheduled_collection import (
     collection_notice,
 )
 from reportagent.services.report_periods import get_daily_range
+from reportagent.services.document_metadata import has_publication_date, metadata_dict
 
 load_dotenv()
 
@@ -97,6 +98,8 @@ def _paper_metadata(row) -> dict:
             )
         },
         "published_date": row.published_date.isoformat() if row.published_date else "",
+        "publication_date_info": metadata_dict(row.publication_date_info_json),
+        "material_type": row.material_type or "unknown",
         "has_full_text": row.has_full_text,
         "selection_provenance_json": row.selection_provenance_json,
         "selection_score": row.selection_score or 0.0,
@@ -124,6 +127,8 @@ def _refresh_candidate_metadata(candidates: list[dict]) -> list[dict]:
         refreshed = []
         for paper in candidates:
             row = current.get(paper["id"])
+            if row is not None and not has_publication_date(row):
+                continue
             if row is None:
                 refreshed.append(
                     {
@@ -189,7 +194,7 @@ def get_todays_papers(
     """Get today's newly ingested papers with current, eligible relevance scores.
 
     按北京时间当天的 created_at（首次入库时间），不限制原始发表日期。
-    发送历史不参与筛选；显式指定论文时跳过日期和相关性过滤。
+    发送历史不参与筛选；显式指定论文时跳过入库窗口和相关性过滤，但发表日期未知仍排除。
 
     Returns:
         (papers, date_label_start, date_label_end) — date labels for briefing title
@@ -220,7 +225,7 @@ def get_todays_papers(
                 >= PUSH_SETTINGS.get("llm_filter_threshold", 6.0),
             )
         q = q.order_by(desc(Report.selection_relevance), desc(Report.published_date))
-        reports = q.all()
+        reports = [row for row in q.all() if has_publication_date(row)]
         if not report_ids:
             reports = [r for r in reports if screening_is_current(r)]
 
@@ -519,7 +524,7 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
         report_ids=ids or None, report_date=report_date
     )
     if ids and not papers:
-        raise ValueError("指定论文不存在")
+        raise ValueError("指定论文不存在或发表日期未知，不能进入日报")
     candidates = select_candidates(papers, len(papers), list(load_enabled_directions()))
     run["report_ids"] = [p["id"] for p in candidates]
     if not candidates and run["stages"]["relevance"]["status"] == "failed":
@@ -543,6 +548,7 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
     for p in candidates:
         p["evaluation"] = assessments.get(p["id"], pending_review(p, "全文评估未完成"))
     candidates = _refresh_candidate_metadata(candidates)
+    run["report_ids"] = [p["id"] for p in candidates]
     run["papers"] = candidates
 
     def render(papers):

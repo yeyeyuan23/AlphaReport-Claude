@@ -72,7 +72,7 @@ def test_ingestion_day_and_current_relevance_select_previously_sent_papers(
     legacy_library,
 ):
     papers, _, _ = daily.get_todays_papers()
-    assert {p["id"] for p in papers} == {1, 2, 4}
+    assert {p["id"] for p in papers} == {1, 2}
 
 
 def test_explicit_paper_ids_are_not_excluded_by_old_send_markers(legacy_library):

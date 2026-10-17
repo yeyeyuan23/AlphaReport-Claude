@@ -17,6 +17,7 @@ from reportagent.skills.registry import skill_resource
 from reportagent.utils.config import get_llm_model, get_llm_base_url, get_llm_provider
 from reportagent.services.paper_scoring import scoring_fingerprint, screening_is_current
 from reportagent.services.text_evidence import text_chunks
+from reportagent.services.document_metadata import material_type
 
 logger = logging.getLogger(__name__)
 MAX_REVIEW_CHARS = 240000
@@ -273,7 +274,7 @@ def select_candidates(
     ordered = sorted(
         papers,
         key=lambda p: (
-            source_category(p.get("source", "")) != "academic",
+            material_type(p) != "academic",
             -(p.get("selection_relevance") or p.get("selection_score") or 0),
             p.get("published_date") or "",
         ),

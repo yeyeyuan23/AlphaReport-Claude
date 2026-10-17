@@ -37,7 +37,7 @@ def test_weekly_backfill_offsets_the_rolling_window_by_seven_days():
         get_weekly_range(-1)
 
 
-def test_daily_uses_beijing_ingestion_day_even_when_publication_is_old_or_unknown(
+def test_daily_uses_beijing_ingestion_day_but_excludes_unknown_publication(
     monkeypatch, memory_session_factory
 ):
     factory = memory_session_factory
@@ -68,7 +68,7 @@ def test_daily_uses_beijing_ingestion_day_even_when_publication_is_old_or_unknow
             )
         db.commit()
     rows, first, last = daily.get_todays_papers(report_date="2026-10-17")
-    assert {r["id"] for r in rows} == {1, 2}
+    assert {r["id"] for r in rows} == {1}
     assert (first, last) == ("2026-10-17", "2026-10-17")
     # A publication-based weekly report must not substitute ingestion dates.
     from reportagent.services.report_periods import get_weekly_range

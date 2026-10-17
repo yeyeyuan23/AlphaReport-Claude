@@ -336,3 +336,26 @@ def test_simultaneous_startups_do_not_duplicate_classification(importer):
 
     result = asyncio.run(run())
     assert result["added"] == 1 and len(importer.calls) == 1
+
+
+def test_real_pdf_import_persists_content_type_and_supported_publication_date(importer):
+    from datetime import datetime
+    import json
+
+    path = importer.root / "broker.pdf"
+    write_pdf(
+        path,
+        title="Portfolio risk model\nSecurities Research Report\nPublished: 2024-02-03",
+    )
+    result = asyncio.run(importer.module.import_pdf_library())
+    assert result["added"] == 1
+    with importer.factory() as session:
+        row = session.query(Report).one()
+        assert row.source == "local_pdf"
+        assert row.material_type == "broker"
+        assert row.published_date == datetime(2024, 2, 3)
+        assert (
+            json.loads(row.material_type_info_json)["evidence"]
+            == "Securities Research Report"
+        )
+        assert json.loads(row.publication_date_info_json)["precision"] == "day"

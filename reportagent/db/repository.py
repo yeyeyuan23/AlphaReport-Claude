@@ -171,15 +171,9 @@ class ReportRepository:
             # Publication dates remain stable across reposts and revisions.
             # Re-import only fills a previously unknown date; it never replaces
             # a known date with a later page/revision timestamp or a missing value.
-            if checked_local_pdf and sr.raw_metadata.get("publication_date_checked"):
-                # Legacy local imports incorrectly used file creation timestamps.
-                # A fresh explicit-date check can repair those values to unknown.
-                existing.published_date = sr.published_date
-                existing.publication_date_info_json = json.dumps(
-                    sr.raw_metadata.get("publication_date_info", {}), ensure_ascii=False
-                )
-            elif sr.published_date is not None and existing.published_date is None:
-                existing.published_date = sr.published_date
+            from reportagent.services.document_metadata import merge_document_metadata
+
+            merge_document_metadata(existing, sr)
             if replace_material:
                 existing.full_text = sr.full_text
                 existing.has_full_text = bool(sr.full_text) and not sr.abstract_only
@@ -246,6 +240,9 @@ class ReportRepository:
             else None,
             summary=report.analysis.summary if report.analysis is not None else None,
         )
+        from reportagent.services.document_metadata import merge_document_metadata
+
+        merge_document_metadata(db_report, sr)
         self.session.add(db_report)
         self.apply_classification(db_report, cl)
         if commit:

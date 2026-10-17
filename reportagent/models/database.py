@@ -51,6 +51,8 @@ class Report(Base):
     arxiv_id = Column(String(50), index=True)
     published_date = Column(DateTime)
     publication_date_info_json = Column(Text)
+    material_type = Column(String(20), default="unknown")
+    material_type_info_json = Column(Text)
     pdf_path = Column(String(500))
     content_hash = Column(String(64), unique=True, nullable=False, index=True)
 
@@ -93,6 +95,7 @@ class LocalPDFImport(Base):
     file_sha256 = Column(String(64), nullable=False)
     report_id = Column(Integer, ForeignKey("reports.id", ondelete="SET NULL"))
     report_content_hash = Column(String(64))
+    metadata_version = Column(Integer, default=0)
     status = Column(String(20), nullable=False)
 
 

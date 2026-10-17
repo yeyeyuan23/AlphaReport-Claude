@@ -58,6 +58,8 @@ def init_db():
         ("selection_provenance_json", "TEXT"),
         ("evaluation_json", "TEXT"),
         ("publication_date_info_json", "TEXT"),
+        ("material_type", "VARCHAR(20) DEFAULT 'unknown'"),
+        ("material_type_info_json", "TEXT"),
         ("classification_provenance_json", "TEXT"),
     ]
     with engine.begin() as conn:
@@ -67,7 +69,13 @@ def init_db():
         Base.metadata.create_all(bind=conn)
         for table, columns in (
             ("reports", _new_columns),
-            ("local_pdf_imports", [("report_content_hash", "VARCHAR(64)")]),
+            (
+                "local_pdf_imports",
+                [
+                    ("report_content_hash", "VARCHAR(64)"),
+                    ("metadata_version", "INTEGER DEFAULT 0"),
+                ],
+            ),
         ):
             existing = {
                 row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")
@@ -81,3 +89,21 @@ def init_db():
         conn.exec_driver_sql(
             "CREATE INDEX IF NOT EXISTS ix_reports_source_item_id ON reports (source_item_id)"
         )
+
+        # Backfill only known typed adapters; a PDF's transport says nothing about its content.
+        from reportagent.services.document_metadata import TYPED_FEEDS
+        import json
+
+        report_columns = {
+            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(reports)")
+        }
+        for source, kind in TYPED_FEEDS.items() if "source" in report_columns else ():
+            conn.exec_driver_sql(
+                "UPDATE reports SET material_type = ?, material_type_info_json = ? "
+                "WHERE source = ? AND (material_type IS NULL OR material_type = '' OR material_type = 'unknown')",
+                (
+                    kind,
+                    json.dumps({"source": "typed_feed", "evidence": source}),
+                    source,
+                ),
+            )
