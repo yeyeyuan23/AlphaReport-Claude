@@ -326,30 +326,42 @@ def test_model_result_cannot_overwrite_metadata_changed_during_scoring(
     assert downloads == ["/High.pdf"] and result["status"] != "ok"
 
 
-def test_missing_source_abstract_reuses_previously_acquired_material(
-    ingest, monkeypatch
-):
-    run, factory, rows, model, _, downloads, source = ingest
-    rows[:] = [rows[0].model_copy(update={"abstract": None})]
-    monkeypatch.setattr(
-        source,
-        "_parse_pdf_bytes",
-        lambda _: "Abstract\n"
-        "We study portfolio allocation and compare out-of-sample financial risk models.\n1 Introduction\n"
-        + "Method details. "
-        * 20,
-    )
+def test_missing_source_abstract_reuses_previously_acquired_material(ingest):
+    run, factory, rows, model, _, downloads, _ = ingest
+    original = rows[0]
+    rows[:] = [original]
+    run()
+    before = model.calls
+    rows[:] = [original.model_copy(update={"abstract": None})]
     result = run()
     assert result["results_count"] == 1
+    assert downloads == ["/High.pdf"] and model.calls == before
     with factory() as session:
         row = session.query(Report).one()
         assert row.has_full_text and Path(row.pdf_path).is_file()
-        assert "alphareport-prefilter-" not in row.pdf_path
+        assert row.abstract == original.abstract
+
+
+def test_missing_abstract_uses_existing_full_text_without_new_download(ingest):
+    run, factory, rows, model, _, downloads, _ = ingest
+    original = rows[0]
+    rows[:] = [original]
+    run()
+    with factory() as session:
+        row = session.query(Report).one()
+        row.abstract = None
+        row.full_text = (
+            "Abstract\n" + original.abstract + "\n1 Introduction\n" + "Methods. " * 200
+        )
+        session.commit()
+    rows[:] = [original.model_copy(update={"abstract": None})]
     before = model.calls
     result = run()
-    assert downloads == ["/High.pdf"] and model.calls == before
+    assert result["results_count"] == 1
+    assert model.calls == before + 1
+    assert downloads == ["/High.pdf"]
     with factory() as session:
-        assert session.query(Report).count() == 1
+        assert session.query(Report).one().abstract == original.abstract
 
 
 def test_older_revision_is_skipped_without_scoring_or_cached_text_mixing(ingest):
@@ -366,44 +378,26 @@ def test_older_revision_is_skipped_without_scoring_or_cached_text_mixing(ingest)
         assert session.query(Report).one().arxiv_id == "2610.10001v2"
 
 
-def test_missing_abstract_later_rejected_leaves_no_pdf_or_library_record(
-    ingest, monkeypatch
-):
-    run, factory, rows, _, _, downloads, source = ingest
-    rows[:] = [rows[1].model_copy(update={"abstract": None})]
-    monkeypatch.setattr(
-        source,
-        "_parse_pdf_bytes",
-        lambda _: "Abstract\n"
-        "We study portfolio allocation and compare out-of-sample financial risk models.\n1 Introduction\n"
-        + "Method details. "
-        * 20,
-    )
+@pytest.mark.parametrize("index", [0, 1])
+def test_missing_abstract_never_downloads_pdf_before_relevance_check(ingest, index):
+    run, factory, rows, model, _, downloads, _ = ingest
+    rows[:] = [rows[index].model_copy(update={"abstract": None})]
     result = run()
-    assert result["source_statuses"][0]["screening"]["rejected"] == 1
-    assert downloads == ["/Low.pdf"]  # only acquired to obtain the missing abstract
-    folder = Path(factory.kw["bind"].url.database).parent
-    assert list(folder.rglob("*.pdf")) == []
+    assert downloads == []
+    assert model.calls == 0
+    stats = result["source_statuses"][0]["screening"]
+    assert stats["pending"] == 1 and stats["rejected"] == 0
+    assert result["status"] != "ok"
     with factory() as session:
         assert session.query(Report).count() == 0
 
 
-def test_staged_pdf_is_removed_if_accepted_metadata_transaction_rolls_back(
-    ingest, monkeypatch
-):
+def test_accepted_metadata_rollback_prevents_pdf_download(ingest, monkeypatch):
     from reportagent.db.repository import ReportRepository
     from reportagent.services import paper_scoring
 
-    run, factory, rows, _, _, downloads, source = ingest
-    rows[:] = [rows[0].model_copy(update={"abstract": None})]
-    monkeypatch.setattr(
-        source,
-        "_parse_pdf_bytes",
-        lambda _: "Abstract\n"
-        "We study portfolio allocation and compare out-of-sample financial risk models.\n1 Introduction\n"
-        + "Method details. "
-        * 20,
-    )
+    run, factory, rows, _, _, downloads, _ = ingest
+    rows[:] = [rows[0]]
     upsert = ReportRepository.upsert_report
 
     def changed(self, report, **kwargs):
@@ -415,7 +409,7 @@ def test_staged_pdf_is_removed_if_accepted_metadata_transaction_rolls_back(
 
     monkeypatch.setattr(ReportRepository, "upsert_report", changed)
     result = run()
-    assert result["status"] != "ok" and downloads == ["/High.pdf"]
+    assert result["status"] != "ok" and downloads == []
     folder = Path(factory.kw["bind"].url.database).parent
     assert list(folder.rglob("*.pdf")) == []
     with factory() as session:

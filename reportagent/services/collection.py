@@ -8,7 +8,6 @@ from typing import Callable
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from time import monotonic
 
 
@@ -227,9 +226,6 @@ async def collect_reports(
             "superseded": 0,
         }
         online = source.source_type != SourceType.LOCAL_PDF
-        staging = (
-            TemporaryDirectory(prefix="alphareport-prefilter-") if online else None
-        )
         classified_results = []
         try:
             available = (
@@ -266,18 +262,12 @@ async def collect_reports(
                     if cancelled():
                         break
                     try:
-                        if online and llm_client is not None:
+                        if online:
                             from reportagent.services.collection_screening import (
-                                supplement_missing_abstract,
+                                reuse_screening_material,
                             )
 
-                            sr = await supplement_missing_abstract(
-                                source,
-                                sr,
-                                errors,
-                                get_session_factory(),
-                                Path(staging.name),
-                            )
+                            sr = reuse_screening_material(sr, get_session_factory())
                         if cancelled():
                             break
                         if online:
@@ -341,7 +331,6 @@ async def collect_reports(
                                 item,
                                 decision,
                                 get_session_factory(),
-                                Path(staging.name),
                             )
                         else:
                             with get_session_factory()() as session:
@@ -370,9 +359,6 @@ async def collect_reports(
                         errors.append(safe_source_error(error, "report storage"))
         except Exception as error:
             errors.append(safe_source_error(error))
-        finally:
-            if staging is not None:
-                staging.cleanup()
 
         observed = getattr(source, "last_search", None)
         if isinstance(observed, SearchDiagnostics) and not unavailable:

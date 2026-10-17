@@ -514,16 +514,20 @@ def test_bigquant_bad_pdf_does_not_remove_valid_sibling(collect, monkeypatch, tm
         key = path.rsplit("/", 1)[1]
         return httpx.Response(
             200,
-            text=f'<article><h1>Portfolio optimization quantitative risk model {key}</h1><p>\\...</p><a href="/{key}.pdf">PDF</a></article>',
+            text=f"<article><h1>Portfolio optimization quantitative risk model {key}</h1>"
+            "<p>We study portfolio risk budgets and evaluate covariance allocation models.</p>"
+            f'<a href="/{key}.pdf">PDF</a></article>',
         )
 
     mock_http(monkeypatch, respond)
     result, rows = collect([BigQuantSource(rate_limit_seconds=0, max_listing_pages=1)])
-    assert len(rows) == 1
+    assert len(rows) == 2
     good = next(row for row in rows if row.title.endswith("good"))
     assert good.full_text and good.pdf_path
-    assert all(not row.title.endswith("bad") for row in rows)
-    assert result["source_statuses"][0]["screening"]["pending"] == 1
+    bad = next(row for row in rows if row.title.endswith("bad"))
+    assert not bad.has_full_text and not bad.pdf_path
+    assert result["source_statuses"][0]["screening"]["selected"] == 2
+    assert result["source_statuses"][0]["screening"]["pending"] == 0
     assert (
         result["status"] == "partial" and result["source_statuses"][0]["full_text"] == 1
     )

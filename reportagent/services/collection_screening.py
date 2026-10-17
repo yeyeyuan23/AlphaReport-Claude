@@ -3,13 +3,8 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import math
 import re
-import shutil
-from contextlib import ExitStack
-from pathlib import Path
-from tempfile import NamedTemporaryFile
 
 from reportagent.db.repository import ReportRepository
 from reportagent.models.database import Report
@@ -19,7 +14,6 @@ from reportagent.sources.base import (
     safe_source_error,
     usable_full_text,
 )
-from reportagent.sources import content_fetch
 from reportagent.processors.paper_sections import extract_paper_sections
 
 
@@ -76,10 +70,8 @@ def superseded(result, existing):
     return bool(current and (old is None or int(current[1]) > int(old[1])))
 
 
-async def supplement_missing_abstract(
-    source, result, errors, factory, staging_directory
-):
-    """Missing material is unknown, not low relevance; acquire only to fill that gap."""
+def reuse_screening_material(result, factory):
+    """Fill missing abstracts from the library without downloading unscreened PDFs."""
     if scoring.has_screening_material(result):
         return result
     with factory() as session:
@@ -105,17 +97,6 @@ async def supplement_missing_abstract(
                         "equations_json": existing.equations_json,
                     }
                 )
-    hydrate = getattr(source, "hydrate_result", None)
-    if hydrate is None:
-        return result
-    try:
-        result = await hydrate(result, pdf_directory=staging_directory)
-        if not scoring.has_screening_material(result) and result.full_text:
-            abstract = extract_paper_sections(result.full_text)["abstract"]
-            if abstract:
-                result = result.model_copy(update={"abstract": abstract})
-    except Exception as error:
-        errors.append(safe_source_error(error, "screening material"))
     return result
 
 
@@ -210,42 +191,9 @@ async def select_metadata(classified, llm, factory, errors, stats):
     return selected
 
 
-def _promote_staged_pdf(item, staging_directory):
-    path = (
-        Path(item.search_result.pdf_path).resolve()
-        if item.search_result.pdf_path
-        else None
-    )
-    if path is None or not path.is_relative_to(staging_directory.resolve()):
-        return item, None
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()[:24]
-    directory = Path(content_fetch.PDF_DIRECTORY)
-    directory.mkdir(parents=True, exist_ok=True)
-    target = directory / f"{item.search_result.source.value}-{digest}.pdf"
-    created = None
-    if not target.exists():
-        with NamedTemporaryFile(
-            dir=directory, suffix=".partial", delete=False
-        ) as temporary:
-            scratch = Path(temporary.name)
-        try:
-            shutil.copyfile(path, scratch)
-            scratch.replace(target)
-            created = target
-        finally:
-            scratch.unlink(missing_ok=True)
-    return item.model_copy(
-        update={
-            "search_result": item.search_result.model_copy(
-                update={"pdf_path": str(target)}
-            )
-        }
-    ), created
-
-
-def store_selected(item, decision, factory, staging_directory):
+def store_selected(item, decision, factory):
     """Only accepted metadata enters the library; bind its score to that evidence."""
-    with ExitStack() as cleanup, factory() as session:
+    with factory() as session:
         if session.bind.dialect.name == "sqlite":
             # Serialize only the brief persistence section, never network/model work.
             session.connection().exec_driver_sql("BEGIN IMMEDIATE")
@@ -263,9 +211,6 @@ def store_selected(item, decision, factory, staging_directory):
             raise SourceParseError(
                 "relevance below current threshold; decision not stored"
             )
-        item, created = _promote_staged_pdf(item, staging_directory)
-        if created:
-            cleanup.callback(created.unlink, missing_ok=True)
         action, rid = repo.upsert_report(item, commit=False)
         row = session.get(Report, rid)
         if not same_metadata(snapshot(item), row):
@@ -286,7 +231,6 @@ def store_selected(item, decision, factory, staging_directory):
             commit=False,
         )
         session.commit()
-        cleanup.pop_all()
         return action, rid, item
 
 
