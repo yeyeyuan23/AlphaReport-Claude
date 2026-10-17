@@ -41,7 +41,11 @@ def test_text_requires_real_nonempty_message_id(sdk, bad_id):
 
 
 @pytest.mark.parametrize("service", [daily_push, weekly_report])
-def test_card_failure_falls_back_to_complete_utf8_bounded_text(sdk, service):
+def test_card_failure_falls_back_to_complete_utf8_bounded_text(sdk, service, monkeypatch):
+    from reportagent.services import feishu_transport
+
+    build = MagicMock(return_value=sdk)
+    monkeypatch.setattr(feishu_transport, "build_client", build)
     sdk.im.v1.message.create.side_effect = lambda req: response(
         ok=req.request_body.msg_type == "text",
     )
@@ -55,6 +59,7 @@ def test_card_failure_falls_back_to_complete_utf8_bounded_text(sdk, service):
             "target", text, [], "2026-10-05", "2026-10-11", "chat_id"
         )
     assert delivered is True
+    build.assert_called_once_with()
     requests = [call.args[0] for call in sdk.im.v1.message.create.call_args_list]
     assert requests[0].request_body.msg_type == "interactive"
     parts = [json.loads(req.request_body.content)["text"] for req in requests[1:]]

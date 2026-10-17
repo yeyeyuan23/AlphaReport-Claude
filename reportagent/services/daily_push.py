@@ -365,7 +365,6 @@ def send_feishu_card(
             briefing,
             receive_id,
             receive_type=receive_type,
-            text_sender=lambda part: send_feishu_text(receive_id, part, receive_type),
         )
     except Exception:
         logger.warning("Feishu daily card delivery failed")
