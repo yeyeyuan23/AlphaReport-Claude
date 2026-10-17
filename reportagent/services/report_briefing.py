@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 from reportagent.skills.registry import skill_resource
+from reportagent.services.public_url import get_library_url
 from reportagent.services.paper_scoring import (
     load_enabled_directions,
     relevance_reason_text,
@@ -263,5 +264,6 @@ def render_briefing(
             focus="\n\n".join(details) or "暂无达到重点推荐标准的论文。",
             other_papers=others,
             source_status=coverage or "本次使用库中已有论文，未重新检查在线来源。",
+            library_url=get_library_url(),
         )
     )

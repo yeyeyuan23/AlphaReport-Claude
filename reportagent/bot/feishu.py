@@ -16,7 +16,7 @@ import uuid
 from lark_oapi.ws import Client as WSClient
 from lark_oapi.event import dispatcher_handler as dh
 from reportagent.utils.config import PROJECT_ROOT
-from reportagent.services.public_url import get_web_base_url
+from reportagent.services.public_url import get_web_base_url, get_library_url
 from reportagent.db.engine import init_db
 from reportagent.services.feishu_security import http_callback_enabled, sender_allowed
 from reportagent.bot.client import send_text, send_chat, reply_msg, react
@@ -112,7 +112,8 @@ def run_weekly_job(chat_id):
         if not get_weekly_papers(start, end):
             send_chat(
                 chat_id,
-                f"最近 7 天（北京时间，含当天）（{first} 至 {last}）库中暂无符合发表日期的资料，可先采集后再试。",
+                f"最近 7 天（北京时间，含当天）（{first} 至 {last}）库中暂无符合发表日期的资料，可先采集后再试。\n\n"
+                f"[研报库首页]({get_library_url()})",
             )
             return
         path = PROJECT_ROOT / "data" / "report-jobs.log"

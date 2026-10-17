@@ -6,6 +6,8 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+import pytest
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -237,6 +239,45 @@ class RepositoryRecoveryTests(unittest.TestCase):
             self.assertEqual(len(result.errors), 1)
             self.assertEqual(session.query(Report).one().title, "good")
         engine.dispose()
+
+
+@pytest.mark.parametrize("report_kind", ["daily", "weekly"])
+def test_library_home_survives_card_rendering_and_text_fallback(
+    monkeypatch, report_kind
+):
+    from reportagent.services import feishu_transport, weekly_report
+
+    monkeypatch.setenv("ALPHAREPORT_BASE_URL", "https://research.example/")
+    monkeypatch.setattr(feishu_transport, "build_client", lambda: object())
+    cards, texts = [], []
+
+    def send(client, kind, content, receive_id, **kwargs):
+        assert receive_id == "fixture-chat"
+        if kind == "interactive":
+            cards.append(json.loads(content))
+            raise RuntimeError("Simulated card rejection")
+        texts.append(json.loads(content)["text"])
+        return "fixture-message"
+
+    monkeypatch.setattr(feishu_transport, "send_payload", send)
+    text = daily.render_briefing([], "fixture", template_skill=report_kind + "-report")
+    if report_kind == "daily":
+        delivered = daily.send_feishu_card(
+            "fixture-chat", text, [], "fixture", "chat_id"
+        )
+    else:
+        delivered = weekly_report.send_feishu_card(
+            "fixture-chat", text, [], "first", "last"
+        )
+    assert delivered is True
+    link = "[研报库首页](https://research.example/library)"
+    markdown = "\n".join(
+        element["content"]
+        for element in cards[0]["elements"]
+        if element["tag"] == "markdown"
+    )
+    assert markdown.count(link) == 1
+    assert "".join(texts).count(link) == 1
 
 
 if __name__ == "__main__":

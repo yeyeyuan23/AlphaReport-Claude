@@ -15,6 +15,11 @@ def get_web_base_url() -> str:
     ).rstrip("/")
 
 
+def get_library_url() -> str:
+    """Resolve the current reading-site homepage for report and empty-result links."""
+    return f"{get_web_base_url()}/library"
+
+
 def sync_public_url(root: Path = PROJECT_ROOT) -> bool:
     env_file = root / ".env"
     log = root / "data" / "cloudflared.log"

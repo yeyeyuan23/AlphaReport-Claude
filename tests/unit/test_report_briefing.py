@@ -228,3 +228,18 @@ def test_daily_briefing_includes_every_paper_detail_link():
     assert brief.count("[网页详情]") == 20
     for paper in papers:
         assert f"[网页详情]({paper['ui_url']})" in brief
+
+
+@pytest.mark.parametrize("template", ["daily-report", "weekly-report"])
+@pytest.mark.parametrize("has_papers", [False, True])
+@pytest.mark.parametrize(
+    "base", ["https://research.example/", "https://new-site.example"]
+)
+def test_digest_includes_configured_library_home_for_empty_and_nonempty_results(
+    monkeypatch, template, has_papers, base
+):
+    monkeypatch.setenv("ALPHAREPORT_BASE_URL", base)
+    papers = [{"id": 1, "title": "Fixture paper"}] if has_papers else []
+    text = report_briefing.render_briefing(papers, "fixture", template_skill=template)
+    link = f"[研报库首页]({base.rstrip('/')}/library)"
+    assert text.count(link) == 1

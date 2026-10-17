@@ -109,6 +109,7 @@ def test_empty_week_notifies_user_and_does_not_call_models_or_delivery_cli(
     worker, monkeypatch
 ):
     run, send, _ = worker
+    monkeypatch.setenv("ALPHAREPORT_BASE_URL", "https://research.example/")
     monkeypatch.setattr(weekly, "get_weekly_papers", lambda *args: [])
     assert hasattr(bot, "run_weekly_job"), "Missing weekly worker"
     bot.run_weekly_job("current-chat")
@@ -116,6 +117,7 @@ def test_empty_week_notifies_user_and_does_not_call_models_or_delivery_cli(
     send.assert_called_once()
     text = send.call_args.args[1]
     assert "2026-10-05" in text and "2026-10-11" in text and "暂无" in text
+    assert "[研报库首页](https://research.example/library)" in text
     assert not bot._report_lock.locked()
 
 
