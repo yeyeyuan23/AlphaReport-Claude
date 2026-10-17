@@ -6,11 +6,9 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from reportagent.db.repository import ReportRepository
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 from reportagent.models.schemas import (
     ClassifiedReport,
     ClassificationResult,
@@ -61,12 +59,8 @@ def report(date=None, arxiv_id=None):
 
 
 @pytest.fixture
-def library():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
-    yield factory
-    engine.dispose()
+def library(memory_session_factory):
+    yield memory_session_factory
 
 
 def test_original_report_date_wins_over_page_publication_and_update_dates():

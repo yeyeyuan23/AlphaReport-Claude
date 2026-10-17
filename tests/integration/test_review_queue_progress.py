@@ -7,11 +7,9 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from reportagent.db import engine as database
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 from reportagent.services import (
     daily_push as daily,
     weekly_report as weekly,
@@ -32,10 +30,8 @@ class QueueModel(Model):
 
 
 @pytest.fixture
-def queue_library(tmp_path, monkeypatch):
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+def queue_library(tmp_path, monkeypatch, memory_session_factory):
+    factory = memory_session_factory
     for service in (daily, weekly, database):
         monkeypatch.setattr(service, "get_session_factory", lambda: factory)
     for service in (daily, weekly):
@@ -81,7 +77,6 @@ def queue_library(tmp_path, monkeypatch):
             session.add(row)
         session.commit()
     yield factory, model, fetch
-    engine.dispose()
 
 
 @pytest.mark.parametrize("flow", ["weekly", "daily"])

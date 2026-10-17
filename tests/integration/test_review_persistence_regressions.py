@@ -3,11 +3,9 @@ import json
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from reportagent.db import engine as database
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 from reportagent.models.schemas import SearchResult, SourceType
 from reportagent.services import one_report, report_quality as quality
 from tests.support.report_fixtures import Model, TEXT, paper, response
@@ -23,12 +21,9 @@ class PersistentModel(Model):
 
 
 @pytest.fixture
-def library():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+def library(memory_session_factory):
+    factory = memory_session_factory
     yield factory
-    engine.dispose()
 
 
 def insert(factory, rid=1, **overrides):

@@ -4,10 +4,8 @@ import asyncio
 import json
 import pytest
 import yaml
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 from reportagent.services import paper_scoring as scoring
 
 
@@ -179,10 +177,8 @@ def test_scoring_fingerprint_tracks_direction_and_prompt_changes(
 
 
 @pytest.fixture
-def memory_db(monkeypatch):
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+def memory_db(monkeypatch, memory_session_factory):
+    factory = memory_session_factory
     monkeypatch.setattr(scoring, "init_db", lambda: None)
     monkeypatch.setattr(scoring, "get_session_factory", lambda: factory)
     with factory() as session:
@@ -196,7 +192,6 @@ def memory_db(monkeypatch):
         )
         session.commit()
     yield factory
-    engine.dispose()
 
 
 def test_apply_scores_persists_relevance_and_ignores_advisory_rejection(

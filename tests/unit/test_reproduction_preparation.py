@@ -3,33 +3,7 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from tests.unit.test_knowledge_card_evidence import reviewed_paper
-
-
-def output():
-    quote = "We use a rolling out-of-sample evaluation with transaction costs."
-    fields = {
-        name: {
-            "status": "documented",
-            "value": "作者使用滚动样本外检验并计入成本",
-            "evidence": [{"quote": quote, "chunk_id": "C001"}],
-        }
-        for name in (
-            "target",
-            "available_information",
-            "training_objective",
-            "data",
-            "split",
-            "baseline",
-            "metrics",
-            "assumptions",
-        )
-    }
-    return {
-        "fields": fields,
-        "minimum_check": "建议：保留末段测试期，比较简单基准并检验成本敏感性。",
-        "falsification": "建议：样本外损失未改善则不支持假设。",
-    }
+from tests.support.report_fixtures import reviewed_paper, reproduction_output as output
 
 
 def test_preparation_preserves_evidence_and_separates_proposal():

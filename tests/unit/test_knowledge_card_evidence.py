@@ -2,15 +2,7 @@ import asyncio
 import json
 from types import SimpleNamespace
 
-from tests.support.report_fixtures import Model, module, paper, response
-
-
-def reviewed_paper():
-    p = paper()
-    model = Model(response())
-    model.model = module().get_llm_model()
-    p["evaluation_json"] = json.dumps(asyncio.run(module().evaluate_paper(p, model)))
-    return p
+from tests.support.report_fixtures import Model, module, paper, response, reviewed_paper
 
 
 def test_card_reuses_reading_assessment_without_new_quality_score():

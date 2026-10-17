@@ -2,85 +2,28 @@
 
 import asyncio
 import json
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import httpx
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from reportagent.models.database import Base, Report
-from reportagent.models.schemas import SearchResult, SourceType
-from reportagent.services import collection
+from reportagent.models.schemas import SourceType
 from reportagent.sources.arxiv_source import ArxivSource
 from reportagent.sources.bigquant_source import BigQuantSource
 from reportagent.sources.eastmoney_source import EastMoneySource
 from reportagent.sources.local_pdf import LocalPDFSource
-from tests.support.collection_scoring import RelevanceModel
+from tests.support.source_fixtures import (
+    collect as collection_fixture,
+    fake,
+    paper,
+    mock_http,
+    atom_entry,
+    atom_feed,
+)
 
 
-@pytest.fixture
-def collect(tmp_path, monkeypatch):
-    engine = create_engine(f"sqlite:///{tmp_path / 'reports.sqlite'}")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
-    monkeypatch.setattr(collection, "init_db", lambda: None)
-    monkeypatch.setattr(collection, "get_session_factory", lambda: factory)
-
-    monkeypatch.setattr(collection, "LLMClient", RelevanceModel)
-    # These cases exercise source health with the original rule classification.
-    monkeypatch.setattr(collection, "LLMClassifier", lambda client: None)
-
-    def run(sources, **kwargs):
-        monkeypatch.setattr(collection, "build_sources", lambda names: sources)
-        names = ",".join(s.source_type.value for s in sources)
-        result = asyncio.run(
-            collection.collect_reports(
-                collection.CollectionOptions(
-                    topics="portfolio",
-                    sources=names,
-                    no_analysis=True,
-                    days=0,
-                    **kwargs,
-                )
-            )
-        )
-        with factory() as session:
-            rows = session.query(Report).all()
-        return result, rows
-
-    yield run
-    engine.dispose()
-
-
-def paper(source=SourceType.ARXIV, **kwargs):
-    values = dict(
-        title="Portfolio optimization and quantitative risk",
-        abstract="A finance portfolio risk model",
-        source=source,
-        source_url="https://example.org/paper/1",
-        abstract_only=True,
-    )
-    values.update(kwargs)
-    return SearchResult(**values)
-
-
-def fake(source, rows=None, error=None, available=True):
-    return SimpleNamespace(
-        source_type=source,
-        is_available=lambda: available,
-        search=AsyncMock(side_effect=error, return_value=rows or []),
-    )
-
-
-def mock_http(monkeypatch, handler):
-    client = httpx.AsyncClient
-    monkeypatch.setattr(
-        httpx,
-        "AsyncClient",
-        lambda **kwargs: client(transport=httpx.MockTransport(handler), **kwargs),
-    )
+# Pytest discovers imported fixtures through module attributes.
+collect = collection_fixture
 
 
 def test_mixed_sources_keep_errors_after_storage_and_redact_secrets(collect):
@@ -352,24 +295,6 @@ def test_local_bad_pdf_is_error_not_empty(collect, tmp_path):
     assert result.get("status") == "failed"
     assert result["source_statuses"][0]["fetched"] == 1
     assert rows == []
-
-
-def atom_entry(identifier, published="2026-10-16T00:00:00Z"):
-    return f"""<entry><id>http://arxiv.org/abs/{identifier}</id>
-    <title>Portfolio optimization quantitative risk model</title>
-    <updated>2026-10-16T00:00:00Z</updated><published>{published}</published>
-    <summary>A finance portfolio risk model with empirical backtests.</summary>
-    <author><name>Researcher</name></author>
-    <link title="pdf" href="https://arxiv.org/pdf/{identifier}" rel="related" type="application/pdf"/>
-    <category term="q-fin.PM"/></entry>"""
-
-
-def atom_feed(entries, total):
-    return (
-        '<feed xmlns="http://www.w3.org/2005/Atom" '
-        'xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">'
-        f"<opensearch:totalResults>{total}</opensearch:totalResults>{entries}</feed>"
-    )
 
 
 def test_arxiv_bad_entry_date_does_not_erase_good_sibling(collect, monkeypatch):

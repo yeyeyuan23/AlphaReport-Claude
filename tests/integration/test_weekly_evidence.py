@@ -6,10 +6,8 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 from reportagent.services import weekly_report as weekly
 from reportagent.services.paper_scoring import scoring_fingerprint, evidence_fingerprint
 from reportagent.services.report_quality import review_fingerprint, SCHEMA_VERSION
@@ -77,14 +75,11 @@ def assessed(p, **changes):
 
 
 @pytest.fixture
-def library(monkeypatch):
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+def library(monkeypatch, memory_session_factory):
+    factory = memory_session_factory
     monkeypatch.setattr(weekly, "init_db", lambda: None)
     monkeypatch.setattr(weekly, "get_session_factory", lambda: factory)
     yield factory
-    engine.dispose()
 
 
 def test_week_query_covers_more_than_100_and_retains_full_abstract(library):

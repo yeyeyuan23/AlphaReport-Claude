@@ -7,10 +7,8 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from reportagent.models.database import Base, Report, ReportRun
+from reportagent.models.database import Report, ReportRun
 from reportagent.services import daily_push as daily
 from reportagent.services.report_quality import review_fingerprint
 from reportagent.services.paper_scoring import evidence_fingerprint
@@ -26,10 +24,8 @@ def save_offline_assessment(session, row, assessment):
 
 
 @pytest.fixture
-def offline_daily(tmp_path, monkeypatch):
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+def offline_daily(tmp_path, monkeypatch, memory_session_factory):
+    factory = memory_session_factory
     (tmp_path / "configs").mkdir()
     (tmp_path / "configs/push_directions.yaml").write_text("push_settings: {}")
     monkeypatch.setattr(daily, "PROJECT_ROOT", tmp_path)
@@ -64,7 +60,6 @@ def offline_daily(tmp_path, monkeypatch):
 
     monkeypatch.setattr(daily, "review_report_ids", review)
     yield factory, tmp_path
-    engine.dispose()
 
 
 def insert_paper(factory):

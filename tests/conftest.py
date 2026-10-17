@@ -8,6 +8,8 @@ import pytest
 
 from tests.support.paths import PROJECT_ROOT
 
+pytest_plugins = ["tests.support.database"]
+
 
 @pytest.fixture(autouse=True)
 def offline_boundaries(request, monkeypatch):

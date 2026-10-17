@@ -13,7 +13,7 @@ from reportagent.models.schemas import UserCriteria, SourceType
 from reportagent.sources.arxiv_source import ArxivSource
 from reportagent.sources.bigquant_source import BigQuantSource
 from reportagent.sources.eastmoney_source import EastMoneySource
-from tests.integration.test_source_health import (
+from tests.support.source_fixtures import (
     collect as collection_fixture,
     fake,
     paper,

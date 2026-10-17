@@ -10,8 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from reportagent.db.engine import get_db
 from reportagent.models.database import Base, Report
-from tests.unit.test_knowledge_card_evidence import reviewed_paper
-from tests.unit.test_reproduction_preparation import output
+from tests.support.report_fixtures import reviewed_paper, reproduction_output as output
 
 
 @pytest.fixture

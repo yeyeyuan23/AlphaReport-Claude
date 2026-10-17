@@ -1,5 +1,6 @@
 """Deterministic paper/model doubles shared by offline regression tests."""
 
+import asyncio
 import copy
 import importlib
 import json
@@ -83,3 +84,37 @@ def complete_analysis():
         methodology=Methodology(analysis_points=[{"analysis": "方法"}]),
         assessment=Assessment(strengths=["优势"], weaknesses=["限制"]),
     ).model_dump()
+
+
+def reviewed_paper():
+    p = paper()
+    model = Model(response())
+    model.model = module().get_llm_model()
+    p["evaluation_json"] = json.dumps(asyncio.run(module().evaluate_paper(p, model)))
+    return p
+
+
+def reproduction_output():
+    quote = "We use a rolling out-of-sample evaluation with transaction costs."
+    fields = {
+        name: {
+            "status": "documented",
+            "value": "作者使用滚动样本外检验并计入成本",
+            "evidence": [{"quote": quote, "chunk_id": "C001"}],
+        }
+        for name in (
+            "target",
+            "available_information",
+            "training_objective",
+            "data",
+            "split",
+            "baseline",
+            "metrics",
+            "assumptions",
+        )
+    }
+    return {
+        "fields": fields,
+        "minimum_check": "建议：保留末段测试期，比较简单基准并检验成本敏感性。",
+        "falsification": "建议：样本外损失未改善则不支持假设。",
+    }
