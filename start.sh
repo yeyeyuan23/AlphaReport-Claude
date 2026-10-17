@@ -10,7 +10,7 @@ FEISHU_PID=""
 TUNNEL_PID=""
 PID_FILE="$PROJECT/data/alphareport.pid"
 if [[ ! -x "$PYTHON" ]]; then
-    echo "Missing .venv. Create a Python 3.10+ environment and install requirements/runtime.txt." >&2
+    echo "Missing .venv. Create a Python 3.12+ environment and install requirements/runtime.txt." >&2
     exit 1
 fi
 if ! "$PYTHON" -c 'import fastapi, uvicorn, lark_oapi, anthropic' >/dev/null 2>&1; then
