@@ -11,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from reportagent.models.database import Base, Report
 from reportagent.models.schemas import AnalysisResult, Assessment, ClassificationResult, Methodology, SearchResult, SourceType
 from reportagent.services import batch_analysis, collection
+from tests.support.collection_scoring import RelevanceModel
 
 
 def complete():
@@ -28,7 +29,8 @@ def collected(tmp_path,monkeypatch):
         monkeypatch.setattr(module,'init_db',lambda:None)
         monkeypatch.setattr(module,'get_session_factory',lambda:factory)
     classifier=SimpleNamespace(classify=AsyncMock(return_value=ClassificationResult()))
-    monkeypatch.setattr(collection,'LLMClient',lambda:object())
+    relevance_model=RelevanceModel()
+    monkeypatch.setattr(collection,'LLMClient',lambda:relevance_model)
     monkeypatch.setattr(collection,'LLMClassifier',lambda client:classifier)
     llm=MagicMock(calls=[])
     llm._client.close=AsyncMock()
@@ -55,20 +57,23 @@ def collected(tmp_path,monkeypatch):
         with factory() as session:
             rows=session.query(Report).order_by(Report.id).all()
         return result,rows
-    yield SimpleNamespace(run=run,agent=agent,llm=llm)
+    yield SimpleNamespace(run=run,agent=agent,llm=llm,relevance_model=relevance_model)
     engine.dispose()
 
 
-def test_default_collection_skips_placeholder_without_model_and_keeps_good_sibling(collected):
+def test_default_collection_excludes_placeholder_before_storage_and_analyzes_good_sibling(collected):
     result,rows=collected.run(['\\...','A portfolio covariance estimator uses market returns and evaluates financial risk.'])
-    assert len(rows)==2
-    assert rows[0].analysis_json is None
-    assert rows[1].analysis_json
-    assert json.loads(rows[1].analysis_json)['evidence_scope']=='abstract'
+    assert len(rows)==1 and rows[0].title.endswith('1')
+    assert rows[0].analysis_json
+    assert json.loads(rows[0].analysis_json)['evidence_scope']=='abstract'
+    assert result['source_statuses'][0]['screening']['pending']==1
+    assert len(collected.relevance_model.requests)==1
+    assert '标题：Quantitative portfolio optimization risk model 0' not in collected.relevance_model.requests[0][-1]['content']
+    assert '标题：Quantitative portfolio optimization risk model 1' in collected.relevance_model.requests[0][-1]['content']
     assert collected.agent.analyze_report_directly.await_count==1
     assert result['storage']['analyzed']==1
     assert result['status']=='partial'
-    assert any('analysis' in error.lower() and 'skip' in error.lower() for error in result['storage']['errors'])
+    assert any('screening' in error.lower() and 'not stored' in error.lower() for error in result['storage']['errors'])
 
 
 def test_default_collection_rejects_incomplete_analysis_and_preserves_success(collected):

@@ -30,6 +30,7 @@ class Report(Base):
     has_full_text = Column(Boolean, default=False)
     source = Column(String(50), nullable=False)
     source_url = Column(String(1000))
+    source_item_id = Column(String(1100), index=True)
     doi = Column(String(200), index=True)
     arxiv_id = Column(String(50), index=True)
     published_date = Column(DateTime)

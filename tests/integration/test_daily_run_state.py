@@ -43,7 +43,7 @@ def offline_daily(tmp_path, monkeypatch):
     async def review(ids, **kwargs):
         assessments = {}
         with factory() as session:
-            for rid in ids:
+            for rid in ids[:kwargs.get("max_reviews", 12)]:
                 assessment = {"tier": "browse", "label": "值得浏览", "status": "reviewed",
                               "findings": [], "limitations": ["Offline evidence"],
                               "source_category": "academic"}

@@ -3,6 +3,9 @@ import json
 from reportagent.services.paper_scoring import relevance_reason_text
 
 def report_to_dict(r) -> dict:
+    from reportagent.services.knowledge_cards import report_snapshot
+    from reportagent.services.report_quality import current_relevance
+    paper = report_snapshot(r)
     custom_tags = [t.value for t in r.tags if t.dimension == "custom"] if r.tags else []
     return {
         "id": r.id, "title": r.title,
@@ -21,21 +24,36 @@ def report_to_dict(r) -> dict:
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,
         "summary": r.summary,
-        "selection_relevance": r.selection_relevance,
+        "selection_relevance": current_relevance(paper),
         "selection_direction": r.selection_direction,
         "selection_reason": relevance_reason_text(r.selection_reason),
-        "evaluation": read_evaluation(r.evaluation_json),
+        "evaluation": read_evaluation(r.evaluation_json, paper=paper),
     }
 
 
-def read_evaluation(value) -> dict | None:
+def read_evaluation(value, *, paper: dict | None = None) -> dict | None:
     try:
         parsed = json.loads(value) if value else None
         if not isinstance(parsed, dict):
             return None
         if 'relevance_reason' in parsed:
             parsed['relevance_reason'] = relevance_reason_text(parsed['relevance_reason'])
-        from reportagent.services.report_quality import SCHEMA_VERSION
+        from reportagent.services.report_quality import SCHEMA_VERSION, pending_review, review_fingerprint, cached_review_is_current
+        if paper is not None:
+            from reportagent.utils.config import get_llm_model
+            model = get_llm_model()
+            same_context = (parsed.get('schema_version') == SCHEMA_VERSION
+                            and parsed.get('model') == model
+                            and parsed.get('fingerprint') == review_fingerprint(paper, model))
+            current_pending = (same_context and parsed.get('tier') == 'pending'
+                               and parsed.get('status') in {'pending', 'needs_verification'})
+            current = current_pending or cached_review_is_current(paper, parsed, model)
+            if not current:
+                pending = pending_review(paper, '原文、模型或筛选标准已变更，或尚无有效全文评估；请重新评估。')
+                pending['relevance_reason'] = relevance_reason_text(pending['relevance_reason'])
+                # A GET is not a new assessment: keep the historical time.
+                pending['reviewed_at'] = parsed.get('reviewed_at')
+                return pending
         if parsed.get('schema_version') in range(1, SCHEMA_VERSION):
             return {**parsed, 'tier': 'pending', 'label': '待重新评估', 'status': 'pending',
                     'validation_issues': ['评估规则已更新，请重新生成全文阅读评估。']}

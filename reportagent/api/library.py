@@ -95,6 +95,7 @@ def get_report_pdf(report_id: int, db: Session = Depends(get_db)):
                 str(local_path),
                 media_type="application/pdf",
                 filename=f"report_{report_id}.pdf",
+                content_disposition_type="inline",
             )
         except Exception:
             pass

@@ -45,6 +45,7 @@ def init_db():
     # Add columns if missing (SQLite doesn't support ADD COLUMN IF NOT EXISTS).
     # Idempotent: inspect PRAGMA table_info first, skip columns that already exist.
     _new_columns = [
+        ("source_item_id", "VARCHAR(1100)"),
         ("knowledge_card_json", "TEXT"),
         ("selection_score", "FLOAT DEFAULT 0.0"),
         ("selection_reason", "TEXT"),
@@ -69,3 +70,5 @@ def init_db():
             for col_name, col_type in columns:
                 if col_name not in existing:
                     conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
+
+        conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_reports_source_item_id ON reports (source_item_id)")

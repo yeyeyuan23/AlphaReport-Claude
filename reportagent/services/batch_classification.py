@@ -63,7 +63,20 @@ def _summary(rep: Report) -> str:
     return " ".join(parts) if parts else "(无标签)"
 
 
+def _validate_selection(options: ClassificationOptions) -> None:
+    """Reject ambiguous or unbounded selections before opening any resources."""
+    if type(options.all) is not bool:
+        raise ValueError("all must be a boolean")
+    for name in ("report_id", "recent"):
+        value = getattr(options, name)
+        if value is not None and (type(value) is not int or value <= 0):
+            raise ValueError(f"{name} must be a positive integer")
+    if sum((options.all, options.report_id is not None, options.recent is not None)) != 1:
+        raise ValueError("Select exactly one of all, report_id, or recent")
+
+
 async def classify_async(options: ClassificationOptions) -> dict:
+    _validate_selection(options)
     init_db()
     factory = get_session_factory()
     session = factory()
@@ -79,12 +92,12 @@ async def classify_async(options: ClassificationOptions) -> dict:
     try:
         repo = ReportRepository(session)
 
-        if options.report_id:
+        if options.report_id is not None:
             reports = [repo.get_report(options.report_id)]
             if not reports[0]:
                 logger.error(f"Report {options.report_id} not found")
                 raise ValueError("Report not found")
-        elif options.recent:
+        elif options.recent is not None:
             reports = session.query(Report).order_by(Report.created_at.desc(), Report.id.desc()).limit(options.recent).all()
         else:
             reports = session.query(Report).order_by(Report.id).all()

@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 
 from reportagent.utils.config import PROJECT_ROOT
-from reportagent.bot.sessions import get_session, save_session, del_session
+from reportagent.bot.sessions import get_session_snapshot, save_session, del_session
 from reportagent.skills.registry import format_skills_context, load_all_skills
 
 logger = logging.getLogger(__name__)
@@ -29,49 +29,62 @@ def claude_environment():
         })
     return env
 
-def ask_claude(msg, chat_id):
+def ask_claude(msg, chat_id, *, session_snapshot=None):
     claude = shutil.which("claude")
-    if not claude: return "Claude Code 未安装"
+    if not claude:
+        return "Claude Code 未安装"
 
-    sid, summary = get_session(chat_id)
+    current_snapshot = get_session_snapshot(chat_id)
+    stale_reply = "会话已清除或更新，请重新发送问题。"
+    if session_snapshot is not None and session_snapshot[2] != current_snapshot[2]:
+        return stale_reply
+    sid, summary, revision = current_snapshot if session_snapshot is None else session_snapshot
     new = sid is None
-    if new: sid = str(uuid.uuid4())
+    if new:
+        sid = str(uuid.uuid4())
+    session_dir = PROJECT_ROOT / ".claude-bot" / "projects" / str(PROJECT_ROOT).replace("/", "-").lstrip("-")
 
-    # Inject memory summary from previous sessions
-    if summary:
-        msg = f"[历史摘要]\n{summary}\n\n---\n当前问题：{msg}"
+    # Carry the same revision through compaction and resume recovery. Never
+    # restart from a fresh snapshot, which could turn a cancelled request new.
+    while True:
+        if not new:
+            sf = session_dir / f"{sid}.jsonl"
+            if sf.exists() and sf.stat().st_size > 50 * 1024:
+                logger.info(f"Compacting session {sid[:8]} ({sf.stat().st_size//1024}KB)")
+                new_summary = _compact_session(sid, summary, session_dir)
+                new_sid = str(uuid.uuid4())
+                next_revision = save_session(chat_id, new_sid, new_summary, expected_revision=revision)
+                if next_revision is None:
+                    return stale_reply
+                revision, sid, summary, new = next_revision, new_sid, new_summary, True
 
-    # Auto-compact when session file exceeds 50KB (~10 exchanges)
-    SESSION_DIR = PROJECT_ROOT / ".claude-bot" / "projects" / str(PROJECT_ROOT).replace("/", "-").lstrip("-")
-    if not new:
-        sf = SESSION_DIR / f"{sid}.jsonl"
-        if sf.exists() and sf.stat().st_size > 50 * 1024:
-            logger.info(f"Compacting session {sid[:8]} ({sf.stat().st_size//1024}KB)")
-            new_summary = _compact_session(sid, summary, SESSION_DIR)
-            save_session(chat_id, str(uuid.uuid4()), new_summary)
-            return ask_claude(msg, chat_id)  # retry with fresh session
-
-    cmd = [
-        claude, "-p", msg,
-        "--session-id" if new else "--resume", sid,
-        "--append-system-prompt", build_system_prompt(),
-        "--print", "--output-format", "text",
-        "--model", os.environ.get("CLAUDE_BOT_MODEL", "deepseek-v4-pro"),
-        "--permission-mode", "dontAsk",
-    ]
-    env = claude_environment()
-    logger.info(f"Claude session={sid[:8]} new={new}")
-    try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=str(PROJECT_ROOT), env=env)
-        out = r.stdout.strip()
-        if r.returncode == 0 and out:
-            save_session(chat_id, sid, summary)
-            return out
-        if not new and "session" in r.stderr.lower():
-            del_session(chat_id)
-            return ask_claude(msg, chat_id)
-        return f"出错: {r.stderr[:200]}"
-    except Exception as e: return f"失败: {e}"
+        prompt = f"[历史摘要]\n{summary}\n\n---\n当前问题：{msg}" if summary else msg
+        cmd = [
+            claude, "-p", prompt,
+            "--session-id" if new else "--resume", sid,
+            "--append-system-prompt", build_system_prompt(),
+            "--print", "--output-format", "text",
+            "--model", os.environ.get("CLAUDE_BOT_MODEL", "deepseek-v4-pro"),
+            "--permission-mode", "dontAsk",
+        ]
+        logger.info(f"Claude session={sid[:8]} new={new}")
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=300,
+                               cwd=str(PROJECT_ROOT), env=claude_environment())
+            out = r.stdout.strip()
+            if r.returncode == 0 and out:
+                if save_session(chat_id, sid, summary, expected_revision=revision) is None:
+                    return stale_reply
+                return out
+            if not new and "session" in r.stderr.lower():
+                next_revision = del_session(chat_id, expected_revision=revision)
+                if next_revision is None:
+                    return stale_reply
+                revision, sid, summary, new = next_revision, str(uuid.uuid4()), "", True
+                continue
+            return f"出错: {r.stderr[:200]}"
+        except Exception as e:
+            return f"失败: {e}"
 
 def _compact_session(sid, old_summary, session_dir):
     """Summarize session into a paragraph, merging with previous summary."""

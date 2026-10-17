@@ -17,7 +17,7 @@ from reportagent.db.engine import init_db
 from reportagent.services.feishu_security import http_callback_enabled, sender_allowed
 from reportagent.bot.client import send_text, send_chat, reply_msg, react
 from reportagent.bot.claude import ask_claude
-from reportagent.bot.sessions import del_session
+from reportagent.bot.sessions import del_session, get_session_snapshot
 
 logger = logging.getLogger(__name__)
 APP_ID = os.environ.get("FEISHU_APP_ID", "")
@@ -230,6 +230,8 @@ def on_message(data):
             return
         if not text.strip(): return
 
+        # Capture before acknowledgements or worker scheduling can delay this message.
+        session_snapshot = get_session_snapshot(cid)
         logger.info(f"[{ct}] {text[:80]}")
         react(mid, "THUMBSUP")   # 👍 已收到
 
@@ -252,7 +254,7 @@ def on_message(data):
             send_text(open_id, "🤔 正在处理...")
 
         def process():
-            ans = ask_claude(text, cid)
+            ans = ask_claude(text, cid, session_snapshot=session_snapshot)
             if ct == "group":
                 if mid: reply_msg(mid, ans)
                 else: send_chat(cid, ans)
@@ -305,6 +307,7 @@ def main():
         if not sender_allowed(open_id):
             return
         if not text.strip(): return
+        session_snapshot = get_session_snapshot(cid)
         react(mid, "THUMBSUP")
         reply = handle_cmd(text, cid, ct)
         if reply:
@@ -322,7 +325,7 @@ def main():
         else:
             send_text(open_id, "🤔 正在处理...")
         def process():
-            ans = ask_claude(text, cid)
+            ans = ask_claude(text, cid, session_snapshot=session_snapshot)
             if ct == "group":
                 if mid: reply_msg(mid, ans)
                 else: send_chat(cid, ans)

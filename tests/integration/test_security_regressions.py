@@ -109,7 +109,7 @@ class BotBoundaryTests(unittest.TestCase):
             observed.update(cmd=cmd, **kwargs)
             return subprocess.CompletedProcess(cmd, 0, "answer", "")
         with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "fixture-key", "DEEPSEEK_BASE_URL": "https://api.deepseek.com/anthropic", "ANTHROPIC_AUTH_TOKEN": "wrong-token"}), patch.object(claude.shutil, "which", return_value="claude"), patch.object(
-            claude, "get_session", return_value=(None, "")
+            claude, "get_session_snapshot", return_value=(None, "", 0)
         ), patch.object(claude, "save_session"), patch.object(claude.subprocess, "run", side_effect=run):
             self.assertEqual(claude.ask_claude("hello", "oc_fixture"), "answer")
         self.assertNotIn("--dangerously-skip-permissions", observed["cmd"])

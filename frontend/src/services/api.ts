@@ -2,12 +2,20 @@ import type { ReportSummary, ReportDetail, ReportStats, KnowledgeCard, Reproduct
 
 const BASE = "/api/v1";
 
+export class RequestError extends Error {
+  status: number;
+  constructor(status: number) {
+    super(`Request failed (${status})`);
+    this.status = status;
+  }
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<{ success: boolean; data: T }> {
   const res = await fetch(url, {
     headers: { "Content-Type": "application/json" },
     ...options,
   });
-  if (!res.ok) throw new Error(`Request failed (${res.status})`);
+  if (!res.ok) throw new RequestError(res.status);
   return res.json();
 }
 

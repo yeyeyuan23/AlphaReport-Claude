@@ -108,7 +108,7 @@ def _refresh_candidate_metadata(candidates: list[dict]) -> list[dict]:
                 refreshed.append({**paper, "evaluation": pending_review(paper, "论文记录已删除，请重新获取并评估。")})
                 continue
             snapshot = {field: getattr(row, field) for field in (
-                "source", "arxiv_id", "title", "abstract", "full_text", "selection_relevance",
+                "source", "arxiv_id", "title", "abstract", "full_text", "has_full_text", "selection_relevance",
                 "selection_score", "selection_reason", "selection_provenance_json",
             )}
             try:
@@ -487,11 +487,16 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
     papers, date_label, _ = get_todays_papers(report_ids=ids or None)
     if ids and not papers:
         raise ValueError("指定论文不存在")
-    candidates = select_candidates(papers, max_reviews, list(load_enabled_directions()))
+    candidates = select_candidates(papers, len(papers), list(load_enabled_directions()))
     run["report_ids"] = [p["id"] for p in candidates]
     if not candidates and run["stages"]["relevance"]["status"] == "failed":
         raise RuntimeError("相关性筛选失败且没有可用候选，本次不能作为正常空日报。")
-    assessments = asyncio.run(review_report_ids(run["report_ids"], force=options.force_review)) if candidates else {}
+    review_audit = {}
+    assessments = asyncio.run(review_report_ids(run["report_ids"], force=options.force_review,
+                                               max_reviews=max_reviews, audit=review_audit)) if candidates else {}
+    run["stages"]["review"] = review_audit
+    candidates = [p for p in candidates if p["id"] in assessments]
+    run["report_ids"] = [p["id"] for p in candidates]
     for p in candidates:
         p["evaluation"] = assessments.get(p["id"], pending_review(p, "全文评估未完成"))
     candidates = _refresh_candidate_metadata(candidates)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -97,8 +98,9 @@ FETCH_PAGE_SIZE = 100
 
 
 class EastMoneySource(BaseSource):
-    def __init__(self, rate_limit_seconds: float = 1.0):
+    def __init__(self, rate_limit_seconds: float = 1.0, download_pdfs: bool = True):
         self.rate_limit_seconds = rate_limit_seconds
+        self.download_pdfs = download_pdfs
 
     @property
     def source_type(self) -> SourceType:
@@ -142,12 +144,22 @@ class EastMoneySource(BaseSource):
                     self.last_search.record_error(error, "article detail")
         return selected
 
-    async def hydrate_result(self, result: SearchResult) -> SearchResult:
+    async def hydrate_result(
+        self, result: SearchResult, *, pdf_directory: Path | None = None,
+    ) -> SearchResult:
         """Fetch public research evidence without models or database writes."""
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-            return await self._fetch_detail(client, result)
+            links = result.raw_metadata.get("pdf_links") or []
+            if not links and result.raw_metadata.get("pdf_link"):
+                links = [result.raw_metadata["pdf_link"]]
+            if links:
+                return await hydrate_pdf(client, result, links, self.last_search, pdf_directory=pdf_directory)
+            return await self._fetch_detail(client, result, download_pdfs=True, pdf_directory=pdf_directory)
 
-    async def _fetch_detail(self, client, result: SearchResult) -> SearchResult:
+    async def _fetch_detail(
+        self, client, result: SearchResult, *, download_pdfs: bool | None = None,
+        pdf_directory: Path | None = None,
+    ) -> SearchResult:
         if not result.source_url:
             raise SourceParseError("missing report detail URL")
         data = await bounded_download(client, result.source_url, MAX_HTML_BYTES)
@@ -159,13 +171,15 @@ class EastMoneySource(BaseSource):
                    "raw_metadata": {**result.raw_metadata,
                                     "content_kind": "html" if text else "metadata_only",
                                     "text_scope": "html_article" if text else "metadata_only",
-                                    "pdf_link": links[0] if links else None}}
+                                    "pdf_link": links[0] if links else None,
+                                    "pdf_links": links}}
         if usable_full_text(text):
-            updates.update(full_text=text, abstract_only=False)
+            updates.update(full_text=text, abstract_only=bool(links))
         result = result.model_copy(update=updates)
         # Public HTML is often an excerpt; the linked report is the better source.
-        if links:
-            result = await hydrate_pdf(client, result, links, self.last_search)
+        should_download = self.download_pdfs if download_pdfs is None else download_pdfs
+        if links and should_download:
+            result = await hydrate_pdf(client, result, links, self.last_search, pdf_directory=pdf_directory)
         if not result.abstract and not result.full_text and not links:
             self.last_search.record_error(SourceParseError("no research text or public PDF in report page"), "article content")
         return result

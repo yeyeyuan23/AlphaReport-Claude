@@ -4,12 +4,22 @@ import logging
 import asyncio
 
 
+def _positive_integer(value):
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError("must be a positive integer") from None
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return number
+
+
 def main():
     parser = argparse.ArgumentParser(description="Re-classify reports")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--all", action="store_true", help="Re-classify all reports")
-    group.add_argument("--report-id", type=int, help="Classify single report by ID")
-    group.add_argument("--recent", type=int, help="Re-classify last N reports")
+    group.add_argument("--report-id", type=_positive_integer, help="Classify single report by ID")
+    group.add_argument("--recent", type=_positive_integer, help="Re-classify last N reports")
 
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--llm", action="store_true", help="Use LLM semantic classification")

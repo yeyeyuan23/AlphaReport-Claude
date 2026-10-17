@@ -1,46 +1,38 @@
-version: '3.8'
-
 services:
   backend:
     build:
       context: ..
       dockerfile: deploy/Dockerfile.backend
-    image: deploy_backend
+    image: alphareport
     container_name: alphareport-backend
+    init: true
     restart: unless-stopped
-    security_opt:
-      - seccomp:unconfined
+    stop_grace_period: 30s
+    user: "${APP_UID:-1000}:${APP_GID:-1000}"
     env_file:
-      - /data1/alphareport/.env
+      - ${ENV_FILE:-/data1/alphareport/.env}
     environment:
-      - PYTHONPATH=/app
-      - HF_ENDPOINT=https://hf-mirror.com
-      - OPENBLAS_NUM_THREADS=1
-      - OMP_NUM_THREADS=1
-      - MKL_NUM_THREADS=1
-      - NUMEXPR_NUM_THREADS=1
-    volumes:
-      - /data1/alphareport/data:/app/data
-      - /data1/alphareport/model_cache:/root/.cache/huggingface
-      - /data1/alphareport/configs/app.yaml:/app/configs/app.yaml:ro
-    command: python -c "import uvicorn; from reportagent.main import app; uvicorn.run(app, host='0.0.0.0', port=8000)"
-    networks:
-      - alphareport-net
-
-  frontend:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.frontend
-    image: deploy_frontend
-    container_name: alphareport-frontend
-    restart: unless-stopped
+      ALPHAREPORT_DEPLOYMENT: "true"
+      ALPHAREPORT_BIND_HOST: "0.0.0.0"
+      ALPHAREPORT_PORT: "8000"
+      ALPHAREPORT_PUBLIC_TUNNEL: "false"
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://hf-mirror.com}"
+      HOME: /app/data/runtime-home
+      OPENBLAS_NUM_THREADS: "1"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
     ports:
-      - "80:80"
-    depends_on:
-      - backend
-    networks:
-      - alphareport-net
-
-networks:
-  alphareport-net:
-    driver: bridge
+      - "${PORT:-80}:8000"
+    volumes:
+      - ${DATA_DIR:-/data1/alphareport/data}:/app/data
+      - ${MODEL_CACHE:-/data1/alphareport/model_cache}:/app/data/runtime-home/.cache/huggingface
+      - ${CONFIG_DIR:-/data1/alphareport/configs}/app.yaml:/app/configs/app.yaml:ro
+      - ${BOT_STATE_DIR:-/data1/alphareport/bot_state}:/app/.claude-bot
+    command: ["bash", "start.sh"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health',timeout=3))['data']; assert d['server']=='ok' and d['feishu_ws']"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 3

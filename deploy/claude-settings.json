@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//app/**)",
+      "Bash(.venv/bin/python -m reportagent.cli.skills *)",
+      "Bash(.venv/bin/python -m reportagent.cli.db_query *)",
+      "Bash(.venv/bin/python -m reportagent.cli.report *)",
+      "Bash(.venv/bin/python -m reportagent.cli.collect *)",
+      "Bash(.venv/bin/python -m reportagent.cli.llm_filter *)",
+      "Bash(.venv/bin/python -m reportagent.cli.daily_feishu_push *)",
+      "Bash(.venv/bin/python -m reportagent.cli.weekly_report *)",
+      "Bash(.venv/bin/python -m reportagent.cli.ideation *)",
+      "Bash(.venv/bin/python -m reportagent.cli.reproduction *)"
+    ]
+  }
+}

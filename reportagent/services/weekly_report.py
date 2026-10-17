@@ -18,7 +18,7 @@ from reportagent.db.engine import init_db, get_session_factory
 from reportagent.utils.config import get_config, get_llm_model
 from reportagent.services.report_briefing import render_briefing
 from reportagent.services.public_url import get_web_base_url
-from reportagent.services.report_quality import pending_review, review_fingerprint
+from reportagent.services.report_quality import pending_review, review_fingerprint, cached_review_is_current
 from reportagent.services.feishu_markdown import card_sections
 
 logger = logging.getLogger("weekly_report")
@@ -143,8 +143,11 @@ def generate_weekly_report(papers: list[dict], week_start: str, week_end: str) -
                 evaluation = json.loads(p.get("evaluation_json") or "null")
             except (ValueError, TypeError):
                 evaluation = None
-        if (not isinstance(evaluation, dict)
-                or evaluation.get("fingerprint") != review_fingerprint(p, get_llm_model())):
+        current_pending = (isinstance(evaluation, dict) and evaluation.get("tier") == "pending"
+                           and evaluation.get("status") in {"pending", "needs_verification"}
+                           and evaluation.get("model") == get_llm_model()
+                           and evaluation.get("fingerprint") == review_fingerprint(p, get_llm_model()))
+        if not current_pending and not cached_review_is_current(p, evaluation, get_llm_model()):
             evaluation = pending_review(p, "尚无与当前原文、模型和筛选标准一致的全文评估。")
         p["evaluation"] = evaluation
         checked.append(p)
@@ -202,15 +205,16 @@ async def prepare_weekly_evidence(papers: list[dict], *, max_reviews: int = 12,
                 cached = json.loads(row.evaluation_json or "null")
             except (ValueError, TypeError):
                 cached = None
-            if (not force_review and isinstance(cached, dict) and cached.get("status") == "reviewed"
-                    and cached.get("tier") != "pending"
-                    and cached.get("fingerprint") == review_fingerprint(snapshot, get_llm_model())):
+            if not force_review and cached_review_is_current(snapshot, cached, get_llm_model()):
                 continue  # Saved reviews remain visible without consuming new-review budget.
             candidates.append(snapshot)
     audit["unreviewed_candidates"] = len(candidates)
-    selected = select_candidates(candidates, max_reviews=max_reviews)
-    audit["review_ids"] = [p["id"] for p in selected]
-    reviewed = await review_report_ids(audit["review_ids"], force=force_review) if selected else {}
+    selected = select_candidates(candidates, max_reviews=len(candidates))
+    review_audit = {}
+    reviewed = await review_report_ids([p["id"] for p in selected], force=force_review,
+                                      max_reviews=max_reviews, audit=review_audit) if selected else {}
+    audit.update(review_audit)
+    audit["review_ids"] = review_audit.get("review_ids", list(reviewed))
     audit["review_tiers"] = {str(rid): result.get("tier") for rid, result in reviewed.items()}
     for rid, result in reviewed.items():
         if result.get("status") != "reviewed":
@@ -293,7 +297,7 @@ def run_weekly_report(options: WeeklyReportOptions) -> dict:
     configured_ids = weekly_ids or os.environ.get("FEISHU_DAILY_PUSH_IDS", "")
     receive_ids = [i.strip() for i in (options.receive_ids or configured_ids).split(",") if i.strip()]
     type_env = "FEISHU_WEEKLY_PUSH_TYPE" if weekly_ids else "FEISHU_DAILY_PUSH_TYPE"
-    receive_type = options.receive_type or os.environ.get(type_env, "chat_id")
+    receive_type = options.receive_type or os.environ.get(type_env, "chat_id" if weekly_ids else "open_id")
     if not options.dry_run and not receive_ids:
         raise ValueError("Set FEISHU_WEEKLY_PUSH_IDS or FEISHU_DAILY_PUSH_IDS before delivery")
     papers = get_weekly_papers(week_start, week_end)
@@ -306,7 +310,7 @@ def run_weekly_report(options: WeeklyReportOptions) -> dict:
     failures = preparation.get("failures", [])
     if failures:
         text += f"\n\n本期有 {len(failures)} 项筛选或全文阅读评估未完成；相关条目保留待核验，可重试。"
-    unattempted = preparation.get("unreviewed_candidates", 0) - len(preparation.get("review_ids", []))
+    unattempted = len(preparation.get("deferred_ids", []))
     if unattempted > 0:
         text += f"\n\n本次全文核验预算为 {options.max_reviews} 篇，另有 {unattempted} 篇候选尚未核验；重跑可继续处理。"
     if options.output:

@@ -55,6 +55,13 @@ llm:
 # ── Collection ────────────────────────────────────────
 collection:
   max_concurrent_sources: 4
+  pdf:
+    max_size_mb: 25  # MiB；部署者可提高，不代表论文质量或模型输入上限
+    download_timeout_seconds: 45  # 每次下载独立限时，不包含解析
+    parse_timeout_seconds: 20
+    max_attempts: 3  # 包含首次请求；仅网络异常/408/429/500/502/503/504重试
+    retry_backoff_seconds: 2
+    max_retry_delay_seconds: 30  # Retry-After 与指数退避均受此上限约束
 
 # ── Vector Store ──────────────────────────────────────
 vector_store:

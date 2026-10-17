@@ -1,19 +1,47 @@
-FROM python:3.12-slim
+FROM node:22-bookworm-slim AS frontend
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
 
+FROM python:3.12-slim-bookworm
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash ca-certificates curl git procps lsof libstdc++6 \
+    && rm -rf /var/lib/apt/lists/*
 
-ENV HF_ENDPOINT=https://hf-mirror.com
-ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+# Official native installer: https://code.claude.com/docs/en/setup
+ARG CLAUDE_CODE_VERSION=stable
+RUN curl -fsSL https://claude.ai/install.sh -o /tmp/install-claude.sh \
+    && bash /tmp/install-claude.sh "$CLAUDE_CODE_VERSION" \
+    && install -m 0755 /root/.local/bin/claude /usr/local/bin/claude \
+    && rm -rf /tmp/install-claude.sh /root/.local/share/claude /root/.local/bin/claude \
+    && claude --version
 
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONPATH=/app \
+    PYTHONDONTWRITEBYTECODE=1 \
+    ALPHAREPORT_PYTHON=/opt/venv/bin/python \
+    ALPHAREPORT_FRONTEND_PREBUILT=true \
+    CLAUDE_CONFIG_DIR=/app/.claude-bot \
+    DISABLE_AUTOUPDATER=1 \
+    HF_ENDPOINT=https://hf-mirror.com
 COPY requirements/ requirements/
 RUN pip install --no-cache-dir --progress-bar off -r requirements/runtime.txt
-
 COPY reportagent/ reportagent/
 COPY configs/ configs/
 COPY skills/ skills/
 COPY scripts/ scripts/
-
-RUN mkdir -p /app/data/pdf_library /app/data/chroma_db
-
-ENV PYTHONPATH=/app
+COPY docs/ docs/
+COPY start.sh README.md CLAUDE.md ./
+COPY deploy/claude-settings.json /app/.claude/settings.json
+COPY --from=frontend /frontend/dist /app/frontend/dist
+RUN ln -s /opt/venv /app/.venv \
+    && useradd --uid 1000 --create-home app \
+    && mkdir -p /app/data/runtime-home /app/.claude-bot \
+    && chown -R app:app /app/data /app/.claude-bot
+USER app
 EXPOSE 8000
+CMD ["bash", "start.sh"]

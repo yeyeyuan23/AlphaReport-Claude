@@ -27,7 +27,7 @@ def test_search_and_recent_separate_entries_and_link_to_reports():
 
 def test_model_answer_is_not_cut_off_at_4000_characters():
     answer = '长回答：' + '完整原文段落。' * 1500 + 'FINAL_MARKER'
-    with patch.object(claude.shutil, 'which', return_value='claude'), patch.object(claude, 'get_session', return_value=(None, '')), patch.object(claude, 'save_session'), patch.object(claude.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, answer, '')):
+    with patch.object(claude.shutil, 'which', return_value='claude'), patch.object(claude, 'get_session_snapshot', return_value=(None, '', 0)), patch.object(claude, 'save_session'), patch.object(claude.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, answer, '')):
         assert claude.ask_claude('question', 'oc_fixture') == answer
 
 

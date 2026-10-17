@@ -50,33 +50,31 @@ class StorageAgent:
         """Index newly-added reports into the vector store for semantic search."""
         try:
             from reportagent.vector_store.store import get_vector_store
-            from reportagent.utils.hashing import content_hash
 
             store = get_vector_store()
             factory = get_session_factory()
             session = factory()
             try:
-                from reportagent.models.database import Report
                 from reportagent.classifiers.quant_filter import compute_quant_score
                 indexed = 0
                 for cr in reports:
                     sr = cr.search_result
-                    cl = cr.classification
-                    text = sr.full_text or sr.abstract or ""
-                    if not text.strip():
-                        continue
-                    c_hash = content_hash(sr.title, sr.authors)
-                    db_report = session.query(Report).filter(Report.content_hash == c_hash).first()
+                    db_report = ReportRepository(session).find_report(sr)
                     if not db_report:
                         continue
-                    topics = ",".join(t.value for t in cl.topics)
-                    markets = ",".join(m.value for m in cl.markets)
-                    quant_score, _ = compute_quant_score(sr.title, sr.abstract or "")
+                    # A delayed revision or a failed update may have been rejected
+                    # by storage. Index the accepted, coherent persisted bundle.
+                    text = db_report.full_text or db_report.abstract or ""
+                    if not text.strip():
+                        continue
+                    topics = db_report.topics or ""
+                    markets = db_report.markets or ""
+                    quant_score, _ = compute_quant_score(db_report.title, db_report.abstract or "")
                     chunks = store.index_report(
                         report_id=db_report.id,
-                        title=sr.title,
+                        title=db_report.title,
                         text=text,
-                        source=sr.source.value,
+                        source=db_report.source,
                         topics=topics,
                         markets=markets,
                         quant_score=quant_score,

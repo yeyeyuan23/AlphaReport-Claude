@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 
-from reportagent.services.report_quality import Review, review_fingerprint
+from reportagent.services.report_quality import Review, cached_review_is_current
 from reportagent.skills.registry import skill_resource
 from reportagent.utils.config import get_llm_model, get_llm_base_url, get_llm_provider
 
@@ -24,9 +24,7 @@ def current_review(paper: dict) -> dict | None:
         review = json.loads(paper.get("evaluation_json") or "null")
         if not isinstance(review, dict) or not paper.get("has_full_text"):
             return None
-        if (review.get("status") != "reviewed" or not review.get("text_complete")
-                or review.get("model") != get_llm_model()
-                or review.get("fingerprint") != review_fingerprint(paper, get_llm_model())):
+        if not cached_review_is_current(paper, review, get_llm_model()):
             return None
         observations = Review.model_validate(review).model_dump(exclude_none=True)
         return {**review, **observations}

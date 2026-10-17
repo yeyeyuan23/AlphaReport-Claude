@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime, timezone
 import json
 import logging
+from pathlib import Path
 import re
 from typing import Optional
 from urllib.parse import urljoin
@@ -128,9 +129,11 @@ class BigQuantSource(BaseSource):
         self,
         rate_limit_seconds: float = DEFAULT_RATE_LIMIT,
         max_listing_pages: int = DEFAULT_MAX_PAGES,
+        download_pdfs: bool = True,
     ):
         self.rate_limit_seconds = rate_limit_seconds
         self.max_listing_pages = max_listing_pages
+        self.download_pdfs = download_pdfs
 
     @property
     def source_type(self) -> SourceType:
@@ -139,10 +142,19 @@ class BigQuantSource(BaseSource):
     def is_available(self) -> bool:
         return True
 
-    async def hydrate_result(self, result: SearchResult) -> SearchResult:
+    async def hydrate_result(
+        self, result: SearchResult, *, pdf_directory: Path | None = None,
+    ) -> SearchResult:
         """Re-fetch one public article's evidence without models or database access."""
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-            return await self._fetch_detail(client, result.title, result.source_url or result.raw_metadata["doc_path"])
+            links = result.raw_metadata.get("pdf_links") or []
+            if not links and result.raw_metadata.get("pdf_link"):
+                links = [result.raw_metadata["pdf_link"]]
+            if links:
+                return await hydrate_pdf(client, result, links, self.last_search, pdf_directory=pdf_directory)
+            return await self._fetch_detail(client, result.title,
+                result.source_url or result.raw_metadata["doc_path"], download_pdfs=True,
+                pdf_directory=pdf_directory)
 
     async def search(self, criteria: UserCriteria) -> list[SearchResult]:
         self._start_search()
@@ -224,6 +236,8 @@ class BigQuantSource(BaseSource):
     async def _fetch_detail(
         self, client: httpx.AsyncClient, title: str, doc_path: str, *,
         date_from: Optional[datetime] = None, date_to: Optional[datetime] = None,
+        download_pdfs: bool | None = None,
+        pdf_directory: Path | None = None,
     ) -> Optional[SearchResult]:
         url = f"{BASE_URL}{doc_path}" if doc_path.startswith("/") else doc_path
         body = await bounded_download(client, url, MAX_HTML_BYTES)
@@ -267,20 +281,22 @@ class BigQuantSource(BaseSource):
             authors=authors,
             abstract=abstract,
             full_text=text if usable_full_text(text) else None,
-            abstract_only=not usable_full_text(text),
+            abstract_only=bool(links) or not usable_full_text(text),
             source=SourceType.BIGQUANT,
             source_url=url,
             published_date=published_date,
             raw_metadata={
                 "doc_path": doc_path,
                 "pdf_link": links[0] if links else None,
+                "pdf_links": links,
                 "published_date_source": date_source,
                 "content_kind": "html" if text else "metadata_only",
                 "text_scope": "html_article" if text else "metadata_only",
             },
         )
-        if links:
-            result = await hydrate_pdf(client, result, links, self.last_search)
+        should_download = self.download_pdfs if download_pdfs is None else download_pdfs
+        if links and should_download:
+            result = await hydrate_pdf(client, result, links, self.last_search, pdf_directory=pdf_directory)
         if not result.abstract and not result.full_text and not links:
             self.last_search.record_error(SourceParseError("article has no research text or public PDF"), "article content")
         return result

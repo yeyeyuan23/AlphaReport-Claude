@@ -4,6 +4,8 @@ from typing import Optional
 import asyncio
 import logging
 from datetime import datetime, timezone
+from functools import partial
+from pathlib import Path
 from threading import Event
 
 import httpx
@@ -14,7 +16,7 @@ from reportagent.sources.base import (
 )
 from reportagent.utils.topic_expansion import expand_topics
 from reportagent.sources.date_window import in_date_window, utc_datetime
-from reportagent.sources.content_fetch import MAX_PDF_BYTES, bounded_download
+from reportagent.sources import content_fetch
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +92,12 @@ class ArxivSource(BaseSource):
 
     def is_available(self) -> bool:
         return True
+
+    async def hydrate_result(
+        self, result: SearchResult, *, pdf_directory: Path | None = None,
+    ) -> SearchResult:
+        """Fetch the search result's original PDF revision without another search."""
+        return (await self._download_and_parse_pdfs([result], pdf_directory=pdf_directory))[0]
 
     async def search(self, criteria: UserCriteria) -> list[SearchResult]:
         """Standard keyword-based search (existing behavior)."""
@@ -169,7 +177,9 @@ class ArxivSource(BaseSource):
 
         return results
 
-    async def _download_and_parse_pdfs(self, results: list[SearchResult]) -> list[SearchResult]:
+    async def _download_and_parse_pdfs(
+        self, results: list[SearchResult], *, pdf_directory: Path | None = None,
+    ) -> list[SearchResult]:
         import httpx
 
         updated = []
@@ -186,34 +196,40 @@ class ArxivSource(BaseSource):
                     continue
 
                 try:
-                    r = await asyncio.wait_for(
-                        self._fetch_one_pdf(client, r, pdf_url), timeout=45
-                    )
+                    r = await self._fetch_one_pdf(client, r, pdf_url, pdf_directory=pdf_directory)
                 except Exception as error:
-                    logger.warning("ArxivSource %s", self.last_search.record_error(error, "PDF download/parse"))
+                    stage = f"PDF {error.stage}" if isinstance(error, content_fetch.PDFTransferError) else "PDF download/parse"
+                    logger.warning("ArxivSource %s", self.last_search.record_error(error, stage))
 
                 updated.append(r)
 
         return updated
 
     async def _fetch_one_pdf(
-        self, client, result: SearchResult, pdf_url: str
+        self, client, result: SearchResult, pdf_url: str, *, pdf_directory: Path | None = None,
     ) -> SearchResult:
-        pdf_bytes = await bounded_download(client, pdf_url, MAX_PDF_BYTES)
+        policy = content_fetch.get_pdf_policy()
+        identity = content_fetch.paper_identifier(result)
+        pdf_bytes = await content_fetch.bounded_download(client, pdf_url, policy.max_bytes,
+            policy=policy, source="arxiv", paper_id=identity)
 
-        if not pdf_bytes[:1024].lstrip().startswith(b"%PDF-"):
-            raise SourceParseError("non-PDF response content")
-        saved_path = await asyncio.to_thread(self._save_pdf_bytes, pdf_bytes, result.arxiv_id)
-        if result.arxiv_id and not saved_path:
-            self.last_search.record_error(SourceParseError("PDF could not be saved"), "PDF save")
+        content_fetch.validate_pdf_header(pdf_bytes, source="arxiv", paper_id=identity)
+        saved_path = None
+        if result.arxiv_id:
+            try:
+                save = (partial(self._save_pdf_bytes, directory=pdf_directory)
+                        if pdf_directory is not None else self._save_pdf_bytes)
+                saved_path = await content_fetch.pdf_stage("save", save, pdf_bytes, result.arxiv_id,
+                    policy=policy, source="arxiv", paper_id=identity, byte_count=len(pdf_bytes))
+            except content_fetch.PDFTransferError as error:
+                self.last_search.record_error(error, "PDF save")
 
         # Text extraction is optional — skip on timeout to avoid blocking
         try:
-            full_text = await asyncio.wait_for(
-                asyncio.to_thread(self._parse_pdf_bytes, pdf_bytes), timeout=20
-            )
-        except asyncio.TimeoutError as error:
-            self.last_search.record_error(error, "PDF text extraction")
+            full_text = await content_fetch.pdf_stage("parse", self._parse_pdf_bytes, pdf_bytes,
+                policy=policy, source="arxiv", paper_id=identity, byte_count=len(pdf_bytes), diagnostics=self.last_search)
+        except content_fetch.PDFTransferError as error:
+            self.last_search.record_error(error, "PDF parse")
             full_text = ""
 
         updates: dict = {}
@@ -222,8 +238,6 @@ class ArxivSource(BaseSource):
         if usable_full_text(full_text):
             updates["full_text"] = full_text
             updates["abstract_only"] = False
-        else:
-            self.last_search.record_error(SourceParseError("PDF has no usable extracted text"), "PDF parse")
 
         if updates:
             result = result.model_copy(update=updates)
@@ -231,12 +245,14 @@ class ArxivSource(BaseSource):
         return result
 
     @staticmethod
-    def _save_pdf_bytes(pdf_bytes: bytes, arxiv_id  : Optional[str]) -> Optional[str]:
+    def _save_pdf_bytes(
+        pdf_bytes: bytes, arxiv_id: Optional[str], *, directory: Path | None = None,
+    ) -> Optional[str]:
         if not arxiv_id:
             return None
         try:
             from reportagent.utils.config import PROJECT_ROOT
-            pdf_dir = PROJECT_ROOT / "data" / "pdfs"
+            pdf_dir = directory if directory is not None else PROJECT_ROOT / "data" / "pdfs"
             pdf_dir.mkdir(parents=True, exist_ok=True)
             safe_name = arxiv_id.replace("/", "_").replace("\\", "_")
             pdf_path = pdf_dir / f"{safe_name}.pdf"

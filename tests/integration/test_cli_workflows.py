@@ -15,6 +15,7 @@ from sqlalchemy.orm import sessionmaker
 
 from reportagent.models.database import Base, Report
 from reportagent.models.schemas import SearchResult, SourceType
+from tests.support.collection_scoring import RelevanceModel
 
 
 
@@ -50,8 +51,8 @@ def test_collection_is_callable_without_processes_and_stores_real_rows():
         with patch.object(collection, "init_db"), patch.object(
             collection, "get_session_factory", return_value=factory
         ), patch.object(collection, "build_sources", return_value=[source]), patch.object(
-            collection, "LLMClient", side_effect=RuntimeError("No model in offline test")
-        ):
+            collection, "LLMClient", side_effect=RelevanceModel
+        ), patch.object(collection, "LLMClassifier", return_value=None):
             result = asyncio.run(collection.collect_reports(collection.CollectionOptions(
                 topics="组合优化", sources="arxiv", no_analysis=True)))
         assert result["topics"] == ["组合优化"]

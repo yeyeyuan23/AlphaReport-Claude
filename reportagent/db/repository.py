@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import json
-import hashlib
 import re
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import or_, desc, asc
+from sqlalchemy import or_, desc, asc, func
 from sqlalchemy.orm import Session
 
 from reportagent.models.database import Report, Tag, SearchHistory, UserCriteriaPreset, report_tags
@@ -18,30 +17,42 @@ from reportagent.models.schemas import (
     SourceType,
 )
 from reportagent.utils.hashing import content_hash
+from reportagent.db.report_identity import identities, identity_hash, compatible_match
 
 
 class ReportRepository:
     def __init__(self, session: Session):
         self.session = session
 
-    def upsert_report(self, report: ClassifiedReport) -> tuple[str, int]:
+    def find_report(self, sr):
+        """Resolve strong identifiers first, including rows written by older versions."""
+        keys = identities(sr)
+        filters = [Report.content_hash == identity_hash(sr)]
+        if keys["source_id"]:
+            filters.insert(0, Report.source_item_id == keys["source_id"])
+        if keys["doi"]:
+            # Prefix/case-normalization is checked exactly in Python below.
+            filters.append(func.lower(Report.doi).contains(keys["doi"], autoescape=True))
+        if keys["arxiv"]:
+            filters.append(or_(Report.arxiv_id == keys["arxiv"],
+                               Report.arxiv_id.like(keys["arxiv"] + "v%")))
+        if keys["url"]:
+            filters.append(func.lower(Report.source_url).like(keys["url"].lower().split("#", 1)[0] + "%"))
+        filters.append(Report.content_hash == content_hash(sr.title, sr.authors))
+        candidates = self.session.query(Report).filter(or_(*filters)).order_by(Report.id).all()
+        # Strong identifiers outrank URL matches when legacy duplicates coexist.
+        candidates.sort(key=lambda row: (
+            not bool(keys["doi"] and identities(row)["doi"] == keys["doi"]),
+            not bool(keys["arxiv"] and identities(row)["arxiv"] == keys["arxiv"]),
+            not bool(keys["source_id"] and identities(row)["source_id"] == keys["source_id"])))
+        return next((row for row in candidates if compatible_match(sr, row)), None)
+
+    def upsert_report(self, report: ClassifiedReport, *, commit: bool = True) -> tuple[str, int]:
         sr = report.search_result
         cl = report.classification
 
-        c_hash = content_hash(sr.title, sr.authors)
-        existing = None
-        if sr.arxiv_id:
-            base_id = re.sub(r"v\d+$", "", sr.arxiv_id)
-            existing = self.session.query(Report).filter(
-                Report.source == "arxiv",
-                or_(Report.arxiv_id == base_id, Report.arxiv_id.like(base_id + "v%")),
-            ).first()
-        if existing is None:
-            existing = self.session.query(Report).filter(Report.content_hash == c_hash).first()
-        # Identical titles/authors do not merge distinct known arXiv identities.
-        if existing and sr.arxiv_id and existing.arxiv_id and re.sub(r"v\d+$", "", sr.arxiv_id) != re.sub(r"v\d+$", "", existing.arxiv_id):
-            c_hash = hashlib.sha256(("arxiv:" + re.sub(r"v\d+$", "", sr.arxiv_id)).encode()).hexdigest()
-            existing = self.session.query(Report).filter(Report.content_hash == c_hash).first()
+        c_hash = identity_hash(sr)
+        existing = self.find_report(sr)
 
         markets_str = ",".join(m.value for m in cl.markets)
         asset_classes_str = ",".join(a.value for a in cl.asset_classes)
@@ -57,15 +68,35 @@ class ReportRepository:
             revision_changed = bool(sr.arxiv_id and sr.arxiv_id != existing.arxiv_id)
             checked_local_pdf = sr.source == SourceType.LOCAL_PDF and existing.source == "local_pdf"
             checked_abstract = checked_local_pdf and "abstract_source" in sr.raw_metadata
-            evidence_changed = revision_changed or sr.title != existing.title or bool(sr.full_text and sr.full_text != existing.full_text) or bool(sr.abstract and sr.abstract != existing.abstract) or (checked_abstract and sr.abstract != existing.abstract)
-            if evidence_changed:
+            replace_material = revision_changed or bool(sr.full_text and not sr.abstract_only)
+            material_changed = (replace_material and (
+                any(getattr(existing, key) != getattr(sr, key)
+                    for key in ("full_text", "pdf_path", "tables_json", "equations_json"))
+                or existing.has_full_text != (bool(sr.full_text) and not sr.abstract_only)
+            )) or bool(sr.full_text and not existing.has_full_text and sr.full_text != existing.full_text)
+            screening_changed = (revision_changed or sr.title != existing.title
+                or bool((sr.abstract or checked_abstract) and sr.abstract != existing.abstract))
+            # Relevance is based on title/abstract evidence; obtaining or reparsing
+            # the same revision's PDF only invalidates full-text-derived outputs.
+            if screening_changed or material_changed:
                 existing.analysis_json = existing.evaluation_json = existing.knowledge_card_json = existing.summary = None
+            if screening_changed:
                 existing.selection_provenance_json = existing.selection_direction = existing.selection_relevance = None
                 existing.selection_score = 0.0
                 existing.selection_reason = None
                 existing.is_selected = False
             existing.title = sr.title
             existing.authors = json.dumps(sr.authors, ensure_ascii=False)
+            source_item_id = identities(sr)["source_id"]
+            if source_item_id and (not existing.source_item_id or
+                    source_item_id.split(":", 1)[0] == existing.source_item_id.split(":", 1)[0]):
+                existing.source_item_id = source_item_id
+            if sr.doi:
+                existing.doi = sr.doi
+            if sr.source_url and (replace_material or not existing.source_url):
+                existing.source_url = sr.source_url
+            if sr.arxiv_id:
+                existing.arxiv_id = sr.arxiv_id
             # Publication dates remain stable across reposts and revisions.
             # Re-import only fills a previously unknown date; it never replaces
             # a known date with a later page/revision timestamp or a missing value.
@@ -76,29 +107,22 @@ class ReportRepository:
                 existing.publication_date_info_json = json.dumps(sr.raw_metadata.get("publication_date_info", {}), ensure_ascii=False)
             elif sr.published_date is not None and existing.published_date is None:
                 existing.published_date = sr.published_date
-            if revision_changed:
-                existing.arxiv_id = sr.arxiv_id
-                existing.source_url = sr.source_url
+            if replace_material:
                 existing.full_text = sr.full_text
                 existing.has_full_text = bool(sr.full_text) and not sr.abstract_only
                 existing.pdf_path = sr.pdf_path
                 existing.tables_json = sr.tables_json
                 existing.equations_json = sr.equations_json
-            elif sr.full_text:
+            elif sr.full_text and not existing.has_full_text:
                 existing.full_text = sr.full_text
                 existing.has_full_text = not sr.abstract_only
             if sr.abstract or checked_abstract:
                 existing.abstract = sr.abstract
-            if sr.abstract and not existing.abstract:
-                existing.abstract = sr.abstract
-            if sr.tables_json and not existing.tables_json:
-                existing.tables_json = sr.tables_json
-            if sr.equations_json and not existing.equations_json:
-                existing.equations_json = sr.equations_json
-            if sr.pdf_path and not existing.pdf_path:
-                existing.pdf_path = sr.pdf_path
             self.apply_classification(existing, cl)
-            self.session.commit()
+            if commit:
+                self.session.commit()
+            else:
+                self.session.flush()
             return "updated", existing.id
 
         db_report = Report(
@@ -109,6 +133,7 @@ class ReportRepository:
             has_full_text=bool(sr.full_text) and not sr.abstract_only,
             source=sr.source.value,
             source_url=sr.source_url,
+            source_item_id=identities(sr)["source_id"] or None,
             doi=sr.doi,
             arxiv_id=sr.arxiv_id,
             published_date=sr.published_date,
@@ -127,7 +152,10 @@ class ReportRepository:
         )
         self.session.add(db_report)
         self.apply_classification(db_report, cl)
-        self.session.commit()
+        if commit:
+            self.session.commit()
+        else:
+            self.session.flush()
 
         return "added", db_report.id
 
@@ -260,7 +288,7 @@ class ReportRepository:
         return True
 
     def update_selection(self, report_id: int, score: float, reason: str, is_selected: bool,
-                         *, direction=None, relevance=None, provenance_json=None) -> bool:
+                         *, direction=None, relevance=None, provenance_json=None, commit: bool = True) -> bool:
         """Update LLM selection score and status for a report."""
         report = self.get_report(report_id)
         if not report:
@@ -271,7 +299,8 @@ class ReportRepository:
         report.selection_direction = direction
         report.selection_relevance = relevance
         report.selection_provenance_json = provenance_json
-        self.session.commit()
+        if commit:
+            self.session.commit()
         return True
 
     def get_unjudged_reports(self, since=None, limit: int = 200, published_since=None,

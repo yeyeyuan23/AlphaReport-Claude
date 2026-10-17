@@ -68,6 +68,9 @@ app = create_app()
 
 def serve():
     import uvicorn
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(name)s %(message)s")
+    # Transfer diagnostics carry safe paper identifiers; httpx INFO prints full URLs.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     uvicorn.run("reportagent.main:app", host=os.environ.get("ALPHAREPORT_BIND_HOST", "127.0.0.1"),
                 port=int(os.environ.get("ALPHAREPORT_PORT", "8000")))
 

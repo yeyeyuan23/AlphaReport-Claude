@@ -1,10 +1,9 @@
 import {
-  createContext,
-  useContext,
   useReducer,
   useEffect,
   type ReactNode,
 } from "react";
+import { AuthContext } from "./useAuth";
 
 const GUEST_EMAIL = "guest@alphareport";
 const EMAIL_KEY = "alphareport.email";
@@ -29,13 +28,6 @@ function reducer(state: AuthState, action: AuthAction): AuthState {
   }
 }
 
-interface AuthContextValue {
-  email: string | null;
-  isReady: boolean;
-}
-
-const AuthContext = createContext<AuthContextValue | null>(null);
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, {
     email: null,
@@ -53,12 +45,4 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth(): AuthContextValue {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error("useAuth must be used within AuthProvider");
-  }
-  return ctx;
 }

@@ -16,6 +16,7 @@ from reportagent.sources.arxiv_source import ArxivSource
 from reportagent.sources.bigquant_source import BigQuantSource
 from reportagent.sources.eastmoney_source import EastMoneySource
 from reportagent.sources.local_pdf import LocalPDFSource
+from tests.support.collection_scoring import RelevanceModel
 
 
 @pytest.fixture
@@ -26,10 +27,9 @@ def collect(tmp_path, monkeypatch):
     monkeypatch.setattr(collection, "init_db", lambda: None)
     monkeypatch.setattr(collection, "get_session_factory", lambda: factory)
 
-    def no_model():
-        raise RuntimeError("offline tests never call models")
-
-    monkeypatch.setattr(collection, "LLMClient", no_model)
+    monkeypatch.setattr(collection, "LLMClient", RelevanceModel)
+    # These cases exercise source health with the original rule classification.
+    monkeypatch.setattr(collection, "LLMClassifier", lambda client: None)
 
     def run(sources, **kwargs):
         monkeypatch.setattr(collection, "build_sources", lambda names: sources)
@@ -102,6 +102,8 @@ def test_canonical_id_dedup_preserves_same_titles_with_different_ids(collect):
 
 def test_eastmoney_retains_first_page_when_next_page_fails(collect, monkeypatch):
     def respond(request):
+        if "/report/info/" in request.url.path:
+            return httpx.Response(200, text='<article><p>We estimate portfolio covariance from market returns and compare financial risk budgets.</p></article>')
         if request.url.params["pageNo"] == "1":
             return httpx.Response(200, json={"data": [
                 {"title": "组合优化 portfolio optimization quantitative risk model", "infoCode": "A1"},
@@ -139,10 +141,14 @@ def test_eastmoney_true_empty_and_diagnostics_reset(collect, monkeypatch):
 
 
 def test_eastmoney_bad_item_does_not_discard_siblings(collect, monkeypatch):
-    mock_http(monkeypatch, lambda request: httpx.Response(200, json={"data": [
-        {"title": "组合优化 portfolio optimization quantitative risk model", "infoCode": "A1"},
-        {"title": ""}, "malformed item",
-    ], "TotalPage": 1}))
+    def respond(request):
+        if "/report/info/" in request.url.path:
+            return httpx.Response(200, text='<article><p>We estimate portfolio covariance from market returns and compare financial risk budgets.</p></article>')
+        return httpx.Response(200, json={"data": [
+            {"title": "组合优化 portfolio optimization quantitative risk model", "infoCode": "A1"},
+            {"title": ""}, "malformed item",
+        ], "TotalPage": 1})
+    mock_http(monkeypatch, respond)
     result, rows = collect([EastMoneySource(rate_limit_seconds=0)])
     assert len(rows) == 1
     status = result["source_statuses"][0]

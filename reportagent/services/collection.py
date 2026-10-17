@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from time import monotonic
 
 
@@ -138,6 +139,7 @@ async def collect_reports(options: CollectionOptions) -> dict:
 
     source_statuses = []
     collection_errors = []
+    report_ids = []
     for source in sources:
         started = monotonic()
         source_name = source.source_type.value
@@ -148,6 +150,10 @@ async def collect_reports(options: CollectionOptions) -> dict:
         completed = False
         unavailable = False
         diagnostics = None
+        screening = {"checked": 0, "selected": 0, "rejected": 0, "pending": 0, "failed": 0, "cached_scores": 0, "superseded": 0}
+        online = source.source_type != SourceType.LOCAL_PDF
+        staging = TemporaryDirectory(prefix="alphareport-prefilter-") if online else None
+        classified_results = []
         try:
             if not source.is_available():
                 unavailable = True
@@ -155,25 +161,65 @@ async def collect_reports(options: CollectionOptions) -> dict:
             else:
                 logger.info("Searching %s for: %s%s", source_name, topics,
                             " (BROAD mode)" if options.broad else "")
-                if options.broad and hasattr(source, "search_broad"):
-                    results = await source.search_broad(criteria)
-                else:
-                    results = await source.search(criteria)
+                download_pdfs = getattr(source, "download_pdfs", None)
+                if online and download_pdfs is not None:
+                    source.download_pdfs = False
+                try:
+                    if options.broad and hasattr(source, "search_broad"):
+                        results = await source.search_broad(criteria)
+                    else:
+                        results = await source.search(criteria)
+                finally:
+                    if download_pdfs is not None:
+                        source.download_pdfs = download_pdfs
                 completed = True
                 logger.info("  → %d results from %s", len(results), source_name)
 
                 for sr in deduplicate_results(results):
                     try:
+                        if online and llm_client is not None:
+                            from reportagent.services.collection_screening import supplement_missing_abstract
+                            sr = await supplement_missing_abstract(source, sr, errors, get_session_factory(),
+                                                                   Path(staging.name))
+                        if online:
+                            from reportagent.services.paper_scoring import has_screening_material
+                            if not has_screening_material(sr):
+                                screening["checked"] += 1
+                                screening["pending"] += 1
+                                errors.append("screening material unavailable; not rejected as irrelevant and not stored")
+                                continue
                         classified = await classify_for_storage(sr, classifier, llm_classifier, errors)
                         if classified is None:
+                            screening["checked"] += 1
+                            screening["rejected"] += 1
                             continue
-                        all_results.append(classified)
-                        valid += 1
-                        full_text_count += int(not sr.abstract_only and usable_full_text(sr.full_text))
+                        classified_results.append(classified)
                     except Exception as error:
                         errors.append(safe_source_error(error, "report validation"))
+                from reportagent.services.collection_screening import select_metadata, store_selected, hydrate_selected
+                selected = (await select_metadata(classified_results, llm_client, get_session_factory(), errors, screening)
+                            if online else [(item, None) for item in classified_results])
+                for item, decision in selected:
+                    try:
+                        if online:
+                            action, rid, item = store_selected(item, decision, get_session_factory(), Path(staging.name))
+                            item = await hydrate_selected(source, item, rid, get_session_factory(), errors)
+                        else:
+                            with get_session_factory()() as session:
+                                action, rid = ReportRepository(session).upsert_report(item)
+                        storage_result["added" if action == "added" else "updated"] += 1
+                        report_ids.append(rid)
+                        all_results.append(item)
+                        valid += 1
+                        sr = item.search_result
+                        full_text_count += int(not sr.abstract_only and usable_full_text(sr.full_text))
+                    except Exception as error:
+                        errors.append(safe_source_error(error, "report storage"))
         except Exception as error:
             errors.append(safe_source_error(error))
+        finally:
+            if staging is not None:
+                staging.cleanup()
 
         observed = getattr(source, "last_search", None)
         if isinstance(observed, SearchDiagnostics) and not unavailable:
@@ -192,34 +238,13 @@ async def collect_reports(options: CollectionOptions) -> dict:
             "source": source_name, "status": status,
             "fetched": fetched, "valid": valid, "full_text": full_text_count,
             "elapsed_ms": round((monotonic() - started) * 1000), "errors": errors,
+            "screening": screening,
         })
         for error in errors:
             message = f"Source {source_name}: {error}"
             logger.warning(message)
             collection_errors.append(message)
-    storage_result["errors"] = list(collection_errors)
-
-    # Step 3: Store to DB
-    report_ids = []
-    if all_results:
-        factory = get_session_factory()
-        session = factory()
-        try:
-            repo = ReportRepository(session)
-            result = repo.batch_upsert(all_results)
-            report_ids = result.report_ids
-            storage_result = {
-                "total": result.total_processed,
-                "added": result.newly_added,
-                "updated": result.updated,
-                "skipped": result.duplicate_skipped,
-                "errors": collection_errors + result.errors,
-                "analyzed": 0,
-            }
-            logger.info(f"Storage: {result.newly_added} added, {result.updated} updated, "
-                        f"{result.duplicate_skipped} skipped")
-        finally:
-            session.close()
+    storage_result.update(total=len(all_results), errors=list(collection_errors))
 
     # All entrypoints use the batch service's evidence, completeness and cache
     # gates. A source row being stored is not evidence of successful analysis.

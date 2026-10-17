@@ -76,13 +76,26 @@ def review_fingerprint(paper: dict, model: str, max_chars: int = MAX_REVIEW_CHAR
     payload = {"schema": SCHEMA_VERSION, "model": model, "max_chars": max_chars,
                "endpoint": get_llm_base_url(), "provider": get_llm_provider(),
                "source": paper.get("source"), "revision": paper.get("arxiv_id"),
-               "text": paper.get("full_text", ""), "title": paper.get("title"),
+               "text": paper.get("full_text", ""), "has_full_text": bool(paper.get("has_full_text")),
+               "title": paper.get("title"),
                "abstract": paper.get("abstract"), "relevance": relevance,
                "selection_reason": paper.get("selection_reason"),
                "selection_provenance": paper.get("selection_provenance_json"),
                "current_scoring_rubric": scoring_fingerprint(),
                "prompt": instructions if instructions is not None else skill_resource("analyze-report", "quality-review.md").read_text(encoding="utf-8")}
     return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def cached_review_is_current(paper: dict, review, model: str) -> bool:
+    """One cache gate for report generation and presentation."""
+    text = paper.get("full_text") or ""
+    return bool(isinstance(review, dict) and paper.get("has_full_text")
+                and 1000 <= len(text.strip()) <= MAX_REVIEW_CHARS
+                and review.get("schema_version") == SCHEMA_VERSION
+                and review.get("model") == model and review.get("text_complete")
+                and review.get("status") == "reviewed"
+                and review.get("tier") in {"focus", "browse", "exclude"}
+                and review.get("fingerprint") == review_fingerprint(paper, model))
 
 
 def pending_review(paper: dict, reason: str) -> dict:
@@ -93,6 +106,7 @@ def pending_review(paper: dict, reason: str) -> dict:
             "confidence": "low", "research_question": "", "method": None, "findings": [], "strengths": [],
             "limitations": [reason], "validation_issues": [reason], "critical_concerns": [],
             "reading_advice": "取得并核对原文后再评价研究质量。", "text_complete": False,
+            "model": get_llm_model(), "fingerprint": review_fingerprint(paper, get_llm_model()),
             "reviewed_at": datetime.now(timezone.utc).isoformat()}
 
 
@@ -167,8 +181,9 @@ def select_candidates(papers: list[dict], max_reviews: int = 12, directions: lis
     return selected
 
 
-async def review_report_ids(report_ids: list[int], *, force: bool = False) -> dict[int, dict]:
-    """Read and save each assessment without holding a database transaction over HTTP."""
+async def review_report_ids(report_ids: list[int], *, force: bool = False,
+                            max_reviews: int | None = None, audit: dict | None = None) -> dict[int, dict]:
+    """Walk requested IDs; reporting callers explicitly bound real model reviews."""
     from reportagent.db.engine import get_session_factory
     from reportagent.models.database import Report
     from reportagent.llm.client import LLMClient
@@ -181,9 +196,13 @@ async def review_report_ids(report_ids: list[int], *, force: bool = False) -> di
     def snapshot(row):
         return {key: getattr(row, key) for key in fields}
 
+    if max_reviews is not None and (type(max_reviews) is not int or max_reviews < 1):
+        raise ValueError("max_reviews must be a positive integer")
+    audit = audit if audit is not None else {}
+    audit.update(review_ids=[], cached_ids=[], pending_material_ids=[], deferred_ids=[])
     factory, results, llm = get_session_factory(), {}, None
     try:
-        for rid in report_ids:
+        for rid in dict.fromkeys(report_ids):
             with factory() as session:
                 row = session.get(Report, rid)
                 if row is None:
@@ -199,7 +218,14 @@ async def review_report_ids(report_ids: list[int], *, force: bool = False) -> di
                     cached = None
                 if not isinstance(cached, dict):
                     cached = None
-                if (not paper["has_full_text"] or not paper["full_text"]) and paper["source"] == "arxiv" and paper["arxiv_id"]:
+                if not force and cached_review_is_current(paper, cached, get_llm_model()):
+                    results[rid] = cached
+                    audit["cached_ids"].append(rid)
+                    continue
+                needs_material = not paper["has_full_text"] or len((paper["full_text"] or "").strip()) < 1000
+                budget_available = max_reviews is None or len(audit["review_ids"]) < max_reviews
+                if (needs_material and budget_available
+                        and paper["source"] == "arxiv" and paper["arxiv_id"]):
                     fetched = await collect_paper(paper["arxiv_id"])
                     with factory() as session:
                         row = session.get(Report, rid)
@@ -222,20 +248,26 @@ async def review_report_ids(report_ids: list[int], *, force: bool = False) -> di
                     if screening_changed:
                         paper["requires_screening_update"] = True
                     cached = None
-                fingerprint = review_fingerprint(paper, get_llm_model())
-                if not force and cached and cached.get("fingerprint") == fingerprint and cached.get("status") == "reviewed" and cached.get("tier") != "pending":
-                    results[rid] = cached
-                    continue
                 if not paper["has_full_text"] or len((paper["full_text"] or "").strip()) < 1000:
+                    audit["pending_material_ids"].append(rid)
                     result = pending_review(paper, "未取得可用全文；暂不作研究质量推荐。")
+                elif len(paper["full_text"]) > MAX_REVIEW_CHARS:
+                    result = pending_review(paper, f"全文 {len(paper['full_text'])} 字符超过可用输入上限 {MAX_REVIEW_CHARS}；需提高限额或分批完整阅读。")
+                    audit["pending_material_ids"].append(rid)
+                elif not budget_available:
+                    audit["deferred_ids"].append(rid)
+                    continue
                 else:
                     if llm is None:
                         llm = LLMClient(thinking="disabled")
+                    audit["review_ids"].append(rid)
                     result = await asyncio.wait_for(evaluate_paper(paper, llm), timeout=240)
             except Exception as exc:
                 refresh_failed = True
                 logger.warning("Report %s review failed: %s", rid, type(exc).__name__)
                 result = pending_review(paper, f"全文评估未完成（{type(exc).__name__}），可重试。")
+                if not paper["has_full_text"] or len((paper["full_text"] or "").strip()) < 1000:
+                    audit["pending_material_ids"].append(rid)
             with factory() as session:
                 row = session.get(Report, rid)
                 if row is None:

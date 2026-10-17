@@ -11,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from reportagent.models.database import Base, Report
 from reportagent.services import weekly_report as weekly
 from reportagent.services.paper_scoring import scoring_fingerprint, evidence_fingerprint
-from reportagent.services.report_quality import review_fingerprint
+from reportagent.services.report_quality import review_fingerprint, SCHEMA_VERSION
 from reportagent.utils.config import get_llm_model
 from tests.support.report_fixtures import TEXT, response
 
@@ -35,6 +35,7 @@ def assessed(p, **changes):
     e={**response(),'method':evidence,'findings':[evidence],'strengths':[evidence],
        'status':'reviewed','tier':'focus','label':'重点阅读','validation_issues':[],
        'text_complete':True,'quality':'strong','confidence':'high','relevance':8,
+       'schema_version':SCHEMA_VERSION,'model':get_llm_model(),
        'fingerprint':review_fingerprint(p,get_llm_model()),**changes}
     p['evaluation']=e
     p['evaluation_json']=json.dumps(e,ensure_ascii=False)
@@ -147,4 +148,4 @@ def test_weekly_review_budget_advances_past_current_cached_papers(library, monke
     papers=weekly.get_weekly_papers(datetime(2026,10,5),datetime(2026,10,12))
     result=asyncio.run(weekly.prepare_weekly_evidence(papers,max_reviews=12))
     assert result['review_ids']==[13]
-    review.assert_awaited_once_with([13],force=False)
+    review.assert_awaited_once_with([13],force=False,max_reviews=12,audit={})

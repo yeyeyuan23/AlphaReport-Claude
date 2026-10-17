@@ -14,6 +14,7 @@ from reportagent.sources.eastmoney_source import EastMoneySource
 from tests.integration.test_source_health import (
     collect, fake, paper, mock_http, atom_entry, atom_feed,
 )
+from tests.support.collection_scoring import RelevanceModel
 
 
 def test_collection_end_date_covers_last_day_in_utc(collect):
@@ -78,7 +79,7 @@ def test_bigquant_date_window_applies_before_limit_and_unknown_is_excluded(monke
 def test_failed_llm_classification_retains_report_but_marks_source_partial(collect, monkeypatch):
     from reportagent.services import collection
     from unittest.mock import AsyncMock
-    monkeypatch.setattr(collection, "LLMClient", lambda: object())
+    monkeypatch.setattr(collection, "LLMClient", RelevanceModel)
     monkeypatch.setattr(collection, "LLMClassifier", lambda _: type("Classifier", (), {
         "classify": AsyncMock(side_effect=RuntimeError("Authorization: Bearer should-not-leak"))})())
     result, rows = collect([fake(SourceType.ARXIV, [paper()])])
@@ -246,7 +247,7 @@ def test_eastmoney_fetches_actual_article_or_public_pdf(monkeypatch, tmp_path, a
 def test_download_size_limit_preserves_valid_siblings(monkeypatch, tmp_path):
     from reportagent.sources import content_fetch
     monkeypatch.setattr(content_fetch, "PDF_DIRECTORY", tmp_path)
-    monkeypatch.setattr(content_fetch, "MAX_PDF_BYTES", 100)
+    monkeypatch.setattr(content_fetch, "get_config", lambda *args, **kwargs: {"max_size_mb": 100 / 1024 / 1024})
     html = '<article><h1>Portfolio risk</h1><p>\\</p><a href="/paper.pdf">PDF</a></article>'
     row, diagnostics = fetch_bigquant(html, b'%PDF-' + b'x' * 101)
     assert row.full_text is None and row.abstract is None
@@ -294,17 +295,17 @@ def test_bigquant_bad_pdf_does_not_remove_valid_sibling(collect, monkeypatch, tm
         return httpx.Response(200, text=f'<article><h1>Portfolio optimization quantitative risk model {key}</h1><p>\\...</p><a href="/{key}.pdf">PDF</a></article>')
     mock_http(monkeypatch, respond)
     result, rows = collect([BigQuantSource(rate_limit_seconds=0, max_listing_pages=1)])
-    assert len(rows) == 2
+    assert len(rows) == 1
     good = next(row for row in rows if row.title.endswith('good'))
     assert good.full_text and good.pdf_path
-    bad = next(row for row in rows if row.title.endswith('bad'))
-    assert bad.abstract is None and bad.full_text is None
+    assert all(not row.title.endswith('bad') for row in rows)
+    assert result['source_statuses'][0]['screening']['pending'] == 1
     assert result['status'] == 'partial' and result['source_statuses'][0]['full_text'] == 1
 
 
 def test_arxiv_pdf_stream_size_is_bounded_and_abstract_survives(collect, monkeypatch):
-    from reportagent.sources import arxiv_source
-    monkeypatch.setattr(arxiv_source, 'MAX_PDF_BYTES', 100, raising=False)
+    from reportagent.sources import content_fetch
+    monkeypatch.setattr(content_fetch, 'get_config', lambda *args, **kwargs: {"max_size_mb": 100 / 1024 / 1024})
     source = ArxivSource(rate_limit_seconds=0)
     monkeypatch.setattr(source, '_execute_search', lambda *args, **kwargs: [paper(
         arxiv_id='2610.00001v1', raw_metadata={'pdf_url':'https://example.org/paper.pdf'})])

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
-import { getReport } from "@/services/api";
+import { getReport, RequestError } from "@/services/api";
 import type { ReportDetail } from "@/types";
 import {
   ResizablePanelGroup,
@@ -16,28 +16,37 @@ import ReproductionCard from "@/components/ReproductionCard";
 
 export default function ReportDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [report, setReport] = useState<ReportDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [isMobile, setIsMobile] = useState(false);
+  return <ReportDetailContent key={id} id={id} />;
+}
+
+function ReportDetailContent({ id }: { id?: string }) {
+  const [result, setResult] = useState<{ report: ReportDetail | null; error?: string } | null>(null);
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia("(max-width: 768px)").matches);
+  const validId = Boolean(id && /^\d+$/.test(id) && Number(id) > 0);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 768px)");
-    setIsMobile(mq.matches);
     const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, []);
 
   useEffect(() => {
-    if (!id) return;
-    setLoading(true);
+    if (!validId) return;
+    let active = true;
     getReport(Number(id)).then((res) => {
-      if (res.success && res.data) setReport(res.data);
-      setLoading(false);
+      if (active) setResult({ report: res.success && res.data ? res.data : null });
+    }).catch((error: unknown) => {
+      if (active) setResult({
+        report: null,
+        error: error instanceof RequestError && error.status === 404 ? undefined : "研报加载失败，请稍后重试",
+      });
     });
-  }, [id]);
+    return () => { active = false; };
+  }, [id, validId]);
 
-  if (loading) {
+  const report = result?.report;
+  if (validId && !result) {
     return (
       <div className="flex items-center justify-center h-64 text-muted-foreground text-sm">
         加载中...
@@ -48,7 +57,9 @@ export default function ReportDetailPage() {
   if (!report) {
     return (
       <div className="text-center py-12">
-        <p className="text-muted-foreground">研报不存在</p>
+        {result?.error ? (
+          <p role="alert" className="text-muted-foreground">{result.error}</p>
+        ) : <p className="text-muted-foreground">研报不存在</p>}
         <Link to="/library" className="text-primary text-sm mt-2 inline-block">
           返回研报库
         </Link>

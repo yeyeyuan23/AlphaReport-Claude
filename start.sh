@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 PROJECT="$(pwd)"
-PYTHON="$PROJECT/.venv/bin/python"
+PYTHON="${ALPHAREPORT_PYTHON:-$PROJECT/.venv/bin/python}"
 PORT="${ALPHAREPORT_PORT:-8000}"
 BIND_HOST="${ALPHAREPORT_BIND_HOST:-127.0.0.1}"
 SERVER_PID=""
@@ -21,19 +21,29 @@ if [[ "${1:-}" == "--check" ]]; then
     echo "Local server and bot dependencies are available."
     exit 0
 fi
-if [[ ! -f .env ]]; then
+if [[ ! -f .env && ( -z "${FEISHU_APP_ID:-}" || -z "${FEISHU_APP_SECRET:-}" ) ]]; then
     echo "Missing .env. Copy .env.example and configure your credentials and allowed sender IDs." >&2
     exit 1
+fi
+if [[ "${ALPHAREPORT_DEPLOYMENT:-false}" == "true" ]]; then
+    "$PYTHON" -m reportagent.cli.check_deployment
 fi
 if lsof -tiTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
     echo "Port $PORT is occupied. Stop its owner or select ALPHAREPORT_PORT; no process was stopped." >&2
     exit 1
 fi
-if [[ ! -d frontend/node_modules ]]; then
-    echo "Install frontend dependencies first: cd frontend && npm ci" >&2
-    exit 1
+if [[ "${ALPHAREPORT_FRONTEND_PREBUILT:-false}" == "true" ]]; then
+    if [[ ! -f frontend/dist/index.html ]]; then
+        echo "Missing prebuilt frontend/dist/index.html; rebuild the deployment image." >&2
+        exit 1
+    fi
+else
+    if [[ ! -d frontend/node_modules ]]; then
+        echo "Install frontend dependencies first: cd frontend && npm ci" >&2
+        exit 1
+    fi
+    (cd frontend && npm run build)
 fi
-(cd frontend && npm run build)
 mkdir -p data
 cleanup() {
     trap - EXIT INT TERM

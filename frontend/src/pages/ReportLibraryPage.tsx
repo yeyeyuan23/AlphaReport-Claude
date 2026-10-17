@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { getReports, getReportStats } from "../services/api";
 import { EvaluationBadge, RelevanceLabel } from "../components/ResearchEvaluation";
@@ -20,42 +20,39 @@ const FILTERS = [
 
 
 export default function ReportLibraryPage() {
-  const [reports, setReports] = useState<ReportSummary[]>([]);
-  const [total, setTotal] = useState(0);
+  const [result, setResult] = useState<{
+    queryKey: string; reports: ReportSummary[]; total: number; error?: string;
+  } | null>(null);
   const [stats, setStats] = useState<ReportStats | null>(null);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [offset, setOffset] = useState(0);
   const limit = 20;
 
-  const fetchReports = useCallback(async () => {
-    setLoading(true);
-    const res = await getReports({
-      search: search || undefined,
-      ...filters,
-      limit,
-      offset,
+  const queryKey = JSON.stringify([search, filters, offset]);
+  const loading = result?.queryKey !== queryKey;
+  const reports = loading ? [] : result.reports;
+  const total = loading ? 0 : result.total;
+
+  useEffect(() => {
+    let active = true;
+    getReports({ search: search || undefined, ...filters, limit, offset }).then((res) => {
+      if (!active) return;
+      if (!res.success || !res.data) throw new Error("Reports unavailable");
+      setResult({ queryKey, reports: res.data.reports, total: res.data.total });
+    }).catch(() => {
+      if (active) setResult({ queryKey, reports: [], total: 0, error: "研报加载失败，请稍后重试" });
     });
-    if (res.success && res.data) {
-      setReports(res.data.reports);
-      setTotal(res.data.total);
-    }
-    setLoading(false);
-  }, [search, filters, offset]);
+    return () => { active = false; };
+  }, [search, filters, offset, queryKey]);
 
-  const fetchStats = useCallback(async () => {
-    const res = await getReportStats();
-    if (res.success && res.data) setStats(res.data as ReportStats);
+  useEffect(() => {
+    let active = true;
+    getReportStats().then((res) => {
+      if (active && res.success && res.data) setStats(res.data);
+    }).catch(() => { /* The report list remains usable without optional statistics. */ });
+    return () => { active = false; };
   }, []);
-
-  useEffect(() => {
-    fetchReports();
-  }, [fetchReports]);
-
-  useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
 
   const setFilter = (key: string, val: string) => {
     setOffset(0);
@@ -122,7 +119,7 @@ export default function ReportLibraryPage() {
           />
           {Object.keys(filters).length > 0 && (
             <button
-              onClick={() => setFilters({})}
+              onClick={() => { setOffset(0); setFilters({}); }}
               className="text-xs text-gray-500 hover:text-gray-700"
             >
               清除筛选
@@ -153,6 +150,8 @@ export default function ReportLibraryPage() {
 
         {loading ? (
           <div className="text-center py-12 text-gray-400">加载中...</div>
+        ) : result?.error ? (
+          <div role="alert" className="text-center py-12 text-gray-500">{result.error}</div>
         ) : reports.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-gray-400">暂无研报</p>
