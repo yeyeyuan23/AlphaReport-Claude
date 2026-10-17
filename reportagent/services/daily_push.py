@@ -36,7 +36,10 @@ from reportagent.services.paper_scoring import (
     load_enabled_directions,
     screening_is_current,
 )
-from reportagent.services.scheduled_collection import read_latest_collection
+from reportagent.services.scheduled_collection import (
+    read_latest_collection,
+    collection_notice,
+)
 from reportagent.services.report_periods import get_daily_range
 
 load_dotenv()
@@ -579,10 +582,9 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
         "reason": "report_reads_library_only",
     }
     run["collection_run"] = collection
-    if collection and collection["status"] in {"failed", "partial", "cancelled"}:
-        run["warnings"].append(
-            "最近一次定时采集未完整成功；本次仅使用库中已有资料，最新资料覆盖可能不完整。"
-        )
+    notice = collection_notice(collection)
+    if notice:
+        run["warnings"].append(notice)
     ids = [int(s.strip()) for s in options.report_ids.split(",") if s.strip()]
     run["stages"]["relevance"] = {"status": "skipped", "reason": "explicit_report_ids"}
     if not ids:

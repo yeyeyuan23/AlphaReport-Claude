@@ -25,6 +25,8 @@ def card_markdown(text: str, *, omit_leading_title: bool = False) -> str:
             seen_content = True
             output.append(line)
             continue
+        # Cards do not render blockquote markers; keep their readable content.
+        line = re.sub(r"^ {0,3}(?:>[ \t]+)+", "", line)
         heading = re.match(r"^ {0,3}(#{1,6})[ \t]+(.+?)[ \t]*$", line)
         if heading:
             if omit_leading_title and not seen_content and len(heading[1]) == 1:

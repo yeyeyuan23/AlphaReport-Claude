@@ -326,6 +326,46 @@ def test_failed_scheduled_collection_is_disclosed_without_blocking_library_repor
     assert_final_artifact(result)
 
 
+def test_pdf_partial_collection_notice_is_specific_in_the_delivered_card(
+    offline_daily, monkeypatch
+):
+    from reportagent.services.feishu_markdown import card_sections
+
+    factory, root = offline_daily
+    insert_paper(factory)
+    directory = root / "data/collections"
+    directory.mkdir(parents=True)
+    (directory / "latest.json").write_text(
+        json.dumps(
+            {
+                "status": "partial",
+                "completed_at": "2026-10-17T00:06:23+00:00",
+                "storage": {"added": 15, "updated": 0},
+                "source_statuses": [
+                    {
+                        "source": "arxiv",
+                        "status": "partial",
+                        "valid": 15,
+                        "full_text": 13,
+                        "errors": ["PDF download/parse: TimeoutError"],
+                    }
+                ],
+            }
+        )
+    )
+    sent = []
+    monkeypatch.setattr(
+        daily,
+        "send_feishu_card",
+        lambda recipient, brief, *args: sent.append(card_sections(brief)) or True,
+    )
+    result = daily.run_daily_push(daily.DailyPushOptions(receive_ids="A"))
+    content = "\n".join(e.get("content", "") for e in sent[0])
+    assert "新增 15 篇" in content and "2 条未取得全文" in content
+    assert "> ⚠" not in content
+    assert "最新资料覆盖可能不完整" not in result["warnings"][0]
+
+
 def test_render_refreshes_candidate_metadata_without_refiltering_explicit_ids(
     offline_daily, monkeypatch
 ):

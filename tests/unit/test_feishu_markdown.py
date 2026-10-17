@@ -1,6 +1,14 @@
 from reportagent.services.feishu_markdown import card_markdown, card_sections
 
 
+def test_blockquotes_are_readable_without_exposing_quote_markers_in_cards():
+    text = "> ⚠ 采集时有两篇 PDF 未取得全文\n\n> ## 说明\n> 保留原文\n```text\n> literal quote marker\n```\na > b"
+    assert (
+        card_markdown(text)
+        == "⚠ 采集时有两篇 PDF 未取得全文\n\n**说明**\n保留原文\n```text\n> literal quote marker\n```\na > b"
+    )
+
+
 def test_all_heading_levels_use_card_supported_bold_labels():
     source = "\n".join("#" * n + " 小节" + str(n) for n in range(1, 7))
     assert card_markdown(source) == "\n".join(
