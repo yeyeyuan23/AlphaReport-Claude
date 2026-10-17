@@ -29,9 +29,9 @@ or `daily_feishu_push --force-review` for an explicit refresh; existing delivery
 
 Web and batch knowledge cards use `reportagent.services.knowledge_cards` and
 [knowledge-card.md](knowledge-card.md). They render the same saved current reading assessment,
-without another model call or quality score. Old, invalid or incomplete assessments
-shows a pending card; prompt/model/content changes invalidate the presentation cache.
-`narrative-system.md` and `narrative-user.md` document the retired generation path.
+without another model call or quality score. Missing, stale or incomplete assessments
+show a pending card; prompt/model/content changes invalidate the presentation cache.
+The `narrative_brief` CLI prepares these same deterministic knowledge cards.
 For source facts, open questions and a proposed minimal verification, use the
 `prepare-reproduction` skill. A preparation card does not execute a reproduction.
 

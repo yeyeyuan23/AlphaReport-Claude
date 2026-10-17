@@ -10,7 +10,7 @@ metadata:
 ```bash
 .venv/bin/python -m reportagent.cli.reproduction --report-id 1
 ```
-`--dry-run` 不写数据库，但可能调用模型；`--force` 忽略旧准备卡重新提取。
+`--dry-run` 不写数据库，但可能调用模型；`--force` 忽略已有准备卡重新提取。
 
 卡片包括研究/预测目标、推断时可用信息、训练目标、数据与样本、训练验证测试划分、基准、评价指标、适用假设。
 原文事实必须附可定位的连续引文；材料不足写待核查，不猜测作者的设置。

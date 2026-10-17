@@ -16,20 +16,21 @@
 
 ## 功能与入口
 
-| 用户功能 | 从哪里使用 | 用途与当前范围 |
+| 用户功能 | 从哪里使用 | 用途 |
 |---|---|---|
 | 连续聊天、研报问答、按指令操作项目 | 飞书普通文本 | 连续讨论研报、提出问题，并按允许的范围操作项目文件 |
 | 一篇 arXiv 论文的全文分析与推送 | 飞书 `/report`、`cli.report` | 获取研究问题、方法、发现、局限及原文依据；机器人命令仅限私聊 |
 | 研报库查询 | 飞书快捷命令、阅读网页、`cli.db_query` | 查询已保存的研报、最近入库内容和数量，支持命令行导出 |
 | 搜索与导入研报 | 本地 PDF 随服务启动自动导入；`cli.collect` | 搜索 arXiv、东方财富、BigQuant 或导入本地 PDF |
-| 整理标签与批量重分析 | `cli.classify`、`cli.analyze` | 手动调整库中研报的分类，或重新分析一篇、多篇已有研报 |
+| 整理标签与批量重分析 | `cli.classify`、`cli.analyze` | 重新分类库中研报，或重新分析一篇、多篇已有研报 |
 | 按研究方向筛选论文 | `cli.llm_filter`、`cli.llm_direction_filter`（同一评分服务的明细视图） | 找出摘要与关注方向匹配的论文；相关性初筛不代表研究质量结论 |
 | 阅读原文、简报与知识卡片 | 网页、`cli.narrative_brief` | 对照 PDF 阅读研究解读，查看方法、发现、原文引证和局限 |
+| 准备论文复现核对卡 | 网页“复现准备”、`cli.reproduction` | 从全文提取目标、数据、训练设置、基准与待确认项，并列出建议验证方案 |
 | 飞书日报 | 私聊 `/daily`、`cli.daily_feishu_push` | 收到有主次的新文章集合，最多重点推荐 5 篇，另列其他材料和待核验项 |
 | 飞书周报 | 私聊 `/weekly`、`cli.weekly_report`；自动运行用外部调度 | 汇总上一个完整周发表的论文并发送 |
 | 按意思查找论文（语义检索） | Python 查询 | 按研究问题寻找相近论文与正文片段；需先准备索引，网页搜索框仍只支持关键词 |
 | 围绕主题寻找研究思路 | `cli.ideation`、Python 调用 | 结合相关文献生成研究机会和方法建议，引用与新颖性需人工核对 |
-| 保存可复用的聊天任务要求（自定义技能） | `cli.skills`、Python 调用 | 将常用任务指令保存下来供聊天复用；不会自动改写单篇或日报的固定分析规则 |
+| 保存可复用的聊天任务要求（自定义技能） | Python 保存、`cli.skills` 查看 | 将常用任务指令保存下来供聊天复用；不会自动改写单篇或日报的固定分析规则 |
 
 下文的 `cli.*` 均表示 `python -m reportagent.cli.*`。**内置调度默认开启：Web 持续运行时，每天北京时间 08:00 自动采集、筛选和入库，09:00 从库中生成日报并推送，周末也执行；单独启动机器人不启动调度器。**
 
@@ -39,14 +40,14 @@
 
 ### 1. 安装本机依赖
 
-- Python 3.12+。
-- 构建网页需要 Node.js 和 npm。当前锁文件的 Vite 要求 Node 20.19+ 或 22.12+；若也运行 lint，Node 22 应至少为 22.13。
+- Python 3.12（CI 验证版本）。
+- 构建和检查网页需要 Node.js 22.13+ 与 npm；CI 使用 Node 22。
 - 普通飞书聊天需要在同一个运行账户的 `PATH` 中找到 `claude`。安装方式见 [Claude Code 官方文档](https://code.claude.com/docs/en/setup)。
 
 在仓库根目录执行：
 
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements/runtime.txt
 cp .env.example .env                # 首次配置时执行；已有 .env 不要覆盖
 (cd frontend && npm ci)
@@ -89,7 +90,7 @@ CLAUDE_BOT_MODEL=deepseek-v4-pro
 | 日报排版 | 从保存的评估结果填充 `skills/daily-report/briefing.md`，此步不调用模型 |
 | 周报的简报生成 | Python 模型 API 刷新过期相关性和全文评估，再从保存的证据填充 `skills/weekly-report/briefing.md` |
 
-普通聊天需要可非交互运行的 Claude Code；单篇、批量分析以及日/周报的相关性筛选和全文评估使用配置的 Python 模型 API。周报复用全文评估，不再单独调用 Claude 改写研究结论。
+普通聊天需要可非交互运行的 Claude Code；单篇、批量分析以及日/周报的相关性筛选和全文评估使用配置的 Python 模型 API。周报根据保存的全文评估确定性排版。
 
 ### 3. 启动
 
@@ -153,9 +154,9 @@ bash scripts/ops/run_bot.sh           # 只启动飞书机器人
 | BigQuant | 指定 Wiki 合集与文章 | 提取文章正文或公开 PDF 附件；提取明确的原报告或文章发表日期，仅有更新时间时保留未知 |
 | 本地 PDF | 启动服务时在后台递归扫描 `sources.local_pdf.library_path`，默认 `data/pdf_library/` | 只导入新增或内容变化的 PDF；提取全文、识别原文摘要并分类入库 |
 
-本地 PDF 无需在飞书里手动导入：将文件放入配置目录（支持子目录和 `.pdf` / `.PDF`），启动服务后自动扫描，目录缺失时自动创建。启动导入只提取材料并分类，不做深度分析或推送；不会阻塞机器人连接。已成功导入且内容未变的文件通过 SHA-256 指纹跳过，不重复解析或调用模型；文件解析或分类失败时记录日志，下次启动重试。SQLite 的 `local_pdf_imports` 表记录文件指纹及对应研报，不因删除文件而自动删除库中记录。部署者可设置 `sources.local_pdf.import_on_startup: false` 关闭启动导入。运行中新增文件会在下一次启动时处理，也可主动补导。
+本地 PDF 无需在飞书里手动导入：将文件放入配置目录（支持子目录和 `.pdf` / `.PDF`），启动服务后自动扫描，目录缺失时自动创建。启动导入只提取材料并分类，不做深度分析或推送；不会阻塞机器人连接。已成功导入且内容未变的文件通过 SHA-256 指纹跳过，不重复解析或调用模型；文件解析或分类失败时记录日志，下次启动重试。SQLite 的 `local_pdf_imports` 表记录文件指纹及对应研报，不因删除文件而自动删除库中记录。部署者可设置 `sources.local_pdf.import_on_startup: false` 关闭启动导入。运行中新增文件会在下一次启动时处理。`collect --sources local_pdf` 可按指定条件手动采集，但受日期、关键词和每源数量限制；启动扫描覆盖整个配置目录，不受这些采集条件限制。
 
-本地论文优先提取完整 `Abstract / 摘要` 章节；缺少摘要时，只将 `Introduction / 引言` 用于分类，并注明材料来源，不把引言或正文开头伪装成论文摘要。日期识别是统一的自动流程：先读取明确的发表日期标签或出版元数据，再识别会议版本/版权页上的年份；按日、月、年保存真实精度，同时保存来源与原文证据。只有明确到日的发表日期进入 `published_date`，年份/月度信息以及会议举办时间、arXiv 版本日期保存在 `publication_date_info`，不补造月日，不用 PDF 文件创建时间。可通过 `cli.db_query --get ID` 查看日期证据。旧本地记录重新导入时同步修正摘要和日期。
+本地论文优先提取完整 `Abstract / 摘要` 章节；缺少摘要时，只将 `Introduction / 引言` 用于分类，并注明材料来源，不把引言或正文开头伪装成论文摘要。日期识别是统一的自动流程：先读取明确的发表日期标签或出版元数据，再识别会议版本/版权页上的年份；按日、月、年保存真实精度，同时保存来源与原文证据。只有明确到日的发表日期进入 `published_date`，年份/月度信息以及会议举办时间、arXiv 版本日期保存在 `publication_date_info`，不补造月日，不用 PDF 文件创建时间。可通过 `cli.db_query --get ID` 查看日期证据。重新导入时同步更新摘要和日期。
 
 ```bash
 .venv/bin/python -m reportagent.cli.collect --topics '因子模型,高频交易' --sources arxiv,eastmoney,bigquant --days 7 --max 15 --no-analysis
@@ -173,7 +174,7 @@ bash scripts/ops/run_bot.sh           # 只启动飞书机器人
 
 ### 分类、评分、知识卡片与数据库工具
 
-模型分类共用 `skills/daily-quant-scan/classification.md` 的提示词与 `configs/classification_taxonomy.yaml` 的类别定义。只根据本次标题、摘要（缺失时为注明来源的引言）分类；未说明的市场、频率留空，不要求每篇达到某个标签数量。每个标签须附原文引文与理由，程序核对引文来源后保存到 `classification_provenance`（`cli.db_query --get ID` 可查看）。引文匹配并不保证语义判断一定正确，仍需抽样核查。`--hybrid` 以模型证据判断为准，不再把规则猜测直接并入结果；重分类会同时替换分类字段和标签关联，移除不再成立的旧标签。
+模型分类共用 `skills/daily-quant-scan/classification.md` 的提示词与 `configs/classification_taxonomy.yaml` 的类别定义。只根据本次标题、摘要（缺失时为注明来源的引言）分类；未说明的市场、频率留空，不要求每篇达到某个标签数量。每个标签须附原文引文与理由，程序核对引文来源后保存到 `classification_provenance`（`cli.db_query --get ID` 可查看）。引文匹配并不保证语义判断一定正确，仍需抽样核查。`--hybrid` 以模型证据判断为准；重分类会同时替换分类字段和标签关联。
 
 部分引文无法定位时，最多让模型修正一次；仍不匹配的标签丢弃。模型结果全部缺少可核验依据时，不把规则猜测补回去；在线论文仍须通过相关性筛选才入库，分类标记 `unverified`。启动导入留待下次重试。批量重分类失败则保留原记录并报告失败。模型服务不可用时的规则分类仍单独标记 `rule`，不冒充模型分类。
 
@@ -188,9 +189,9 @@ bash scripts/ops/run_bot.sh           # 只启动飞书机器人
 .venv/bin/python -m reportagent.cli.analyze --topic factor_model --depth standard
 # 相关性初筛：最近四天发表、尚未评分或评分指纹已过期的论文
 .venv/bin/python -m reportagent.cli.llm_filter --published-days 4 --threshold 6 --batch-size 10 --dry-run
-# 另一种评分：按研究方向逐项打分
+# 同一评分服务的方向明细视图
 .venv/bin/python -m reportagent.cli.llm_direction_filter --report-ids 12,18 --dry-run --json
-# 从已有分析生成叙事型知识卡片
+# 从已保存且有效的全文评估生成知识卡片；不调用模型
 .venv/bin/python -m reportagent.cli.narrative_brief --report-id 12 --dry-run
 # 数据查询和导出
 .venv/bin/python -m reportagent.cli.db_query --stats
@@ -200,7 +201,7 @@ bash scripts/ops/run_bot.sh           # 只启动飞书机器人
 
 分析深度包括 `quick`、`standard`、`deep`；`--force` 可重新分析或生成卡片。`db_query` 还支持读取全文、手动更新分析/摘要/知识卡片。本地 PDF 默认在服务启动时导入，`collect --sources local_pdf` 用于运行中主动补导，无需单独运行解析命令。
 
-网页提供关键词搜索、市场/资产/频率/主题筛选、统计、分页、PDF、研究简报和知识卡片。网页关键词搜索不是语义检索。知识卡片优先使用缓存或分析映射；叙事卡片重新生成用上面的 CLI。当前网页没有聊天、任务监控或删除入口。
+网页提供关键词搜索、市场/资产/频率/主题筛选、统计、分页、PDF、研究简报、知识卡片和复现准备卡。关键词搜索不使用语义索引。研究简报展示已有分析，知识卡片展示当前有效的全文评估；无有效评估时只显示摘要和待核验状态。`cli.narrative_brief` 准备同一份知识卡片，不重做论文分析或质量评估。
 
 ## 飞书日报与周报
 
@@ -222,11 +223,11 @@ ALPHAREPORT_BASE_URL=https://your-report-site.example
 
 ### 日报
 
-流程：读取论文库最近四个 UTC 日期的资料 → 按当前启用方向刷新摘要相关性初筛 → 从评分指纹有效的论文中轮流选取各方向候选 → 最多 12 篇全文质量评估 → 最多 5 篇重点阅读推荐 → 模板排版与按目标投递。`/daily`、日报 CLI 和 09:00 自动日报都不触发采集。
+流程：读取论文库最近四个 UTC 日期的资料 → 按当前启用方向刷新摘要相关性初筛 → 从评分指纹有效的论文中轮流选取各方向候选 → 复用有效评估，最多新发起 12 篇全文质量评估 → 最多 5 篇重点阅读推荐 → 模板排版与按目标投递。`/daily`、日报 CLI 和 09:00 自动日报都不触发采集。
 
-“重点推荐”表示值得优先阅读：当前方向相关性至少 6 分，研究质量为“基本扎实”或“较强”、评估把握为“中”或“高”，且没有明确影响核心结论的关键疑虑，即可进入候选。不再要求最高档质量和置信度，也不要求单独列出优势。普通局限与推荐一同展示；学术论文、券商研报和社区研究均可入选，并明确标注材料类型。材料不足、质量未知或评估把握低的内容保留在其他栏目，不靠放宽规则凑满 5 篇。
+“重点推荐”表示值得优先阅读：当前方向相关性至少 6 分，研究质量为“基本扎实”或“较强”、评估把握为“中”或“高”，且没有明确影响核心结论的关键疑虑，即可进入候选。普通局限与推荐一同展示；学术论文、券商研报和社区研究均可入选，并明确标注材料类型。材料不足、质量未知或评估把握低的内容保留在其他栏目，不靠放宽规则凑满 5 篇。
 
-券商研报、社区材料、其他论文和待核验内容分栏展示。缺少全文、文本截断或阅读评估未完成的论文不能进入重点推荐；原文引证供查阅，逐字匹配不作为筛查、推荐或展示条件。报告展示最近定时采集的完成时间和来源状态；采集失败不阻止使用库中已有资料，但会提示覆盖可能不完整，不将历史状态说成本次在线检查。飞书日报和网页展示同一份保存的 `evaluation`，不再由另一个模型重写结论。
+券商研报、社区材料、其他论文和待核验内容分栏展示。缺少全文、文本截断或阅读评估未完成的论文不能进入重点推荐；原文引证供查阅，逐字匹配不作为筛查、推荐或展示条件。报告展示最近定时采集的完成时间和来源状态；采集失败不阻止使用库中已有资料，但会提示覆盖可能不完整，不将历史状态说成本次在线检查。飞书日报和网页展示同一份保存的 `evaluation`。
 
 日报分别展示最近定时采集的有效资料条数和从研报库选入的候选篇数。候选可包含此前已收录、符合本期日期范围的论文，发送历史不参与筛选。推荐理由保留方向匹配与全文阅读判断，不展示内部方向编号或摘要初筛阶段的过期评估状态。
 
@@ -235,21 +236,19 @@ ALPHAREPORT_BASE_URL=https://your-report-site.example
 ```bash
 # 使用库中论文预览；仍会刷新过期相关性评分和全文评估，可能调用模型
 .venv/bin/python -m reportagent.cli.daily_feishu_push --dry-run --output data/daily-preview.md
-# 更新评分和全文评估后预览；始终只使用库中论文
-.venv/bin/python -m reportagent.cli.daily_feishu_push --dry-run
-# 检查指定论文并强制刷新全文评估；跳过自动采集与摘要初筛
+# 检查指定论文并强制刷新全文评估；跳过日期和摘要相关性初筛
 .venv/bin/python -m reportagent.cli.daily_feishu_push --report-ids 12,18 --force-review --dry-run
 # 确认配置与目标后实际发送
 .venv/bin/python -m reportagent.cli.daily_feishu_push --receive-ids oc_your_chat_id --receive-type chat_id
 ```
 
-`--max-reviews` 控制本期评估数量，默认读取 `push_settings.max_reviews`（当前 12），允许 1–12；`--force-review` 刷新全文评估缓存。`--dry-run` 不投递，但会保存评分、评估和运行记录；产物保存在 `data/daily_reports/`，JSON 包含最终状态、阶段错误和逐收件人发送结果。进程锁阻止同时运行两个日报；顺序重跑会重新发送，不做跨运行去重。旧 `--no-collect` 参数仍可接受，但已无需指定。
+`--max-reviews` 控制本期新发起全文评估的上限，默认读取 `push_settings.max_reviews`（12），允许 1–12；有效缓存不占预算，缺全文项不会堵住后续有全文候选。库中 arXiv 资料缺少全文时可尝试补取 PDF，这不等于搜索和采集新条目。`--force-review` 刷新全文评估缓存。`--dry-run` 不投递，但会保存评分、评估和运行记录；产物保存在 `data/daily_reports/`，JSON 包含最终状态、阶段错误和逐收件人发送结果。进程锁阻止同时运行两个日报；顺序重跑会重新发送，不做跨运行去重。
 
-研究方向读取 `configs/push_directions.yaml` 中启用的定义；修改方向、筛选提示词或阈值后，旧相关性评分须重新计算。`llm_filter_threshold` 控制初筛门槛，`llm_batch_size` 控制评分批量；日报窗口仍为最近四个 UTC 日期。采集回溯配置属于 `configs/app.yaml` 的 `daily_collection.lookback_days`，与日报命令分离。部分历史展示参数尚未接通，评估数量使用上述 CLI 参数。
+研究方向读取 `configs/push_directions.yaml` 中启用的定义；修改方向、筛选提示词或阈值后，失效的相关性评分须重新计算。`llm_filter_threshold` 控制初筛门槛，`llm_batch_size` 控制评分批量；日报窗口为最近四个 UTC 日期。采集回溯配置属于 `configs/app.yaml` 的 `daily_collection.lookback_days`，与日报命令分离。`max_featured` 控制日报重点推荐数量，上限为 5；周报最多推荐 5 篇，评估预算由周报自己的 `--max-reviews` 控制。
 
 ### 周报
 
-按发表日期查询上一个完整 **UTC 周一至周日**的全部库中论文，不自动重复采集，也不限于精选。默认通过配置的模型 API 更新过期相关性与最多 12 篇全文评估，复用保存的阅读评估分层排版；只凭摘要相关性不能进入重点推荐。缺正文、材料不足或评估未完成的条目单独列出。`--max-reviews` 可设 1–12，`--force-review` 刷新评估，`--no-llm` 仅读取缓存，过期或缺失的评估保留待核验。
+按发表日期查询上一个完整 **UTC 周一至周日**的全部库中论文，不采集新条目，也不限于精选。默认通过配置的模型 API 更新过期相关性与最多 12 篇新全文评估，复用保存的阅读评估分层排版；只凭摘要相关性不能进入重点推荐。已有有效评估不占本期预算；库中 arXiv 条目缺正文时可尝试补取 PDF。缺正文、材料不足或评估未完成的条目单独列出。`--max-reviews` 可设 1–12，`--force-review` 刷新评估，`--no-llm` 仅读取缓存，过期或缺失的评估保留待核验。
 
 在机器人私聊发送 `/weekly` 即可生成并发送到当前会话，无需配置推送目标；空周会明确告知暂无资料。与 `/daily`、`/report` 共用任务锁，同一时间处理一个任务。命令在后台运行，不占用普通聊天的 300 秒调用窗口。此命令不安装周报定时任务。
 
@@ -285,9 +284,9 @@ bash scripts/ops/keepalive.sh    # 检查整套服务的 PID；需要时后台�
 | 飞书周报 | 私聊 `/weekly` 或调用 `cli.weekly_report` | 手动按需运行；自动运行需外部调度 |
 | 服务进程守护 | 调用 `scripts/ops/keepalive.sh` | 需自己配置外部调度 |
 
-`configs/app.yaml` 的 `daily_collection` 和 `daily_report` 是两项独立任务，默认都开启，时区都是 `Asia/Shanghai`，周末也执行。每天 08:00 从 arXiv、东方财富、BigQuant 采集、分类入库；09:00 从库中生成并发送日报。`schedule_cron` 填写 `HH:MM`。原来的 Feishu/独立 arXiv 模式分叉已经移除。自动日报需配置推送目标，并只保留一个承载调度的 Web 进程；修改配置后需重启 Web。
+`configs/app.yaml` 的 `daily_collection` 和 `daily_report` 是两项独立任务，默认都开启，时区都是 `Asia/Shanghai`，周末也执行。每天 08:00 从 arXiv、东方财富、BigQuant 采集、分类入库；09:00 从库中生成并发送日报。`schedule_cron` 填写 `HH:MM`。自动日报需配置推送目标，并只保留一个承载调度的 Web 进程；修改配置后需重启 Web。
 
-两项任务可分别设置 `enabled: false`：关闭日报不会停止采集，关闭采集也不阻止报告读取已有论文。手动 `/daily`、`/weekly` 不依赖定时开关。采集结果和来源诊断保存到 `data/collections/`，`latest.json` 是最近一次完成的采集记录。`cli.collect` 仍用于手动指定来源、时间范围等；内置定时采集直接调用与它相同的共享 `collect_reports` 服务，不再由日报启动采集子进程。`cli.scheduled_collect` 可按当前配置手动补跑同一采集任务。
+两项任务可分别设置 `enabled: false`：关闭日报不会停止采集，关闭采集也不阻止报告读取已有论文。手动 `/daily`、`/weekly` 不依赖定时开关。采集结果和来源诊断保存到 `data/collections/`，`latest.json` 是最近一次完成的采集记录。`cli.collect` 用于手动指定来源、时间范围等；内置定时采集调用与它相同的共享 `collect_reports` 服务。`cli.scheduled_collect` 可按当前配置手动补跑同一采集任务。
 
 ### 外部 cron 示例
 
@@ -301,11 +300,11 @@ PATH=/home/your-user/.local/bin:/usr/local/bin:/usr/bin:/bin
 30 9 * * 1 cd /absolute/path/to/AlphaReport-Claude && .venv/bin/python -m reportagent.cli.weekly_report >> data/cron-weekly.log 2>&1
 ```
 
-安装前先手工生成预览并确认收件人。用外部 cron 替代哪项任务，就关闭对应的 `daily_collection.enabled` 或 `daily_report.enabled` 并重启 Web，避免重复执行；只安装周报任务不要求关闭内置任务。机器上已有旧路径 `scripts/daily_feishu_push.py`、`scripts/weekly_report.py` 或 `scripts/bot_keepalive.sh` 的任务，需要按上例迁移；旧兼容入口已移除。本次调整没有修改本机系统调度。
+安装前先手工生成预览并确认收件人。用外部 cron 替代哪项任务，就关闭对应的 `daily_collection.enabled` 或 `daily_report.enabled` 并重启 Web，避免重复执行；只安装周报任务不要求关闭内置任务。
 
 ### 监听地址、隧道与 Docker
 
-默认网页仅监听 `127.0.0.1:8000`。启动参数由 shell 读取，需要导出或在命令前赋值，单写 `.env` 不生效：
+本机 Web 默认仅监听 `127.0.0.1:8000`。启动参数由 shell 读取，需要导出或在命令前赋值，单写 `.env` 不生效：
 
 ```bash
 ALPHAREPORT_BIND_HOST=127.0.0.1 ALPHAREPORT_PORT=8001 bash start.sh
@@ -329,23 +328,24 @@ ALPHAREPORT_BASE_URL=https://your-report-site.example
 
 `DATA_DIR`、`MODEL_CACHE`、`CONFIG_DIR`、`BOT_STATE_DIR`、`ENV_FILE` 和 `PORT` 都可在执行命令时覆盖。默认依次为 `/data1/alphareport/data`、`/data1/alphareport/model_cache`、`/data1/alphareport/configs`、`/data1/alphareport/bot_state`、`/data1/alphareport/.env` 和 `80`。部署使用执行者的 UID/GID，可用 `APP_UID`、`APP_GID` 显式指定；挂载目录需允许该身份写入。
 
-新配置从当前 `configs/app.yaml` 复制，已有配置不会覆盖；旧服务器还在使用 `OPENAI_API_KEY` 配置时，需要同时核对 `llm.api_key_env` 与环境文件。数据库、PDF 和机器人会话保存在宿主机挂载目录中。更新配置后重新执行 `deploy.sh`，脚本会重新创建容器以加载新的环境变量，并移除旧的独立前端容器。已有飞书消息中的链接不会自动改变。
+首次部署复制仓库的 `configs/app.yaml`；已有配置不会覆盖。模型凭据的环境变量名由 `llm.api_key_env` 和 `llm.base_url_env` 指定，须与环境文件一致。数据库、PDF 和机器人会话保存在宿主机挂载目录中。更新配置后重新执行 `deploy.sh`，脚本会重新创建容器以加载新的环境变量。已有飞书消息中的链接不会自动改变。
 
 网页和机器人使用同一数据库；内置日报由网页进程调度，周报可通过飞书 `/weekly` 触发。健康检查确认网页接口与机器人进程存在，不等于模型和飞书连接已通过真实调用验证。`docker compose -f deploy/docker-compose.yml logs -f` 可查看运行日志；自行执行 Compose 命令时，应导出与部署时一致的路径和端口变量。
 
 ## 扩展功能与可用范围
 
-以下功能保留，但需要额外准备；默认网页没有完整操作入口。它们不影响普通聊天、单篇分析和飞书日/周报的使用。
+语义检索和研究创意需要先准备向量索引；复现准备需要可用全文；自定义技能通过 Python 保存。这些功能可按研究需要使用。
 
 | 功能 | 解决什么问题 | 何时值得使用 |
 |---|---|---|
 | 语义检索 | 用一句研究问题寻找意思相近的论文与原文片段，例如“有哪些方法预测尾部风险” | 论文库变大，关键词搜索不够用时 |
 | 研究创意 | 围绕一个主题整理已有研究，并提出可进一步验证的研究思路 | 阅读文献后需要讨论下一步研究时；不等于已证明有新颖性 |
+| 复现准备 | 整理原文设置、缺失信息与建议验证步骤 | 计划复现一篇已有全文的论文时 |
 | 自定义技能 | 保存经常重复的聊天任务要求，例如固定的文献比较格式 | 同一种任务反复使用时；它是任务指令，不会新增代码功能 |
 
-### 按意思查找论文
+### 按意思查找论文（语义检索）
 
-输入研究问题，返回相关论文及匹配的正文片段。当前可通过 Python 查询使用；网页搜索框仍是关键词搜索。
+输入研究问题，返回相关论文及匹配的正文片段。可通过 Python 查询使用；网页搜索框仍是关键词搜索。
 
 使用前需按[索引维护说明](docs/architecture.md#向量索引准备与重建)准备研报索引。普通采集和单篇分析不会自动建立该索引。准备完成后可查询：
 
@@ -357,16 +357,9 @@ for match in get_vector_store().search("波动率预测", limit=5):
 PY
 ```
 
-### 机器人与后台工具
-
-飞书机器人是交互主入口，普通聊天调用 Claude Code，采集、分类、分析及推送通过共享 CLI/服务执行。
-论文详情和 PDF 由 `reportagent.main:app` 提供，供飞书消息中的链接使用；阅读网页可选。
-旧网页聊天、采集任务 API、独立 LangGraph 编排及 `legacy_app` 已下线，不再提供第二套业务入口。
-研究创意、自定义技能和语义检索仍分别通过下述 CLI 或 Python 接口提供。
-
 ### 围绕主题寻找研究思路
 
-输入研究主题和角度，程序检索最多 8 篇相关库内文献，保留完整摘要；有当前有效的全文评估时加入原文方法、发现与局限。
+先按[索引维护说明](docs/architecture.md#向量索引准备与重建)准备语义索引。输入研究主题和角度，程序检索最多 8 篇相关库内文献，保留完整摘要；有当前有效的全文评估时加入原文方法、发现与局限。
 输出候选假设、最接近的已有工作、候选差异、数据需求、最小验证与否定条件。检索失败会明确提示；未命中不代表领域内无人研究。
 
 ```bash
@@ -393,11 +386,11 @@ PY
 ```
 
 前提是已有可用的提取全文，不要求先完成论文质量评估；单篇 arXiv 可用 `cli.report` 准备。
-成功准备卡按原文、模型与提示词缓存；`--force` 可重新提取，失败不会覆盖旧成功结果。
+成功准备卡按原文、模型与提示词缓存；`--force` 可重新提取，失败不会覆盖已有成功结果。
 
 ### 保存可复用的聊天任务要求
 
-例如每次比较论文都要求按“研究问题、数据、方法、证据、局限”组织，可以保存成自己的任务模板，后续聊天复用。当前可通过 `cli.skills` 管理，或在本机保存：
+例如每次比较论文都要求按“研究问题、数据、方法、证据、局限”组织，可以保存成自己的任务模板，后续聊天复用。通过 Python 保存；`cli.skills list` 和 `cli.skills show <名称>` 用于查看：
 
 ```bash
 .venv/bin/python - <<'PY'
@@ -417,9 +410,9 @@ PY
 | 位置 | 职责 |
 |---|---|
 | `configs/app.yaml` | 模型、数据源、数据库、调度器、技能目录等运行设置 |
-| `configs/push_directions.yaml` | 研究方向与推送参数；部分字段尚未接通 |
+| `configs/push_directions.yaml` | 研究方向、相关性阈值和日报评估/推荐参数 |
 | `configs/classification_taxonomy.yaml` | 市场、资产、频率、主题分类 |
-| `skills/` | 分析、扫描、评分、日/周报、研究创意六类任务的说明、提示词和输出模板 |
+| `skills/` | 分析、采集扫描、评分、日报、周报、复现准备、研究创意七类任务的说明和资源 |
 | `reportagent/skills/` | 唯一共享技能加载器；用户技能在 `data/user_skills/` |
 | `reportagent/services/` | 业务实现；`bot/`、`api/`、`cli/` 适配各入口 |
 | `frontend/` | React 网页；构建结果在 `frontend/dist/` |
@@ -432,11 +425,11 @@ PY
 .venv/bin/python -m reportagent.cli.skills show analyze-report
 ```
 
-内置任务只有 `skills/` 一份来源，飞书 Claude Code 与后台 CLI/服务共享读取。分析共用 `analyze-report/grounding.md` 的证据规则；`analyze-report/quality-review.md` 定义全文评估，`paper-selection/` 定义摘要相关性初筛。评分同时产生全方向明细与最佳方向，明细保存在 `selection_provenance.direction_scores`，CLI 不再另写一套 `analysis_json` 评分。摘要汇总的提示词和各深度长度预算位于 `analyze-report/summary.yaml`。`daily-report/briefing.md`、`weekly-report/briefing.md` 和 `analyze-report/single-brief.md` 是确定性排版模板，不是模型提示词。修改研究判断应修改对应评估资源；修改排版不应改动已保存的证据。
+内置任务只有 `skills/` 一份来源，飞书 Claude Code 与后台 CLI/服务共享读取。分析共用 `analyze-report/grounding.md` 的证据规则；`analyze-report/quality-review.md` 定义全文评估，`paper-selection/` 定义摘要相关性初筛。评分同时产生全方向明细与最佳方向，明细保存在 `selection_provenance.direction_scores`。摘要汇总的提示词和各深度长度预算位于 `analyze-report/summary.yaml`。`daily-report/briefing.md`、`weekly-report/briefing.md` 和 `analyze-report/single-brief.md` 是确定性排版模板，不是模型提示词。修改研究判断应修改对应评估资源；修改排版不应改动已保存的证据。
 
-分析与质量评估默认覆盖完整提取文本（最多 240,000 字符），以带偏移的文本段组织；超过上限会明确停止或待核验，不截前半篇冒充全文。分析中的章节、表号和评估中的可选原文引证供用户回看依据，不再以引文逐字匹配决定筛查、推荐或卡片展示；模型阅读评估不代表结论已被独立验证。旧版评估在下次正常评估时按新规则更新，不需强制刷新。复现准备卡中的引证定位仍用于核对具体资料，不参与论文推荐筛查。材料不足独立于不相关，补全文/摘要后重新评估。模型、任务资源、分析深度或来源内容变化会令缓存失效；失败刷新保留原成功结果。
+分析与质量评估默认覆盖完整提取文本（最多 240,000 字符），以带偏移的文本段组织；超过上限会明确停止或待核验，不截前半篇冒充全文。分析中的章节、表号和评估中的可选原文引证供用户回看依据；引文逐字匹配不参与推荐或卡片展示；模型阅读评估不代表结论已被独立验证。复现准备卡中的引证定位仍用于核对具体资料，不参与论文推荐筛查。材料不足独立于不相关，补全文/摘要后重新评估。模型、任务资源、分析深度或来源内容变化会令缓存失效；失败刷新保留原成功结果。
 
-`CLAUDE.md` 是编程 Agent 的项目指南；技能说明不能替代代码中的权限、完整性校验和回执。配置归属见 [configs/README.md](configs/README.md)，脚本用途与旧命令迁移见 [scripts/README.md](scripts/README.md)。
+`CLAUDE.md` 是编程 Agent 的项目指南；技能说明不能替代代码中的权限、完整性校验和回执。配置归属见 [configs/README.md](configs/README.md)，脚本用途见 [scripts/README.md](scripts/README.md)。
 
 ## 维护与排查
 
@@ -477,7 +470,7 @@ bash -n start.sh scripts/ops/run_bot.sh scripts/ops/keepalive.sh scripts/ops/syn
 
 ## 自动检查（CI）
 
-每次推送、提交 PR 或在 GitHub Actions 手动运行时，`CI` 工作流执行：Python 格式与 lint、Python 3.12 离线测试、前端格式与 ESLint、前端组件测试和 TypeScript/生产构建。检查完整源码；首次接入已统一现有文件格式。GitHub 检查只读代码，不发布网站，也不需要模型或飞书密钥。
+每次推送、提交 PR 或在 GitHub Actions 手动运行时，`CI` 工作流执行：Python 格式与 lint、Python 3.12 离线测试、前端格式与 ESLint、前端组件测试和 TypeScript/生产构建。检查完整源码。GitHub 检查只读代码，不发布网站，也不需要模型或飞书密钥。
 
 本地运行同一套检查：
 

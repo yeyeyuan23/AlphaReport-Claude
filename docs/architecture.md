@@ -1,168 +1,143 @@
 # 架构与开发约定
 
-AlphaReport 在本机运行 Python 服务和 Claude Code 子进程，通过模型 API 完成分析。
-飞书负责交互与推送，网页负责检索和阅读研报，CLI 支持人工操作与外部调度。
-安装、使用、部署和排查统一见 [项目首页](../README.md)。本文只维护开发架构与边界。
+飞书负责交互与推送，Web 提供研报检索和阅读，CLI 支持手工操作与外部调度。
+Python 服务和 Claude Code 子进程在部署主机运行，模型推理通过 API 完成。
+安装、使用、部署和排查见 [项目首页](../README.md)。
 
 ## 入口与调用关系
 
 | 入口 | 实现 | 职责 |
 |---|---|---|
 | 飞书机器人 | `reportagent.bot.feishu` | 接收消息、校验发送者、处理快捷命令和会话 |
-| 默认 Web | `reportagent.main:app` | 提供研报阅读 API 与前端静态文件 |
+| Web | `reportagent.main:app` | 阅读 API、前端静态文件、启动导入与定时任务 |
 | 命令行 | `reportagent.cli.*` | 解析参数、调用共享服务 |
 
 ```text
-飞书普通聊天 → Claude Code 子进程 → 共享技能说明与工具
-飞书 /report、/daily → 对应 CLI ─┐
-人工操作 / 外部调度 → CLI ──┼→ 共享服务 → 数据源、模型 API、数据库、飞书
-网页 → Web API ─────────────┘
+飞书普通聊天 → Claude Code → 技能说明、文件/Shell 工具 → 共享 CLI
+飞书 /report、/daily、/weekly → 对应 CLI ─┐
+人工操作 / 外部调度 → CLI ─────────────┼→ 共享服务 → 数据源、模型 API、SQLite、飞书
+网页 → Web API ──────────────────────┘
+Web 启动 → 本地 PDF 增量导入；独立调度 → 08:00 采集、09:00 日报
 ```
 
-默认网页保留研报库、PDF、简报和知识卡片阅读功能。
-旧网页聊天、任务监控、Ask AI、独立 Graph 业务节点和历史启动入口已删除。
-本地启动与 Docker 默认均使用 `reportagent.main:app`。
+本机和 Docker 共用 `start.sh`，Web 入口为 `reportagent.main:app`。
+WebSocket 和 HTTP inbox 只提取消息字段，交给 `handle_incoming_message` 处理
+鉴权、会话快照、命令和回复。`/report`、`/daily`、`/weekly` 仅支持私聊，并共用任务锁。
 
 ## 配置、技能与实现的边界
 
 | 位置 | 管理的内容 |
 |---|---|
-| `configs/` | 模型、数据库、数据源、分类、研究方向、定时设置与通用聊天提示词 |
-| `skills/<任务>/` | 内置任务说明、专属提示词和输出模板 |
+| `configs/` | 模型、数据库、数据源、分类、研究方向与定时设置 |
+| `skills/<任务>/` | 任务说明、专属提示词和输出模板 |
 | `reportagent/skills/registry.py` | 技能发现、别名解析和资源定位 |
-| `reportagent/services/` | 采集、分析、持久化、筛选、推送和数据转换 |
+| `reportagent/services/` | 采集、分析、持久化、评分、投递和数据转换 |
 | `reportagent/bot/`、`api/`、`cli/` | 各入口的输入输出适配 |
 | `reportagent/db/`、`llm/`、`sources/` | 数据访问、模型调用和数据源实现 |
-| `scripts/ops/`、`scripts/dev/` | 运维启动器与本地手工调试工具 |
+| `scripts/ops/` | 运维启动与维护工具 |
 
-任务资源按用途归档：分析用的 YAML 跟随分析技能，端口和模型地址放运行配置。
-详细配置归属见 [configs/README.md](../configs/README.md)。
+任务定义跟随技能管理，运行设置归入 `configs/`，详见 [配置说明](../configs/README.md)。
+普通聊天的通用系统提示位于 `bot/claude.py`，并附加 registry 读取的技能说明。
+CLI 和 `/api/v1/skills` 使用同一 registry；用户技能默认保存在 `data/user_skills/`。
+`cli.skills` 提供列表和详情，保存、更新与删除使用 registry 的 Python 接口。
+资源解析须限制在技能目录内，用户提供的名称不能直接成为文件路径。
 
-内置技能只有根目录 `skills/` 一份来源。飞书 Claude Code 通过 registry 加载完整技能说明；CLI 和 `/api/v1/skills` 使用同一目录。
-用户自定义 YAML 位于 `data/user_skills/`，原中文技能名称保留为别名。
-资源解析必须限制在对应技能目录内，用户提供的名称不能直接成为文件路径。
-
-技能说明指导模型工作；权限校验、分析完整性检查和发送结果记录由 Python 代码执行。
-网页可以直接读取已有结果，无需让每个 HTTP 请求经过模型。
+技能指导模型工作；权限、输入与响应校验、缓存和发送回执由代码执行。
+读取已有结果不需要调用模型。
 
 ## 主要业务流程
 
-- **来源采集**：适配器记录实际请求与解析结果，采集服务返回整体 `status` 和逐源
-  `source_statuses`，保留部分结果、错误及原有入库统计。空结果与失败分开处理。
-- **摘要初筛**：`paper_scoring` 读取 YAML 中启用的方向，保存相关性、最佳方向和
-  评分来源指纹。方向、提示词或阈值变化后重新评分；相关性不充当质量结论。
-- **飞书日报**：检查来源 → 查询最近四个 UTC 日期中评分指纹有效的候选 →
-  按方向轮流选取最多 12 篇 → 全文证据评估 → 最多 5 篇学术重点及其他分栏 →
-  模板渲染 → 按收件人发送并记录本次结果。生成报告不采集新论文、不记录逐篇已推送标记。
-  最近一次独立采集失败时可使用库中已有资料，明确展示采集时间和覆盖限制。
-  私聊 `/daily`、CLI 与启用后的 Feishu 调度复用
-  [daily_push.py](../reportagent/services/daily_push.py)，进程锁阻止重叠运行，运行结果写入数据库。
-- **共享全文评估**：[report_quality.py](../reportagent/services/report_quality.py)
-  校验研究问题、方法、发现、优势和局限；原文引文与文本块编号可选，供用户回看。
-  内容、模型、提示词和相关性共同决定缓存指纹，结果存为 `evaluation_json`。
-  缺少全文或输入超限时保留待核验状态；可选引文缺失或无法逐字定位不会阻止评估、
-  推荐或卡片展示。文本块编号不是 PDF 页码，模型阅读也不代表结论已独立验证或实验已复现。
-- **单篇研报**：固定 arXiv 版本 → PDF 全文 → 分阶段分析与同一套全文评估 →
-  保存产物及研报库 → 按授权目标投递。用户指定阅读未完成方向初筛时不显示相关性分数。
-  [one_report.py](../reportagent/services/one_report.py) 按 PDF、模型和技能资源指纹复用缓存，
-  强制刷新不清除已有回执。待核验评估可重试，并复用仍有效的阶段分析。
-- **网页与排版**：日报通过 [report_briefing.py](../reportagent/services/report_briefing.py)
-  将保存的评估填入 `skills/daily-report/briefing.md`；网页读取同一份评估，显示引文和局限。
-  排版不再调用模型改写研究结论。`--dry-run` 可更新评估和运行记录，但不采集新论文、不投递。
-- **飞书周报**：仍使用独立的 [weekly_report.py](../reportagent/services/weekly_report.py)，
-  查询上一个完整 UTC 周的全部库中资料，以配置的 Python API 刷新过期相关性和最多
-  12 篇尚未核验的全文评估；已有有效评估不消耗这次预算。再复用同一评估和
-  `skills/weekly-report/briefing.md` 模板分层排版，不调用 Claude 重写结论。
-  缺失/失效材料单列，相关性不能充当质量。日/周报均不按发送历史筛选，重复执行会再次发送。
+- **采集与导入**：`collection.collect_reports` 负责手动和定时采集。在线来源先取得标题、摘要、
+  日期和身份，分类并按方向筛选；达标才入库并获取全文。摘要不足时可先暂存补取材料，
+  筛选未通过则清理暂存内容。返回整体 `status`、逐源 `source_statuses` 和入库统计，
+  区分空结果、失败和部分成功。`local_pdf_import` 在启动时增量导入整个配置目录，
+  共用分类与 repository，使用文件指纹和进程锁避免重复导入。
+- **相关性评分**：`paper_scoring` 读取启用方向与完整摘要，同时生成各方向分数和最佳方向；
+  `DirectionFilter` 是明细视图。统一保存 `selection_relevance`、`selection_direction`
+  与 `selection_provenance_json`，后者包含方向明细、材料及规则指纹。
+  缺材料与不相关分开处理；失败不覆盖已有成功结果，过期评分不进入候选。
+- **分阶段分析**：`batch_analysis` 与 `one_report` 使用 `AnalysisAgent`，分别读取
+  `analysis.yaml`、`one-report.yaml`；摘要汇总共用 `summary.yaml` 和 `services.summary`。
+  批量缓存区分 quick/standard/deep、材料、模型与资源；完整性与并发检查通过后才保存。
+  单篇阅读固定 arXiv 版本、提取 PDF 全文，保存产物和研报库，再按授权会话投递。
+- **全文阅读评估**：`report_quality` 使用 `quality-review.md` 和 `grounding.md`，
+  将研究问题、方法、发现、优势、局限与评估把握存入 `evaluation_json`。
+  材料、模型、提示词和相关性决定缓存是否有效。默认完整输入上限为 240,000 字符；
+  缺全文或超限保持待核验。引文供查阅，逐字匹配不参与推荐或展示判断；
+  文本块编号是提取偏移，不是 PDF 页码。模型评估不代表复现实验。
+- **日报**：`daily_push` 读取最近四个 UTC 日期的库中资料，刷新失效相关性，按方向轮流处理候选；
+  复用有效评估，最多新发起配置预算内的全文评估（缺省 12，范围 1–12），
+  缺全文项不占预算。随后按 `daily-report/briefing.md` 渲染，最多重点推荐 5 篇。
+  来源覆盖读取最近定时采集记录，不能说成本次在线检查；过程锁和 `ReportRun` 记录本次运行。
+- **周报**：`weekly_report` 查询上一完整 UTC 周发表的全部库中资料，刷新相关性和最多
+  `--max-reviews` 篇新全文评估，使用 `weekly-report/briefing.md` 分层排版。
+  有效缓存不占预算，未完成评估的条目保留待核验；`--no-llm` 只读取缓存。
+- **报告投递**：日/周报不采集新条目；已在库中的 arXiv 资料缺全文时可补取 PDF。
+  日/周报每次执行都按本期资料生成内容，重复执行会再次发送。
+  单篇阅读按产物和目标会话保存发送回执，用于避免重复投递。
+  普通回复、单篇、日报、周报共用 `feishu_transport` 的客户端、请求和消息 ID 校验；
+  卡片失败时回退完整文本，任一分片失败不能视为完整投递成功。
+- **阅读展示**：`report_reads` 组合 repository 查询、有效分析和知识卡片。
+  网页简报映射已有分析，阅读评估展示保存的 `evaluation_json`。
+  知识卡片由 `knowledge_cards` 根据有效评估确定性生成，规则见 `knowledge-card.md`；
+  `cli.narrative_brief` 使用同一服务，不额外调用模型，无有效评估时只显示摘要和待核验状态。
+  `POST /api/v1/reports/{report_id}/research-briefing?force=true` 可调用模型生成叙事文本，
+  提示词位于 `analyze-report/briefing.md`；返回文本不写入质量评估或改变推荐。
+- **复现准备与研究创意**：`reproduction` 从可用全文提取设置，原文事实须附可定位引文；
+  建议方案单独标注，成功卡片保存到 `analysis_json.reproduction_preparation`。
+  `research_ideation` 使用语义索引检索文献，再让模型提出有范围声明的候选假设，
+  外部查新可按需使用 Tavily；检索失败与未命中分开处理。
 
-分析技能中的 `grounding.md` 约束原文证据与推断，`quality-review.md` 定义质量评估；
-`daily-report/briefing.md` 和 `weekly-report/briefing.md` 是格式模板。
-通用批量分析与单篇分析仍使用各自的阶段配置，摘要汇总共用 `summary.yaml`。
-完整提取文本最多 240,000 字符，以带偏移文本块组织；超过限额明确待核验，不静默截断。
-PDF连字、安全英文断行和空白规范化保留原始字符位置，不放宽为删句或数学符号模糊匹配。
-修改这些资源后按相应指纹刷新缓存；模型阅读不等于复现论文实验。
-
-知识卡片由 `services/knowledge_cards.py` 从当前有效的 `evaluation_json` 确定性生成，
-网页和批量 CLI 共用同一服务；无当前证据时只展示摘要和待核验状态。
-复现准备使用 `services/reproduction.py` 与 `skills/prepare-reproduction/`，
-原文事实仍必须逐项附可定位的连续引文；定位失败先尝试一次纠正，仍失败时不生成成功卡片。
-建议方案独立标注，成功卡片存入 `analysis_json.reproduction_preparation`。
-模型调用前后核对源资料，失败或过期结果不覆盖成功缓存。
-研究创意使用 `services/research_ideation.py`；检索由程序执行，模型仅生成有范围声明的候选假设，
-不再声称具备生成阶段未接入的工具能力。
-
-Web 中的两项调度独立开启，时区均为 `Asia/Shanghai`，每天含周末执行：
-08:00 的 `daily_collection` 经 `scheduled_collection` 调用共享 `collection.collect_reports`，
-只做多来源采集、分类和入库，来源诊断保存到 `data/collections/`；
-09:00 的 `daily_report` 调用与手动 `/daily` 相同的报告服务，仅读库、评估和发送。
-`cli.collect` 是手动指定条件采集的入口；`cli.scheduled_collect` 可按调度配置补跑采集。
-原来的 Feishu/独立 arXiv 模式分叉已移除。手动 `/daily`、`/weekly` 不依赖调度开关。
+Web 中两项定时任务独立配置，每天含周末执行：`daily_collection` 默认北京时间 08:00
+调用 `scheduled_collection`，通过共享采集服务入库；`daily_report` 默认 09:00
+调用与手动 `/daily` 相同的报告服务。`cli.scheduled_collect` 可按配置补跑采集。
+手动 `/daily`、`/weekly` 不依赖定时开关，周报自动运行使用外部调度。
 
 ## 内部处理与维护工具
 
-用户功能、使用入口和部署步骤统一在 [README](../README.md#功能与入口)。下载、PDF 解析、
-正文清洗、公式/表格提取、去重、缓存和索引维护是这些功能的内部步骤，不单独列为用户功能。
-手工 CLI 用于开发检查或排查已有资料；正常阅读和导入不要求用户先运行它们。
+下载、解析、正文清洗、公式/表格提取、去重、缓存和索引维护是业务内部步骤。
+正常阅读和启动导入不要求先运行维护命令。用户功能及部署入口见 [README](../README.md#功能与入口)。
 
 ### PDF、公式与表格解析
 
-相关实现位于 `sources/arxiv_source.py`、`sources/local_pdf.py`、
-`services/pdf_extraction.py` 和 `processors/`。各入口使用的解析路径应分别核对：
-arXiv 下载流程使用 PyMuPDF 提取全文，`cli.parse_pdf` 调用 MinerU 提取服务并在不可用时
-回退；本地 PDF 采集可尝试 MinerU、Docling，再回退 PyMuPDF。
-可选解析器的存在不代表每条采集路径都已经接入。
-
-从项目根目录手动检查解析结果：
+`services.pdf_extraction` 统一字节与路径提取。arXiv 和通用附件下载使用 PyMuPDF；
+本地 PDF 先读取原生元数据，再尝试 MinerU，并按可用情况合并 Docling 结果。
+`cli.parse_pdf` 尝试本地 MinerU，不可用或没有有效内容时回退 PyMuPDF。
+可选解析器需另行安装，基础解析不保证公式与表格结构完整。
 
 ```bash
 .venv/bin/python -m reportagent.cli.parse_pdf --pdf /path/to/paper.pdf --output data/pdf-preview.json
+.venv/bin/python -m reportagent.cli.parse_pdf --report-id 12 --save
 ```
 
-输出包含文本预览和公式、表格数量。回退解析不保证公式和表格结构；PDF 页眉、页脚和
-公式编号可能混入正文，需要与引文定位一并处理。`parse_pdf --report-id ID --save` 复用受限下载和原子缓存，
-保存前核对原始材料，完整替换正文/表格/公式并失效旧分析；失败或并发修改不覆盖原结果。
-`--pdf` 只预览，不接受 `--save`；用户导入本地论文使用启动扫描或 `collect --sources local_pdf`。
+`--pdf` 用于预览，不接受 `--save`。`--report-id --save` 通过 `pdf_material`、`report_pdf`
+复用下载限额和原子缓存，核对数据库与文件是否仍匹配，完整替换正文、表格、公式，
+并使派生分析与展示失效；失败或并发更新不能覆盖原结果。
+
+研报默认保存在 `data/report_library.db`，下载的 PDF 在 `data/pdfs/`。
+本地导入的 PDF 留在配置目录，数据库记录其原路径；部署时应持久化整个资料目录。
+单篇产物在 `data/one_reports/`，采集记录在 `data/collections/`，日报产物在 `data/daily_reports/`。
 
 ### 向量索引准备与重建
 
-语义检索的用户用途和查询入口见 [README](../README.md#按意思查找论文)。
-`reportagent/vector_store/` 使用 Chroma 与 embedding 模型建立论文片段索引，
-该索引独立于 SQLite。普通采集和 `/report` 只写研报库，不自动填充向量库。
+语义检索与研究创意使用 `vector_store` 的 Chroma 索引，它独立于 SQLite，
+普通采集和 `/report` 不自动填充索引。用途和查询示例见 [README](../README.md#按意思查找论文语义检索)。
 
 ```bash
 .venv/bin/python -m reportagent.vector_store.populate --source arxiv --limit 100
 .venv/bin/python -m reportagent.vector_store.populate --report-id 12
 ```
 
-索引构建会运行 embedding，可能下载本地模型或调用付费 API。默认处理含全文论文；
-`--clear` 会删除已有索引再重建。模型设置读取 `vector_store` 独立配置，配置好聊天模型
-不代表索引服务已就绪。论文更新或删除后，也需核对索引是否与库中版本一致。
-
-### 统一业务执行
-
-- 采集和启动导入共用 `collection` 的分类政策；定时、手动 CLI 共用同一在线预筛和入库。
-- `paper_scoring` 是唯一评分模型协议；`DirectionFilter` 仅将同一结果转换为方向明细。
-- `batch_analysis` 与 `one_report` 共用 `AnalysisAgent` 阶段引擎，`summary` 共用技能、生成及完整性检查。
-- PDF 字节/路径提取、MinerU fallback 和可选 Docling 合并由 `pdf_extraction` 提供；维护 CLI 共用下载政策和缓存。
-- 普通回复、单篇、日报、周报共用 `feishu_transport` 的 SDK 工厂、请求、消息 ID 校验和文本分片回退。
-- WS/HTTP inbox 只提取字段，统一交给 `handle_incoming_message` 处理鉴权、命令、快照和回复。
-
-语义检索保留在 `vector_store`，研究创意在 `services.research_ideation` 与 `cli.ideation`，
-自定义技能在 `skills.registry` 与 `cli.skills`。旧 `chat`/LangGraph、旧任务 API 和 `legacy_app` 已移除。
+构建索引会运行 embedding，可能下载本地模型或调用模型 API；设置由 `vector_store` 管理。
+默认处理含全文论文，`--clear` 删除已有索引再重建。资料更新或删除后须核对索引版本。
 
 ## 修改与验证
 
-新增业务逻辑放共享服务，入口只负责适配；应用代码不反向导入 `scripts/`。
-旧业务脚本入口已移除，统一使用模块 CLI；迁移映射见 [scripts/README.md](../scripts/README.md)。
-日报通过模块 CLI 隔离摘要初筛的超时，全文评估由共享服务在渲染和发送前完成；新论文采集由独立任务负责。
-数据库查询和 PDF 命令复用 repository 与解析服务；历史固定 ID 补丁仅作维护用途。
+业务逻辑放共享服务，入口负责适配；应用代码不反向导入 `scripts/`。
+修改入口、文件位置或参数时，同步检查 Shell、Docker、技能说明与测试中的调用。
+维护阅读 API 地址、材料及分析的缓存指纹、用户技能与单篇投递回执的一致性。
+空研报 ID、多候选与参数错误须明确处理，不能默默选择第一项；单条入库失败须先回滚再处理后续记录。
+干净 checkout 缺少 `frontend/dist/` 时应能导入应用和运行后端测试。
 
-修改入口或文件位置时，同时检查 Shell、Docker、导入、技能说明与测试中的路径。
-保留研报阅读 API URL、数据库、模型选择、中文别名、用户自定义技能和单篇阅读发送回执的兼容性。
-新库不创建日报逐篇发送标记；旧库的历史表/列不主动删除，但已不再读取或写入。
-干净 checkout 缺少 `frontend/dist` 时仍应能导入应用和运行后端测试。
-依赖研报 ID 的工具遇到缺失或多个候选时应停止，不能默认选择第一篇。
-批量入库中单条记录的事务失败后先回滚，再处理后续记录。
-
-回归命令见 [项目首页的测试说明](../README.md#测试与内容验收)。测试使用临时文件、数据库和替代的
-外部接口，不调用真实模型、采集源或消息发送服务。前端构建通过与 lint 通过分别验证。
+检查命令见 [README](../README.md#自动检查ci)，离线测试和真实材料验收的分工见
+[tests/README.md](../tests/README.md)。前端构建与 lint、程序正确性与研究内容质量分别验证。
