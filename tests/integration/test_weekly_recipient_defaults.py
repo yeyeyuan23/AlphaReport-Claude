@@ -2,7 +2,7 @@
 
 import sys
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -98,9 +98,6 @@ def test_weekly_delivery_uses_recipient_type(
         "generate_weekly_report",
         lambda *args, **kwargs: "Offline weekly report",
     )
-    prepare = AsyncMock(
-        side_effect=AssertionError("No model refresh in recipient tests")
-    )
     send = MagicMock(return_value=True)
     monkeypatch.setattr(weekly, "send_feishu_card", send)
     output = tmp_path / "weekly.md"
@@ -135,5 +132,4 @@ def test_weekly_delivery_uses_recipient_type(
         "2026-10-11",
         expected_type,
     )
-    prepare.assert_not_awaited()
     assert output.read_text(encoding="utf-8") == "Offline weekly report"
