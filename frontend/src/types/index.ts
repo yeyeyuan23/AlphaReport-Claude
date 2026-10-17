@@ -17,18 +17,6 @@ export type Topic =
   | 'statistical_arbitrage'
   | 'other';
 
-export interface UserCriteria {
-  topics: string[];
-  sources: SourceType[];
-  keywords: string[];
-  date_from?: string;
-  date_to?: string;
-  max_results_per_source: number;
-  journals: string[];
-  brokers: string[];
-  local_pdf_path?: string;
-}
-
 export interface ReportSummary {
   id: number;
   title: string;
@@ -91,22 +79,6 @@ export interface ResearchEvaluation {
   reading_advice: string;
   reviewed_at: string;
   model?: string;
-}
-
-export interface ReportTable {
-  table_body: string;
-  table_caption?: string[];
-  page_idx?: number;
-}
-
-export interface ReportEquation {
-  latex: string;
-  text?: string;
-  page_idx?: number;
-  meaning?: string;
-  symbols?: Record<string, string>;
-  role_in_paper?: string;
-  is_key_formula?: boolean;
 }
 
 // ── Analysis ──
@@ -230,50 +202,10 @@ export interface ReproductionCard {
   open_questions?: string[];
 }
 
-export const BIAS_RISK_LABELS: Record<string, string> = {
-  none: '无风险',
-  low: '低风险',
-  medium: '中风险',
-  high: '高风险',
-  unknown: '未知',
-};
-
-export const METHOD_CATEGORY_LABELS: Record<string, string> = {
-  factor_model: '因子模型',
-  ai_ml_model: 'AI/机器学习',
-  statistical_method: '统计方法',
-  theoretical: '理论推导',
-  empirical: '实证研究',
-  other: '其他',
-};
-
-export interface CollectionTask {
-  task_id: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-  phase: 'collecting' | 'classifying' | 'storing' | 'complete';
-  progress_message: string;
-  results_count: number;
-  storage_result?: {
-    total_processed: number;
-    newly_added: number;
-    updated: number;
-    duplicate_skipped: number;
-  };
-  created_at: string;
-  updated_at: string;
-}
-
 export interface ReportStats {
   total_reports: number;
   with_full_text: number;
   without_full_text: number;
-}
-
-export interface ApiResponse<T = unknown> {
-  success: boolean;
-  data?: T;
-  error?: string;
-  message?: string;
 }
 
 export const SOURCE_LABELS: Record<SourceType, string> = {
@@ -307,34 +239,6 @@ export const FREQUENCY_LABELS: Record<Frequency, string> = {
   low_freq: '低频/日频+',
   mixed: '混合',
 };
-
-// ── Chat ──
-
-export interface ChatMessage {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  thinking?: string;
-  toolCalls?: ToolCallEvent[];
-  timestamp: number;
-  isStreaming?: boolean;
-}
-
-export interface ToolCallEvent {
-  name: string;
-  args: Record<string, unknown>;
-  result?: string;
-}
-
-export interface ChatConversation {
-  id: string;
-  user_id?: string;
-  email?: string;
-  title: string;
-  message_count: number;
-  created_at: string;
-  updated_at: string;
-}
 
 export const TOPIC_LABELS: Record<Topic, string> = {
   risk_model: '风险模型',

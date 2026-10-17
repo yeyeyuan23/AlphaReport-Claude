@@ -1,6 +1,5 @@
 import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
-import { AuthProvider } from './contexts/AuthContext';
 
 // ── Lazy load pages for code splitting ──
 const ReportLibraryPage = lazy(() => import('./pages/ReportLibraryPage'));
@@ -55,11 +54,9 @@ function AppLayout() {
 export default function App() {
   return (
     <BrowserRouter>
-      <AuthProvider>
-        <Routes>
-          <Route path="/*" element={<AppLayout />} />
-        </Routes>
-      </AuthProvider>
+      <Routes>
+        <Route path="/*" element={<AppLayout />} />
+      </Routes>
     </BrowserRouter>
   );
 }

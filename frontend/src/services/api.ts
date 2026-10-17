@@ -65,12 +65,6 @@ export async function getReportStats() {
   return request<ReportStats>(`${BASE}/reports/stats`);
 }
 
-// ── Taxonomy ──
-
-export async function getTaxonomy() {
-  return request<{ taxonomy: Record<string, unknown> }>(`${BASE}/classification/taxonomy`);
-}
-
 export interface ResearchBriefingResult {
   sections?: { title: string; icon: string; content: string }[];
   content?: string;
