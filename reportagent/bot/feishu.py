@@ -104,15 +104,15 @@ def run_weekly_job(chat_id):
     """Reuse the weekly CLI outside the event callback and deliver to this chat."""
     try:
         from reportagent.services.weekly_report import (
-            get_previous_week_range,
+            get_weekly_range,
             get_weekly_papers,
         )
 
-        start, end, first, last = get_previous_week_range()
+        start, end, first, last = get_weekly_range()
         if not get_weekly_papers(start, end):
             send_chat(
                 chat_id,
-                f"上一完整 UTC 周（{first} 至 {last}）库中暂无符合发表日期的资料，可先采集后再试。",
+                f"最近 7 天（北京时间，含当天）（{first} 至 {last}）库中暂无符合发表日期的资料，可先采集后再试。",
             )
             return
         path = PROJECT_ROOT / "data" / "report-jobs.log"
@@ -203,8 +203,8 @@ def handle_cmd(text, chat_id, chat_type):
         return (
             "📊 AlphaReport 指令\n\n"
             "/report <arXiv编号或链接>：分析单篇论文并推送到当前私聊\n"
-            "/daily：从论文库评估并生成日报\n"
-            "/weekly：汇总上一完整 UTC 周的库中资料\n\n"
+            "/daily：评估当日新增入库论文并生成日报\n"
+            "/weekly：汇总最近 7 天（北京时间，含当天）的库中资料\n\n"
             "/stats：查看研报库统计\n"
             "/search <关键词>：搜索研报，最多显示 5 篇\n"
             "/recent：查看最近入库的 5 篇研报\n"
@@ -218,7 +218,7 @@ def handle_cmd(text, chat_id, chat_type):
         if chat_type != "p2p":
             return "请在机器人私聊中使用 /weekly。"
         if text != "/weekly":
-            return "用法：/weekly（无需参数，汇总上一完整 UTC 周）。"
+            return "用法：/weekly（无需参数，汇总最近 7 天（北京时间，含当天））。"
         if not _report_lock.acquire(blocking=False):
             return "已有研报任务正在处理，请等待完成后再提交。"
         try:
@@ -228,7 +228,7 @@ def handle_cmd(text, chat_id, chat_type):
         except Exception:
             _report_lock.release()
             raise
-        return "开始生成上一完整 UTC 周的周报：使用库中资料，刷新相关性并评估符合条件的论文，完成后推送到当前私聊。"
+        return "开始生成最近 7 天（北京时间，含当天）的周报：使用库中资料，刷新相关性并评估符合条件的论文，完成后推送到当前私聊。"
 
     if command == "/daily":
         if chat_type != "p2p":
@@ -240,7 +240,7 @@ def handle_cmd(text, chat_id, chat_type):
         except Exception:
             _report_lock.release()
             raise
-        return "开始生成日报：使用库中近期资料，刷新相关性并评估符合条件的论文，完成后推送到当前私聊。"
+        return "开始生成日报：使用库中北京时间当日新增入库的资料，刷新相关性并评估符合条件的论文，完成后推送到当前私聊。"
 
     if command == "/report":
         if chat_type != "p2p":

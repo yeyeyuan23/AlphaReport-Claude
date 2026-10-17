@@ -83,7 +83,7 @@ daily_collection:
   timezone: "Asia/Shanghai"
   schedule_cron: "08:00"  # 每天，含周末；只采集、分类和入库
   sources: [arxiv, eastmoney, bigquant]
-  lookback_days: 3  # 从 UTC 当天往前 3 天零点起，覆盖日报四天候选窗口
+  lookback_days: 3  # 从 UTC 当天往前 3 天零点起采集，回查来源延迟；独立于报告日期范围
   max_per_source: 15
 
 daily_report:

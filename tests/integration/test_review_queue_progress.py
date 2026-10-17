@@ -113,7 +113,7 @@ def test_weekly_fallback_recipient_uses_daily_default_open_id(
     monkeypatch.setenv("FEISHU_DAILY_PUSH_IDS", "daily-user")
     monkeypatch.setattr(
         weekly,
-        "get_previous_week_range",
+        "get_weekly_range",
         lambda *args: (
             datetime(2020, 1, 1),
             datetime(2030, 1, 1),
@@ -178,7 +178,7 @@ def test_reporting_budget_defaults_to_all_and_explicit_limits_accept_more_than_t
     monkeypatch.setattr(daily, "_load_push_settings", lambda: config["push_settings"])
     monkeypatch.setattr(
         weekly,
-        "get_previous_week_range",
+        "get_weekly_range",
         lambda *args: (
             datetime(2020, 1, 1),
             datetime(2030, 1, 1),
@@ -221,7 +221,7 @@ def test_cli_review_budget_overrides_configured_limit(queue_library, monkeypatch
     monkeypatch.setattr(daily, "_load_push_settings", lambda: config["push_settings"])
     monkeypatch.setattr(
         weekly,
-        "get_previous_week_range",
+        "get_weekly_range",
         lambda *args: (
             datetime(2020, 1, 1),
             datetime(2030, 1, 1),
@@ -267,7 +267,7 @@ def test_daily_query_keeps_more_than_two_hundred_current_candidates(queue_librar
     assert len(daily.get_todays_papers()[0]) == 241
 
 
-def test_daily_relevance_refresh_requests_an_unlimited_window(
+def test_daily_relevance_refresh_requests_all_additions_for_its_report_date(
     queue_library, monkeypatch
 ):
     commands = []
@@ -277,7 +277,9 @@ def test_daily_relevance_refresh_requests_an_unlimited_window(
         lambda args, **kwargs: commands.append((args, kwargs))
         or subprocess.CompletedProcess(args, 0),
     )
-    daily.run_daily_push(daily.DailyPushOptions(dry_run=True, max_reviews=1))
+    result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True, max_reviews=1))
     command, kwargs = commands[0]
     assert command[command.index("--max-papers") + 1] == "0"
+    assert command[command.index("--created-date") + 1] == result["report_date"]
+    assert "--published-days" not in command
     assert kwargs.get("timeout") is None

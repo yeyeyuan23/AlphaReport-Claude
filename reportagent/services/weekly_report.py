@@ -1,4 +1,4 @@
-"""Query the previous publication week, generate its report and deliver it."""
+"""Query the rolling seven-day publication window and deliver its report."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from pathlib import Path
 
 
@@ -25,6 +25,7 @@ from reportagent.services.report_quality import (
     resolve_review_budget,
 )
 from reportagent.services.feishu_markdown import card_sections
+from reportagent.services.report_periods import get_weekly_range
 
 load_dotenv()
 
@@ -52,36 +53,6 @@ class WeeklyReportOptions:
     no_llm: bool = False
     max_reviews: int | None = None
     force_review: bool = False
-
-
-def get_previous_week_range(weeks_ago: int = 0) -> tuple[datetime, datetime, str, str]:
-    """
-    计算上周（Monday 00:00 ~ Sunday 23:59:59）的 UTC 范围。
-
-    Args:
-        weeks_ago: 0 = 上周, 1 = 上上周, 2 = 三周前 ...
-
-    Returns:
-        (week_start, week_end, start_label, end_label)
-        Labels are date strings like '2026-06-29' for display.
-    """
-    today = datetime.now(timezone.utc).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
-    # Today's weekday: Monday=0 ... Sunday=6
-    weekday = today.weekday()
-
-    # Last Monday (or further back)
-    last_monday = today - timedelta(days=weekday + 7 + weeks_ago * 7)
-    # Following Sunday
-    last_sunday = last_monday + timedelta(days=6)
-    # End of Sunday
-    week_end = last_sunday.replace(hour=23, minute=59, second=59, microsecond=999999)
-
-    start_label = last_monday.strftime("%Y-%m-%d")
-    end_label = last_sunday.strftime("%Y-%m-%d")
-
-    return last_monday, week_end, start_label, end_label
 
 
 # ═══════════════════════════════════════════════════
@@ -372,9 +343,7 @@ def run_weekly_report(options: WeeklyReportOptions) -> dict:
     max_reviews = resolve_review_budget(
         options.max_reviews, _load_scoring_config().get("push_settings", {})
     )
-    week_start, week_end, start_label, end_label = get_previous_week_range(
-        options.weeks_ago
-    )
+    week_start, week_end, start_label, end_label = get_weekly_range(options.weeks_ago)
     weekly_ids = os.environ.get("FEISHU_WEEKLY_PUSH_IDS", "").strip()
     configured_ids = weekly_ids or os.environ.get("FEISHU_DAILY_PUSH_IDS", "")
     receive_ids = [

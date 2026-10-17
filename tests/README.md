@@ -27,8 +27,8 @@
 从仓库根目录运行，下列命令使用当前 `.env` 与实际研报库，会联网、调用模型并更新资料。每次验收换一个目录；目录首次使用时保存 `before.sqlite` 备份。结果、分类、评分、完整分析、提取文本与周报预览都留在该目录，不提交 Git。脚本始终只预览，不发送飞书消息。
 
 ```bash
-# 1. 先采集上一完整 UTC 周：将日期换成实际的周一至周日
-.venv/bin/python -m tests.acceptance.workflows collect --run-dir data/acceptance/my-run --label weekly-collection --date-from 2026-10-05 --date-to 2026-10-11 --max-per-source 4
+# 1. 先采集周报最近 7 天：将日期换成包含当天的 7 个北京时间日期
+.venv/bin/python -m tests.acceptance.workflows collect --run-dir data/acceptance/my-run --label weekly-collection --date-from 2026-10-11 --date-to 2026-10-17 --max-per-source 4
 # 2. 扩充近期资料，再用真实模型重新分类；检查 classify-library.json 中的标签
 .venv/bin/python -m tests.acceptance.workflows collect --run-dir data/acceptance/my-run --label recent-collection --days 7 --max-per-source 6
 .venv/bin/python -m tests.acceptance.workflows classify --run-dir data/acceptance/my-run
@@ -36,7 +36,7 @@
 .venv/bin/python -m tests.acceptance.workflows batch --run-dir data/acceptance/my-run --topic portfolio_optimization --depth standard
 # 3. 对整个库重新做摘要相关性评分；--review 再对所有过线候选做全文评估
 .venv/bin/python -m tests.acceptance.workflows score --run-dir data/acceptance/my-run --review
-# 周报只查询库中的上一完整 UTC 周，不会自动补采；默认先验证模板
+# 周报只查询库中最近 7 个北京时间日期（含当天）发表的资料，不会自动补采；默认先验证模板
 .venv/bin/python -m tests.acceptance.workflows weekly --run-dir data/acceptance/my-run --label weekly-template
 .venv/bin/python -m tests.acceptance.workflows weekly --run-dir data/acceptance/my-run --label weekly-model --llm-weekly
 ```

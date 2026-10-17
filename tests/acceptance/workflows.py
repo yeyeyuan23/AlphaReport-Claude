@@ -166,13 +166,13 @@ async def classify(args):
 
 def weekly(args):
     from reportagent.services.weekly_report import (
-        get_previous_week_range,
+        get_weekly_range,
         get_weekly_papers,
         run_weekly_report,
         WeeklyReportOptions,
     )
 
-    start, end, first, last = get_previous_week_range()
+    start, end, first, last = get_weekly_range()
     papers = get_weekly_papers(start, end)
     save(args.run_dir, f"{args.label}-input.json", papers)
     preview = args.run_dir / f"{args.label}.md"

@@ -22,7 +22,7 @@ def test_weekly_starts_private_background_job_and_shares_report_lock(monkeypatch
     assert "私聊" in (bot.handle_cmd("/weekly", "test-chat", "group") or "")
     thread.assert_not_called()
     reply = bot.handle_cmd("/weekly", "test-chat", "p2p")
-    assert reply is not None and "开始" in reply and "UTC" in reply
+    assert reply is not None and "开始" in reply and "最近 7 天" in reply
     thread.assert_called_once_with(
         target=bot.run_weekly_job, args=("test-chat",), daemon=True
     )
@@ -54,7 +54,7 @@ def worker(monkeypatch, tmp_path):
     monkeypatch.setattr(bot, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(
         weekly,
-        "get_previous_week_range",
+        "get_weekly_range",
         lambda: (
             datetime(2026, 10, 5, tzinfo=timezone.utc),
             datetime(2026, 10, 11, 23, 59, 59, tzinfo=timezone.utc),

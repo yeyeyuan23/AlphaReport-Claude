@@ -157,7 +157,7 @@ def test_no_llm_preview_does_not_call_models_or_send(library, tmp_path, monkeypa
         session.commit()
     monkeypatch.setattr(
         weekly,
-        "get_previous_week_range",
+        "get_weekly_range",
         lambda *args: (
             datetime(2026, 10, 5, tzinfo=timezone.utc),
             datetime(2026, 10, 11, 23, 59, 59, tzinfo=timezone.utc),
@@ -193,7 +193,7 @@ def test_native_weekly_prepares_shared_evidence_instead_of_claude(
         session.commit()
     monkeypatch.setattr(
         weekly,
-        "get_previous_week_range",
+        "get_weekly_range",
         lambda *args: (
             datetime(2026, 10, 5),
             datetime(2026, 10, 11, 23, 59, 59),

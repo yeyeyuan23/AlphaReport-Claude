@@ -15,6 +15,10 @@ from reportagent.services.report_quality import (
 )
 
 
+def _publication_date(paper: dict) -> str:
+    return f"原始发表日期：{str(paper.get('published_date') or '未知')[:10]}"
+
+
 def _links(paper: dict) -> str:
     return " · ".join(
         f"[{label}]({paper[key]})"
@@ -133,6 +137,7 @@ def render_briefing(
         details.append(
             f"### {i}. {p['title']}\n"
             f"**材料类型**：{source_label}\n\n"
+            f"{_publication_date(p)}\n\n"
             f"**研究问题**：{sections['research_question']}\n\n"
             f"**方法与发现**：{sections['method_findings']}\n\n"
             f"**为什么值得读**：{sections['why_read']}\n\n"
@@ -201,7 +206,7 @@ def render_briefing(
                 or "仅依据摘要判断方向相关性，不代表论文质量低。"
             )
         remaining[group].append(
-            f"- **{p['title']}** · {label} · {direction}\n  {summary}\n  {_links(p)}"
+            f"- **{p['title']}** · {label} · {direction}\n  {_publication_date(p)}\n  {summary}\n  {_links(p)}"
         )
     others = "\n\n".join(
         f"## {label}\n" + "\n".join(items)
@@ -237,7 +242,8 @@ def render_briefing(
         )
         overview = (
             f"{label}有效资料 {valid} 条（按来源合计）；"
-            "本期候选可包含此前已收录、符合本期日期范围的库中论文。\n\n" + overview
+            "采集有效条数可能包含已有条目的更新，与本期报告候选数不必一致。\n\n"
+            + overview
         )
         if source_checked_at:
             coverage = (

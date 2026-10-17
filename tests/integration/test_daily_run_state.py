@@ -180,7 +180,10 @@ def test_empty_daily_sends_a_completion_card_to_each_recipient(
         daily.DailyPushOptions(no_collect=True, receive_ids="A,B,A")
     )
     assert [item[0] for item in sent] == ["A", "B"]
-    assert all(not item[2] and "暂无符合日期范围与筛选条件" in item[1] for item in sent)
+    assert all(
+        not item[2] and "暂无通过当前相关性筛选的新增入库论文" in item[1]
+        for item in sent
+    )
     assert result["status"] == "empty"
     assert result["deliveries"] == {"A": True, "B": True}
     assert_final_artifact(result)
@@ -208,7 +211,7 @@ def test_empty_preview_has_an_explicit_result_without_sending(
     monkeypatch.setattr(daily, "send_feishu_card", lambda *args: sent.append(args))
     result = daily.run_daily_push(daily.DailyPushOptions(no_collect=True, dry_run=True))
     assert result["status"] == "preview"
-    assert "暂无符合日期范围与筛选条件" in result["briefing"]
+    assert "暂无通过当前相关性筛选的新增入库论文" in result["briefing"]
     assert sent == [] and result["deliveries"] == {}
 
 

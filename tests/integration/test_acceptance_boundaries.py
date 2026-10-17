@@ -110,7 +110,7 @@ def test_weekly_preview_uses_publication_boundaries_and_cannot_deliver(
         monkeypatch.setattr(weekly, "init_db", lambda: None)
         monkeypatch.setattr(
             weekly,
-            "get_previous_week_range",
+            "get_weekly_range",
             lambda *args: (start, end, "2026-10-05", "2026-10-11"),
         )
         send = MagicMock(side_effect=AssertionError("Acceptance must not send"))

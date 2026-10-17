@@ -84,7 +84,7 @@ def test_weekly_delivery_uses_recipient_type(
     papers = [{"id": 1, "title": "Offline weekly recipient fixture"}]
     monkeypatch.setattr(
         weekly,
-        "get_previous_week_range",
+        "get_weekly_range",
         lambda *args: (
             datetime(2026, 10, 5, tzinfo=timezone.utc),
             datetime(2026, 10, 11, 23, 59, 59, tzinfo=timezone.utc),

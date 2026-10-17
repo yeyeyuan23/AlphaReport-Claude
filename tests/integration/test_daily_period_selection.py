@@ -1,4 +1,4 @@
-"""Daily content depends on publication/screening, never legacy send markers."""
+"""Daily content depends on ingestion/screening, never legacy send markers."""
 
 import json
 from datetime import datetime, timedelta, timezone
@@ -68,9 +68,11 @@ def legacy_library(monkeypatch):
     engine.dispose()
 
 
-def test_date_window_and_current_relevance_select_previously_sent_paper(legacy_library):
+def test_ingestion_day_and_current_relevance_select_previously_sent_papers(
+    legacy_library,
+):
     papers, _, _ = daily.get_todays_papers()
-    assert [p["id"] for p in papers] == [1]
+    assert {p["id"] for p in papers} == {1, 2, 4}
 
 
 def test_explicit_paper_ids_are_not_excluded_by_old_send_markers(legacy_library):

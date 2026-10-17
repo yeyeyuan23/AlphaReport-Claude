@@ -74,7 +74,7 @@ def test_zero_current_source_results_can_feature_existing_library_paper_with_cle
     assert "本次在线采集有效资料 0 条" in brief
     assert "本期检查 1 篇库中候选" in brief
     assert "重点推荐 1 篇" in brief
-    assert "此前已收录" in brief
+    assert "采集有效条数可能包含已有条目的更新" in brief
     assert "覆盖可能不完整" in brief
 
 
@@ -154,6 +154,16 @@ def test_daily_does_not_select_old_score_after_abstract_changes():
         result = daily.get_todays_papers()
     assert result[0] == []
     engine.dispose()
+
+
+def test_report_date_and_original_publication_date_are_distinct():
+    from reportagent.services.report_briefing import render_briefing
+
+    p = evaluated_paper(1)
+    p["published_date"] = "2026-10-15T00:00:00"
+    text = render_briefing([p], "2026-10-17")
+    assert "2026-10-17" in text
+    assert "原始发表日期：2026-10-15" in text
 
 
 def test_daily_template_edits_take_effect_without_another_model_call(tmp_path):

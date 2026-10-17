@@ -12,7 +12,7 @@ import logging
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -37,6 +37,7 @@ from reportagent.services.paper_scoring import (
     screening_is_current,
 )
 from reportagent.services.scheduled_collection import read_latest_collection
+from reportagent.services.report_periods import get_daily_range
 
 load_dotenv()
 
@@ -88,9 +89,6 @@ PUSH_SETTINGS: dict = _load_push_settings()
 # ═══════════════════════════════════════════════════
 # Step 2: Query recent papers (rolling window)
 # ═══════════════════════════════════════════════════
-
-# arXiv 入库比 published_date 滞后 1-3 天，2 天窗口几乎永远为空 → 放宽到 4 天
-PUSH_WINDOW_DAYS = 4
 
 
 def _paper_metadata(row) -> dict:
@@ -198,11 +196,13 @@ def _refresh_candidate_metadata(candidates: list[dict]) -> list[dict]:
 
 def get_todays_papers(
     report_ids: list[int] | None = None,
+    *,
+    report_date: str | None = None,
 ) -> tuple[list[dict], str, str]:
-    """Get papers in the publication window with current, eligible relevance scores.
+    """Get today's newly ingested papers with current, eligible relevance scores.
 
-    使用 published_date（发表日期），非 created_at（入库日期）。
-    与周报一样，发送历史不参与筛选；显式指定论文时跳过日期和相关性过滤。
+    按北京时间当天的 created_at（首次入库时间），不限制原始发表日期。
+    发送历史不参与筛选；显式指定论文时跳过日期和相关性过滤。
 
     Returns:
         (papers, date_label_start, date_label_end) — date labels for briefing title
@@ -214,18 +214,12 @@ def get_todays_papers(
         from reportagent.models.database import Report
         from sqlalchemy import desc
 
-        today_start = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
-        today_end = today_start.replace(
-            hour=23, minute=59, second=59, microsecond=999999
-        )
-        window_start = today_start - timedelta(days=PUSH_WINDOW_DAYS - 1)
-
+        start, end, label, _ = get_daily_range(report_date)
         logger.info(
-            f"Query window: published_date {window_start.strftime('%Y-%m-%d')} "
-            f"~ {today_end.strftime('%Y-%m-%d')} "
-            f"({PUSH_WINDOW_DAYS} days), current relevance required"
+            "Query daily additions: created_at %s ~ %s (%s Beijing), current relevance required",
+            start,
+            end,
+            label,
         )
 
         q = session.query(Report)
@@ -233,8 +227,8 @@ def get_todays_papers(
             q = q.filter(Report.id.in_(report_ids))
         else:
             q = q.filter(
-                Report.published_date >= window_start,
-                Report.published_date <= today_end,
+                Report.created_at >= start,
+                Report.created_at <= end,
                 Report.selection_relevance
                 >= PUSH_SETTINGS.get("llm_filter_threshold", 6.0),
             )
@@ -244,13 +238,10 @@ def get_todays_papers(
             reports = [r for r in reports if screening_is_current(r)]
 
         if not reports:
-            date_label = today_start.strftime("%Y-%m-%d")
             logger.warning(
-                f"No eligible papers in the last {PUSH_WINDOW_DAYS} days "
-                f"({window_start.strftime('%Y-%m-%d')} ~ {today_start.strftime('%Y-%m-%d')}). "
-                f"Sending empty brief."
+                "No eligible new additions on %s Beijing. Sending empty brief.", label
             )
-            return [], date_label, date_label
+            return [], label, label
 
         # 实际取到了哪几天的论文
         day_counts: dict[str, int] = {}
@@ -259,7 +250,6 @@ def get_todays_papers(
                 r.published_date.strftime("%Y-%m-%d") if r.published_date else "unknown"
             )
             day_counts[day] = day_counts.get(day, 0) + 1
-        days_sorted = sorted(d for d in day_counts if d != "unknown")
         logger.info(
             "Papers by published_date: "
             + ", ".join(
@@ -267,21 +257,13 @@ def get_todays_papers(
             )
         )
 
-        if days_sorted:
-            label_start, label_end = days_sorted[0], days_sorted[-1]
-        else:
-            label_start = label_end = today_start.strftime("%Y-%m-%d")
-        date_label = (
-            label_end if label_start == label_end else f"{label_start} ~ {label_end}"
-        )
-
         papers = [_paper_metadata(row) for row in reports]
 
         selection_count = sum(1 for p in papers if p.get("selection_score", 0) > 0)
         logger.info(
-            f"Found {len(papers)} papers for push ({selection_count} LLM-selected), date label: {date_label}"
+            f"Found {len(papers)} new additions for daily report {label} ({selection_count} LLM-selected)"
         )
-        return papers, date_label, date_label
+        return papers, label, label
     finally:
         session.close()
 
@@ -566,6 +548,8 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
     PUSH_SETTINGS = _load_push_settings()
     max_reviews = resolve_review_budget(options.max_reviews, PUSH_SETTINGS)
     run["review_budget"] = max_reviews
+    _, _, report_date, _ = get_daily_range()
+    run["report_date"] = report_date
     max_featured = min(5, int(PUSH_SETTINGS.get("max_featured", 5)))
     # Preview must not rewrite .env or discover a new public tunnel.
     if not options.dry_run:
@@ -609,8 +593,8 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
                     sys.executable,
                     "-m",
                     "reportagent.cli.llm_filter",
-                    "--published-days",
-                    str(PUSH_WINDOW_DAYS),
+                    "--created-date",
+                    report_date,
                     "--max-papers",
                     "0",
                     "--batch-size",
@@ -633,7 +617,9 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
             warning = "相关性筛选未完整成功；本期只包含已通过当前筛选标准的有效候选，覆盖可能不完整。"
             run["warnings"].append(warning)
             logger.warning(warning)
-    papers, date_label, _ = get_todays_papers(report_ids=ids or None)
+    papers, date_label, _ = get_todays_papers(
+        report_ids=ids or None, report_date=report_date
+    )
     if ids and not papers:
         raise ValueError("指定论文不存在")
     candidates = select_candidates(papers, len(papers), list(load_enabled_directions()))
@@ -672,8 +658,10 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
         deferred = len(review_audit.get("deferred_ids", []))
         if deferred:
             text += f"\n\n本次全文评估预算为 {max_reviews} 篇，另有 {deferred} 篇候选尚未评估；重跑可继续处理。"
+        if ids:
+            text += "\n\n本次为指定论文评估，未按当日新增入库范围筛选。"
         if not papers:
-            text += "\n\n本期暂无符合日期范围与筛选条件的论文。"
+            text += "\n\n当日暂无通过当前相关性筛选的新增入库论文。"
         if run["warnings"]:
             text = (
                 "\n".join(f"> ⚠ {warning}" for warning in run["warnings"])

@@ -8,7 +8,10 @@ def main():
     parser = argparse.ArgumentParser(description="Weekly Report — 每周论文周报推送")
     parser.add_argument("--dry-run", action="store_true", help="预览模式，不实际推送")
     parser.add_argument(
-        "--weeks-ago", type=int, default=0, help="0=上周, 1=上上周（用于补发）"
+        "--weeks-ago",
+        type=int,
+        default=0,
+        help="0=最近7天（含当天），1=窗口前移7天（用于补发）",
     )
     parser.add_argument(
         "--receive-ids", type=str, default="", help="飞书接收者 ID，逗号分隔"

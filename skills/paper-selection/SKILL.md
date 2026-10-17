@@ -8,10 +8,10 @@ description: 根据完整摘要评估论文与已启用研究方向的相关性�
 和 [scoring-user.md](scoring-user.md) 仅评估研究相关度。
 研究方向和推送设置属于运行配置，见 `configs/push_directions.yaml`。
 
-从仓库根目录预览最近四个 UTC 日期发表、尚未评分或评分已过期的论文：
+从仓库根目录预览北京时间指定日期新增入库、尚未评分或评分已过期的论文：
 
 ```bash
-.venv/bin/python -m reportagent.cli.llm_filter --published-days 4 --dry-run
+.venv/bin/python -m reportagent.cli.llm_filter --created-date 2026-10-17 --dry-run
 ```
 
 `reportagent.cli.llm_direction_filter` 是同一评分服务的方向明细入口，共用上述提示词、验证、材料指纹与 selection 字段；明细保存在 selection_provenance.direction_scores。

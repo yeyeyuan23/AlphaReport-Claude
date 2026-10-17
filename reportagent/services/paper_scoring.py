@@ -39,6 +39,7 @@ class ScoringOptions:
     days: int = 1
     all_unjudged: bool = False
     published_days: int | None = None
+    created_date: str | None = None
     threshold: float | None = None
     batch_size: int = 10
     max_papers: int = 200
@@ -556,6 +557,13 @@ async def score_reports(options: ScoringOptions) -> None:
     if type(options.max_papers) is not int or options.max_papers < 0:
         raise ValueError("max_papers must be a nonnegative integer; 0 means unlimited")
     limit = options.max_papers or None
+    from reportagent.services.report_periods import get_daily_range
+
+    if options.created_date and (options.published_days or options.all_unjudged):
+        raise ValueError("created_date cannot be combined with other date scopes")
+    created_range = (
+        get_daily_range(options.created_date) if options.created_date else None
+    )
     init_db()
     factory = get_session_factory()
     session = factory()
@@ -577,7 +585,15 @@ async def score_reports(options: ScoringOptions) -> None:
             else _valid_score(options.threshold, "threshold")
         )
 
-        if getattr(options, "published_days", None):
+        if created_range:
+            start, end, _, _ = created_range
+            papers = repo.get_unjudged_reports(
+                since=start,
+                created_until=end,
+                limit=limit,
+                scoring_fingerprint=fingerprint,
+            )
+        elif getattr(options, "published_days", None):
             published_since = datetime.now(timezone.utc).replace(
                 hour=0, minute=0, second=0, microsecond=0
             ) - timedelta(days=options.published_days - 1)
