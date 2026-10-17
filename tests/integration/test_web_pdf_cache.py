@@ -440,3 +440,46 @@ def test_post_commit_refresh_failure_cannot_remove_committed_pdf(web_pdf, monkey
         path = db.get(Report, web_pdf["id"]).pdf_path
         assert path is not None
         assert Path(path).read_bytes() == PDF
+
+
+@pytest.mark.parametrize("cached", [False, True], ids=["download", "local-cache"])
+def test_one_validator_change_is_observed_by_both_adapters(
+    web_pdf, monkeypatch, cached
+):
+    original = content_fetch.validate_pdf_header
+    # The fixture is accepted by the actual policy before changing that one seam.
+    original(PDF, source="fixture", paper_id="fixture")
+    calls = []
+
+    def reject_previously_valid_pdf(data, *, source, paper_id):
+        original(data, source=source, paper_id=paper_id)
+        calls.append((data, source, paper_id))
+        raise SourceParseError("shared PDF policy now rejects this fixture")
+
+    monkeypatch.setattr(
+        content_fetch, "validate_pdf_header", reject_previously_valid_pdf
+    )
+    if cached:
+        directory = web_pdf["directory"]
+        directory.mkdir(parents=True)
+        path = directory / "previously-valid.pdf"
+        path.write_bytes(PDF)
+        web_pdf["row"].source = "local_pdf"
+        web_pdf["row"].source_url = None
+        web_pdf["row"].pdf_path = str(path)
+        web_pdf["db"].commit()
+        with pytest.raises(HTTPException) as caught:
+            web_pdf["call"]()
+        assert caught.value.status_code == 404
+        assert calls == [(PDF, "local_pdf", str(web_pdf["id"]))]
+        assert not web_pdf["requests"]
+        assert path.read_bytes() == PDF
+        assert list(directory.iterdir()) == [path]
+        with web_pdf["factory"]() as db:
+            assert db.get(Report, web_pdf["id"]).pdf_path == str(path)
+    else:
+        web_pdf["responses"].append(httpx.Response(200, content=PDF))
+        rejected(web_pdf)
+        assert calls == [(PDF, "arxiv", "quant-ph/9701001v1")]
+        assert len(web_pdf["requests"]) == 1
+        assert_not_cached(web_pdf)

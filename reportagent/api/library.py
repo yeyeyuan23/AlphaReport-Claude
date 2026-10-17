@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from reportagent.db.engine import get_db
 from reportagent.services.report_views import read_current_analysis
-from reportagent.services import report_pdf
+from reportagent.services import report_pdf, report_reads
 from reportagent.sources.content_fetch import get_pdf_policy
 from reportagent.db.repository import ReportRepository
 from reportagent.models.schemas import ReportListParams
@@ -64,34 +64,19 @@ def list_reports(
         limit=limit,
         offset=offset,
     )
-    reports, total = ReportRepository(db).list_reports(params)
     return {
         "success": True,
-        "data": {
-            "reports": [_report_to_dict(r) for r in reports],
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-        },
+        "data": report_reads.list_reports(db, params, serialize=_report_to_dict),
     }
 
 
 @router.get("/reports/{report_id}")
 def get_report(report_id: int, db: Session = Depends(get_db)):
-    report = ReportRepository(db).get_report(report_id)
-    if not report:
+    data = report_reads.get_report_detail(
+        db, report_id, serialize=_report_to_dict, include_knowledge_card=True
+    )
+    if data is None:
         raise HTTPException(status_code=404, detail="Report not found")
-    data = _report_to_dict(report)
-    data["full_text"] = report.full_text
-    data["summary"] = report.summary
-    data["tables_json"] = report.tables_json
-    data["equations_json"] = report.equations_json
-    analysis = read_current_analysis(report)
-    if analysis is not None:
-        data["analysis"] = analysis
-    from reportagent.services.knowledge_cards import build_knowledge_card
-
-    data["knowledge_card"] = build_knowledge_card(report)
     return {"success": True, "data": data}
 
 
@@ -129,15 +114,9 @@ def get_knowledge_card(
     force: bool = Query(False, description="刷新当前证据的卡片展示；不重新评估论文"),
     db: Session = Depends(get_db),
 ):
-    from reportagent.services.knowledge_cards import get_knowledge_card as prepare_card
-
-    report = ReportRepository(db).get_report(report_id)
-    if not report:
+    card = report_reads.get_knowledge_card(db, report_id, force=force)
+    if card is None:
         raise HTTPException(status_code=404, detail="Report not found")
-    previous = report.knowledge_card_json
-    card = prepare_card(report, force=force)
-    if report.knowledge_card_json != previous:
-        db.commit()
     return {"success": True, "data": card}
 
 
