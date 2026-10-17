@@ -10,6 +10,19 @@ from reportagent.filters.direction_filter import DirectionFilter
 ABSTRACT = "We study portfolio allocation using conditional risk forecasts and evaluate out of sample."
 
 
+@pytest.fixture(autouse=True)
+def risk_rubric(monkeypatch):
+    from reportagent.services import paper_scoring
+
+    monkeypatch.setattr(
+        paper_scoring,
+        "_load_scoring_config",
+        lambda: {
+            "directions": [{"id": "risk", "name": "Risk"}],
+        },
+    )
+
+
 def setup_filter():
     f = DirectionFilter()
     f._directions = [{"id": "risk", "name": "Risk"}]
@@ -22,16 +35,23 @@ def papers():
 
 def item(score=7):
     return {
-        "report_id": 1,
+        "index": 0,
         "scores": [
             {"direction_id": "risk", "score": score, "reason": "Risk forecasting"}
         ],
     }
 
 
+def assess_response(response, filt=None):
+    """Exercise the canonical model-response parser through its live adapter."""
+    filt = filt or setup_filter()
+    filt._llm_client = SimpleNamespace(chat_json=AsyncMock(return_value=response))
+    return asyncio.run(filt.score_papers(papers()))[0]
+
+
 @pytest.mark.parametrize("score", [15, -1, float("inf"), float("nan"), True, "7"])
 def test_invalid_score_is_retryable_not_selected(score):
-    r = setup_filter()._parse_response([item(score)], papers())[0]
+    r = assess_response([item(score)])
     assert r.status == "retryable_error"
     assert r.max_score is None
     assert not r.is_selected
@@ -40,7 +60,7 @@ def test_invalid_score_is_retryable_not_selected(score):
 def test_threshold_is_used_by_result_and_selection():
     f = setup_filter()
     f.SELECTION_THRESHOLD = 8
-    r = f._parse_response([item(7)], papers())[0]
+    r = assess_response([item(7)], f)
     assert not r.is_selected
     assert f.get_selected_papers([r]) == []
 
@@ -49,7 +69,7 @@ def test_threshold_is_used_by_result_and_selection():
     "payload", [[], [item(), item()], [None], [item() | {"scores": []}]]
 )
 def test_missing_duplicate_or_invalid_response_remains_retryable(payload):
-    r = setup_filter()._parse_response(payload, papers())[0]
+    r = assess_response(payload)
     assert r.status == "retryable_error"
     assert not r.is_selected
 
@@ -79,9 +99,7 @@ def test_model_failure_is_retryable():
 
 
 def test_explicit_error_status_cannot_become_selected():
-    r = setup_filter()._parse_response(
-        [item() | {"status": "retryable_error"}], papers()
-    )[0]
+    r = assess_response([item() | {"status": "retryable_error"}])
     assert r.status == "retryable_error" and not r.is_selected
 
 
@@ -96,3 +114,12 @@ def test_model_initialization_failure_is_retryable(monkeypatch):
         asyncio.run(setup_filter().score_papers(papers()))[0].status
         == "retryable_error"
     )
+
+
+def test_valid_canonical_scalar_result_is_preserved_by_detail_adapter():
+    r = assess_response(
+        [{"index": 0, "score": 7, "best_direction": "risk", "reason": "Risk evidence"}]
+    )
+    assert r.status == "scored" and r.max_score == 7
+    assert r.best_direction == "risk" and r.is_selected
+    assert r.assessment["reason"] == "Risk evidence"

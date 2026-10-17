@@ -102,11 +102,8 @@ def test_no_supported_labels_is_a_failure_not_a_successful_empty_classification(
 
 
 def test_hybrid_cannot_restore_rule_labels_rejected_by_model():
-    rule = ClassificationResult(
-        topics=[Topic.STATISTICAL_ARB], custom_tags=["pairs trading"]
-    )
     model = classify(response())
-    result = _merge_results(rule, model)
+    result = _merge_results(model)
     assert result.topics == [Topic.AI_ML_MODEL]
     assert result.custom_tags == ["graph learning"]
     assert result.provenance == model.provenance

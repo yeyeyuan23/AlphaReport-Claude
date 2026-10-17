@@ -15,6 +15,7 @@ from reportagent.db.repository import ReportRepository
 from reportagent.models.database import Report, Tag, report_tags
 from reportagent.classifiers.rule_classifier import RuleClassifier
 from reportagent.classifiers.llm_classifier import LLMClassifier
+from reportagent.classifiers.provenance import classification_material
 from reportagent.llm.client import LLMClient
 from reportagent.models.schemas import (
     ClassificationResult,
@@ -77,9 +78,7 @@ class ClassificationOptions:
     dry_run: bool = False
 
 
-def _merge_results(
-    rule: ClassificationResult, llm: ClassificationResult
-) -> ClassificationResult:
+def _merge_results(llm: ClassificationResult) -> ClassificationResult:
     """Model evidence is authoritative; rule guesses cannot restore rejected labels."""
     return llm.model_copy(update={"method": "hybrid"})
 
@@ -172,18 +171,21 @@ async def classify_async(options: ClassificationOptions) -> dict:
                         original = {
                             key: getattr(r, key) for key in _CLASSIFICATION_STATE
                         }
+                        if not (r.abstract or "").strip():
+                            # Without an abstract, a labelled introduction from
+                            # full text supplies the classifier's evidence.
+                            original.update(full_text=r.full_text, source=r.source)
                         tags = {(tag.dimension, tag.value) for tag in r.tags}
                 if r is None:
                     raise ValueError("Report no longer exists")
-                title, abstract = r.title or "", r.abstract or ""
+                title, material = r.title or "", classification_material(r)
                 if options.hybrid:
-                    rule_result = rule_classifier.classify(title, abstract)
-                    llm_result = await llm_classifier.classify(title, abstract)
-                    result = _merge_results(rule_result, llm_result)
+                    llm_result = await llm_classifier.classify(title, material)
+                    result = _merge_results(llm_result)
                 elif options.llm:
-                    result = await llm_classifier.classify(title, abstract)
+                    result = await llm_classifier.classify(title, material)
                 else:
-                    result = rule_classifier.classify(title, abstract)
+                    result = rule_classifier.classify(title, material)
 
                 with factory() as write_session:
                     conditions = _unchanged_conditions(report_id, original, tags)

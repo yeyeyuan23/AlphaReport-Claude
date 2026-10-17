@@ -155,9 +155,12 @@ async def run_direction_filter(options: DirectionOptions) -> None:
                 for s in r["scores"][:3]:
                     print(f"     {s['direction']}: {s['score']:.1f} — {s['reason']}")
 
-    # Store
-    if not options.dry_run:
-        store_scores(results)
-        logger.info("Scores stored to DB")
-    else:
+    # Preserve usable siblings, then enforce the canonical command outcome.
+    from reportagent.services.paper_scoring import ensure_scoring_succeeded
+
+    stats = {"errors": 0} if options.dry_run else store_scores(results)
+    ensure_scoring_succeeded(stats, filt.failed_batches)
+    if options.dry_run:
         logger.info("[DRY RUN] Scores not stored")
+    else:
+        logger.info("Scores stored to DB")

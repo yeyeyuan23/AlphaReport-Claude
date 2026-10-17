@@ -553,6 +553,22 @@ def apply_scores(
     return stats
 
 
+def ensure_scoring_succeeded(stats: dict, failed_batches: list[tuple]) -> None:
+    """Fail command execution after usable sibling assessments have been preserved."""
+    if stats["errors"]:
+        raise RuntimeError(
+            f"Failed to persist {stats['errors']} relevance assessment(s); "
+            "affected papers remain retryable."
+        )
+    if failed_batches:
+        total_failed = sum(n for _, n, _ in failed_batches)
+        raise RuntimeError(
+            f"LLM scoring failed for {total_failed} paper(s) in "
+            f"{len(failed_batches)} batch(es); they remain retryable. "
+            f"First error: {failed_batches[0][2]}"
+        )
+
+
 async def score_reports(options: ScoringOptions) -> None:
     if type(options.max_papers) is not int or options.max_papers < 0:
         raise ValueError("max_papers must be a nonnegative integer; 0 means unlimited")
@@ -672,19 +688,7 @@ async def score_reports(options: ScoringOptions) -> None:
         if options.dry_run:
             logger.info("[DRY RUN] No changes written to database.")
 
-        # Persist valid siblings, but make partial failure visible to callers.
-        if stats["errors"]:
-            raise RuntimeError(
-                f"Failed to persist {stats['errors']} relevance assessment(s); "
-                "affected papers remain retryable."
-            )
-        if failed_batches:
-            total_failed = sum(n for _, n, _ in failed_batches)
-            raise RuntimeError(
-                f"LLM scoring failed for {total_failed} paper(s) in "
-                f"{len(failed_batches)} batch(es); they remain retryable. "
-                f"First error: {failed_batches[0][2]}"
-            )
+        ensure_scoring_succeeded(stats, failed_batches)
 
     finally:
         session.close()

@@ -18,7 +18,6 @@ from reportagent.services.paper_scoring import (
     _load_scoring_config,
     load_enabled_directions,
     has_screening_material,
-    normalize_direction_scores,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,6 +76,7 @@ class DirectionFilter:
 
     def __init__(self, llm_client=None):
         self._llm_client = llm_client
+        self.failed_batches: list[tuple] = []
         self._directions: list[dict] = []
         self._load_directions()
         self.SELECTION_THRESHOLD = _configured_threshold(_load_scoring_config())
@@ -116,6 +116,7 @@ class DirectionFilter:
         """Detailed view of the same relevance execution used by collection and reports."""
         from reportagent.services import paper_scoring as scoring
 
+        self.failed_batches = []
         if not papers:
             return []
         _valid_score(self.SELECTION_THRESHOLD, "threshold")
@@ -126,11 +127,12 @@ class DirectionFilter:
                 from reportagent.llm.client import LLMClient
 
                 self._llm_client = LLMClient()
-            assessed, _ = await scoring.score_papers_batch(
+            assessed, self.failed_batches = await scoring.score_papers_batch(
                 self._llm_client, papers, batch_size=self.BATCH_SIZE
             )
-        except Exception:
-            return self._empty_results(papers, reason="模型评分失败，待重试")
+        except Exception as error:
+            self.failed_batches = [(0, len(papers), str(error)[:200])]
+            return self._empty_results(papers, reason=f"模型评分失败，待重试：{error}")
         finally:
             if owned and self._llm_client is not None:
                 await self._llm_client._client.close()
@@ -144,9 +146,10 @@ class DirectionFilter:
                 if value["status"] == "pending_needs_material":
                     result.status, result.reason = value["status"], value["reason"]
                     result.assessment = value
-                elif value.get("direction_scores"):
+                elif value["status"] == "scored":
                     result.direction_scores = [
-                        DirectionScore(**detail) for detail in value["direction_scores"]
+                        DirectionScore(**detail)
+                        for detail in value.get("direction_scores", [])
                     ]
                     result.max_score = value["relevance"]
                     result.best_direction = value["best_direction"] or ""
@@ -155,59 +158,6 @@ class DirectionFilter:
                         value["reason"],
                         value,
                     )
-            results.append(result)
-        return results
-
-    def _parse_response(
-        self, resp: dict | list, papers: list[dict]
-    ) -> list[PaperDirectionResult]:
-        """Parse LLM response into PaperDirectionResult list."""
-        items = (
-            resp
-            if isinstance(resp, list)
-            else (
-                resp.get("papers", resp.get("results", []))
-                if isinstance(resp, dict)
-                else []
-            )
-        )
-        if not isinstance(items, list):
-            items = []
-        indexed = {}
-        for item in items:
-            if isinstance(item, dict) and type(item.get("report_id")) is int:
-                indexed.setdefault(item["report_id"], []).append(item)
-        results = []
-        for paper in papers:
-            result = self._empty_results([paper])[0]
-            matches = indexed.get(paper["id"], [])
-            try:
-                if len(matches) != 1:
-                    raise ValueError("论文评分缺失或重复")
-                item = matches[0]
-                if item.get("status", "scored") not in (
-                    "scored",
-                    "pending_needs_material",
-                ):
-                    raise ValueError("未知或失败的评分状态")
-                if item.get("status") == "pending_needs_material":
-                    if item.get("scores") not in (None, []):
-                        raise ValueError("材料不足时不能附带分数")
-                    result.status = "pending_needs_material"
-                    result.reason = str(item.get("reason") or "需要补充研究摘要")
-                    results.append(result)
-                    continue
-                scores = normalize_direction_scores(
-                    item.get("scores"),
-                    {value["id"]: value for value in self._directions},
-                )
-                result.direction_scores = [DirectionScore(**value) for value in scores]
-                best = max(result.direction_scores, key=lambda x: x.score)
-                result.max_score = best.score
-                result.best_direction = best.direction_id if best.score > 0 else ""
-                result.status, result.reason = "scored", best.reason
-            except (ValueError, TypeError):
-                result.reason = "模型结果缺失或无效，待重试"
             results.append(result)
         return results
 
@@ -238,19 +188,3 @@ class DirectionFilter:
             for r in results
             if r.status == "scored" and r.max_score is not None and r.max_score >= t
         ]
-
-    def format_scores_for_briefing(self, results: list[PaperDirectionResult]) -> str:
-        """格式化方向评分信息，供 Claude 简报使用。"""
-        lines = ["## 🎯 LLM 方向评分结果\n"]
-        for r in sorted(
-            results,
-            key=lambda x: x.max_score if x.max_score is not None else -1,
-            reverse=True,
-        ):
-            if not r.is_selected:
-                continue
-            top3 = sorted(r.direction_scores, key=lambda x: x.score, reverse=True)[:3]
-            score_str = " | ".join(f"{s.direction_name}: {s.score:.1f}" for s in top3)
-            lines.append(f"- **{r.title[:60]}**")
-            lines.append(f"  最高分: {score_str}")
-        return "\n".join(lines)

@@ -18,12 +18,18 @@ _DIMENSIONS = {
 _OWNED_TAGS = {dimension for dimension, _ in _DIMENSIONS.values()} | {"custom"}
 
 
-def classification_material(search_result) -> str:
-    """Return exactly the material supplied to the classifier, including its label."""
-    introduction = search_result.raw_metadata.get("introduction")
-    return search_result.abstract or (
-        f"【原文引言；未提取到论文摘要】\n{introduction}" if introduction else ""
-    )
+def classification_material(paper) -> str:
+    """Resolve the same bounded evidence for source results and persisted reports."""
+    abstract = paper.abstract or ""
+    if abstract.strip():
+        return abstract
+    metadata = getattr(paper, "raw_metadata", None) or {}
+    introduction = metadata.get("introduction")
+    if not introduction:
+        from reportagent.processors.paper_sections import extract_paper_sections
+
+        introduction = extract_paper_sections(paper.full_text or "")["introduction"]
+    return f"【原文引言；未提取到论文摘要】\n{introduction}" if introduction else ""
 
 
 def input_fingerprint(title: str, material: str) -> str:
