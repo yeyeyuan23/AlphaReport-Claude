@@ -216,7 +216,7 @@ def test_new_and_delayed_arxiv_revisions_cannot_replace_known_publication_date(l
         assert session.get(Report, rid).published_date == datetime(2025, 1, 1)
 
 
-def test_reposted_old_report_is_not_included_in_this_publication_week(library):
+def test_reposted_old_report_preserves_original_date_and_requires_announcement(library):
     fetched = fetch(
         page(
             "<p>本文来自方正证券研究所于2022年8月4日发布的报告《多因子研究》。</p>",
@@ -233,7 +233,13 @@ def test_reposted_old_report_is_not_included_in_this_publication_week(library):
         _, rid = repo.upsert_report(
             ClassifiedReport(search_result=old, classification=ClassificationResult())
         )
+        assert session.get(Report, rid).published_date is None
         repo.upsert_report(classified)
+    # Read a fresh session: the parser's original date must actually persist.
+    with library() as session:
+        row = session.get(Report, rid)
+        assert row.published_date == datetime(2022, 8, 4)
+        assert row.announced_at is None
     with (
         patch.object(weekly_report, "init_db"),
         patch.object(weekly_report, "get_session_factory", return_value=library),
@@ -250,6 +256,32 @@ def test_reposted_old_report_is_not_included_in_this_publication_week(library):
         # Original cited dates remain in the library but are not evidence of
         # when this BigQuant page became public.
         assert papers == []
+
+        # A verified recent announcement makes the old report eligible now,
+        # while its original research date must remain unchanged.
+        announced = fetched.model_copy(
+            update={"announced_at": datetime(2026, 10, 9, 1)}
+        )
+        with library() as session:
+            _, updated_id = ReportRepository(session).upsert_report(
+                ClassifiedReport(
+                    search_result=announced, classification=ClassificationResult()
+                )
+            )
+            assert updated_id == rid
+        with library() as session:
+            row = session.get(Report, rid)
+            assert row.published_date == datetime(2022, 8, 4)
+            assert row.announced_at == datetime(2026, 10, 9, 1)
+        papers = weekly_report.get_weekly_papers(
+            datetime(2026, 10, 5), datetime(2026, 10, 12)
+        )
+        assert [paper["id"] for paper in papers] == [rid]
+        assert papers[0]["published_date"] == "2022-08-04T00:00:00"
+        assert (
+            weekly_report.get_weekly_papers(datetime(2022, 8, 1), datetime(2022, 8, 8))
+            == []
+        )
 
 
 def test_invalid_optional_jsonld_type_does_not_drop_the_article():
