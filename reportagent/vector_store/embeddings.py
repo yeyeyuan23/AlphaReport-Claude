@@ -5,7 +5,7 @@ import time
 from functools import lru_cache
 from typing import Optional, Any
 
-from reportagent.utils.config import get_config, PROJECT_ROOT, get_llm_api_key, get_llm_base_url
+from reportagent.utils.config import get_config, get_llm_api_key, get_llm_base_url
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +17,10 @@ class EmbeddingClient:
     and local (sentence-transformers) backends.
     """
 
-    def __init__(self, backend  : Optional[str] = None):
-        self.backend = backend or get_config("vector_store", "embedding_backend", default="openai")
+    def __init__(self, backend: Optional[str] = None):
+        self.backend = backend or get_config(
+            "vector_store", "embedding_backend", default="openai"
+        )
 
         if self.backend == "local":
             self._model = self._init_local()
@@ -28,7 +30,9 @@ class EmbeddingClient:
             self._dim = get_config("vector_store", "voyage_dim", default=1024)
         else:
             self._client = self._init_openai()
-            self._model_name = get_config("vector_store", "openai_model", default="text-embedding-3-small")
+            self._model_name = get_config(
+                "vector_store", "openai_model", default="text-embedding-3-small"
+            )
             self._dim = get_config("vector_store", "openai_dim", default=1536)
 
     # -- local ----------------------------------------------------------
@@ -36,7 +40,9 @@ class EmbeddingClient:
     def _init_local(self):
         from sentence_transformers import SentenceTransformer
 
-        model_name = get_config("vector_store", "local_model", default="BAAI/bge-small-zh-v1.5")
+        model_name = get_config(
+            "vector_store", "local_model", default="BAAI/bge-small-zh-v1.5"
+        )
         logger.info("Loading local embedding model: %s", model_name)
         return SentenceTransformer(model_name)
 
@@ -90,7 +96,9 @@ class EmbeddingClient:
         resp = requests.post(
             "https://api.voyageai.com/v1/embeddings",
             json={
-                "model": get_config("vector_store", "voyage_model", default="voyage-3-lite"),
+                "model": get_config(
+                    "vector_store", "voyage_model", default="voyage-3-lite"
+                ),
                 "input": texts,
             },
             headers={"Authorization": f"Bearer {api_key}"},
@@ -113,7 +121,7 @@ class EmbeddingClient:
                 logger.warning("Embedding attempt %d failed: %s", attempt + 1, e)
                 if attempt == max_retries - 1:
                     raise
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
 
 
 @lru_cache(maxsize=1)

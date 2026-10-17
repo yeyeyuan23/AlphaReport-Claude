@@ -1,4 +1,5 @@
 """Collect on a fixed schedule and save source diagnostics independently of reports."""
+
 from __future__ import annotations
 
 import asyncio
@@ -17,8 +18,16 @@ DEFAULT_TOPICS = "量化策略,因子模型,高频交易,风险模型,执行算�
 
 def read_latest_collection(root: Path | None = None) -> dict | None:
     try:
-        value = json.loads(((root or PROJECT_ROOT) / "data/collections/latest.json").read_text(encoding="utf-8"))
-        if isinstance(value, dict) and value.get("completed_at") and value.get("status") in {"ok", "partial", "failed", "cancelled"}:
+        value = json.loads(
+            ((root or PROJECT_ROOT) / "data/collections/latest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        if (
+            isinstance(value, dict)
+            and value.get("completed_at")
+            and value.get("status") in {"ok", "partial", "failed", "cancelled"}
+        ):
             return value
     except (OSError, ValueError, TypeError):
         pass
@@ -27,12 +36,15 @@ def read_latest_collection(root: Path | None = None) -> dict | None:
 
 def _save(path: Path, result: dict):
     temporary = path.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.write_text(
+        json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     temporary.replace(path)
 
 
 def run_scheduled_collection() -> dict:
     from reportagent.services.collection import CollectionOptions, collect_reports
+
     config = get_config("daily_collection", default={})
     directory = PROJECT_ROOT / "data/collections"
     directory.mkdir(parents=True, exist_ok=True)
@@ -41,17 +53,32 @@ def run_scheduled_collection() -> dict:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return {"status": "already_running"}
-        result = {"run_id": str(uuid.uuid4()), "status": "running", "source_statuses": [],
-                  "started_at": datetime.now(timezone.utc).isoformat()}
+        result = {
+            "run_id": str(uuid.uuid4()),
+            "status": "running",
+            "source_statuses": [],
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
         try:
             sources = config.get("sources", ["arxiv", "eastmoney", "bigquant"])
-            options = CollectionOptions(topics=config.get("topics", DEFAULT_TOPICS),
-                sources=",".join(sources), days=config.get("lookback_days", 3),
-                max_results=config.get("max_per_source", 15), no_analysis=True, broad=True)
+            options = CollectionOptions(
+                topics=config.get("topics", DEFAULT_TOPICS),
+                sources=",".join(sources),
+                days=config.get("lookback_days", 3),
+                max_results=config.get("max_per_source", 15),
+                no_analysis=True,
+                broad=True,
+            )
+
             async def collect():
                 return await asyncio.wait_for(collect_reports(options), timeout=900)
+
             response = asyncio.run(collect())
-            if not isinstance(response, dict) or response.get("status") not in {"ok", "partial", "failed"}:
+            if not isinstance(response, dict) or response.get("status") not in {
+                "ok",
+                "partial",
+                "failed",
+            }:
                 raise ValueError("Collector returned no verifiable outcome")
             result.update(response)
         except Exception as error:

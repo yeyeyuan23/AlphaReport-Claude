@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import AsyncGenerator
 
 from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import create_react_agent
@@ -21,11 +19,18 @@ logger = logging.getLogger(__name__)
 
 
 def _load_system_prompt() -> str:
-    rel = get_config("chat", "system_prompt_path", default="configs/prompts/chat_system.txt")
+    rel = get_config(
+        "chat", "system_prompt_path", default="configs/prompts/chat_system.txt"
+    )
     path = PROJECT_ROOT / rel
     if path.exists():
-        return path.read_text(encoding="utf-8").strip() + format_skills_context(load_all_skills())
-    return "你是 ResearchAgent 智能助手，专注于量化金融研报的收集和分析。" + format_skills_context(load_all_skills())
+        return path.read_text(encoding="utf-8").strip() + format_skills_context(
+            load_all_skills()
+        )
+    return (
+        "你是 ResearchAgent 智能助手，专注于量化金融研报的收集和分析。"
+        + format_skills_context(load_all_skills())
+    )
 
 
 def _build_llm() -> ChatOpenAI:

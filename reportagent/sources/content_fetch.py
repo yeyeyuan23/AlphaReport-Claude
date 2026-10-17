@@ -3,6 +3,7 @@
 HTML previews remain source excerpts. They are not model-written summaries and do
 not establish that every page of an attached report is available.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -14,7 +15,11 @@ from urllib.parse import urljoin, urlsplit
 from bs4 import BeautifulSoup
 
 from reportagent.models.schemas import SearchResult
-from reportagent.sources.base import SearchDiagnostics, SourceParseError, usable_full_text
+from reportagent.sources.base import (
+    SearchDiagnostics,
+    SourceParseError,
+    usable_full_text,
+)
 from reportagent.utils.config import PROJECT_ROOT
 
 PDF_DIRECTORY = PROJECT_ROOT / "data" / "pdfs"
@@ -24,6 +29,7 @@ MAX_HTML_BYTES = 5 * 1024 * 1024
 
 async def bounded_download(client, url: str, max_bytes: int) -> bytes:
     """Stream a bounded response; limit actual bytes even without Content-Length."""
+
     async def read():
         if urlsplit(url).scheme not in {"https", "http"}:
             raise SourceParseError("unsupported public download URL")
@@ -40,6 +46,7 @@ async def bounded_download(client, url: str, max_bytes: int) -> bytes:
                     raise SourceParseError("download exceeds size limit")
                 chunks.append(chunk)
             return b"".join(chunks)
+
     return await asyncio.wait_for(read(), timeout=45)
 
 
@@ -59,7 +66,9 @@ def article_text(article) -> str | None:
         return None
     # Copy so dates/authors can still be read from the source tree.
     copy = BeautifulSoup(str(article), "html.parser")
-    for tag in copy.select("script, style, nav, aside, header, footer, h1, time, .comment, .comments"):
+    for tag in copy.select(
+        "script, style, nav, aside, header, footer, h1, time, .comment, .comments"
+    ):
         tag.decompose()
     for link in copy.find_all("a", href=True):
         href = link["href"]
@@ -77,7 +86,9 @@ def article_text(article) -> str | None:
 
 def pdf_links(soup, page_url: str) -> list[str]:
     urls = []
-    for tag in soup.find_all(["a", "iframe", "embed"], href=True) + soup.find_all(["iframe", "embed"], src=True):
+    for tag in soup.find_all(["a", "iframe", "embed"], href=True) + soup.find_all(
+        ["iframe", "embed"], src=True
+    ):
         href = tag.get("href") or tag.get("src") or ""
         if ".pdf" in urlsplit(href).path.lower():
             url = urljoin(page_url, href)
@@ -88,6 +99,7 @@ def pdf_links(soup, page_url: str) -> list[str]:
 
 def _extract_and_save_pdf(data: bytes, source: str) -> tuple[str | None, str]:
     import fitz
+
     with fitz.open(stream=data, filetype="pdf") as document:
         text = "\n".join(page.get_text() for page in document)
     # Opening with a PDF parser validates the file before it reaches the cache.
@@ -97,22 +109,41 @@ def _extract_and_save_pdf(data: bytes, source: str) -> tuple[str | None, str]:
     return text if usable_full_text(text) else None, str(path)
 
 
-async def hydrate_pdf(client, result: SearchResult, urls: list[str], diagnostics: SearchDiagnostics) -> SearchResult:
+async def hydrate_pdf(
+    client, result: SearchResult, urls: list[str], diagnostics: SearchDiagnostics
+) -> SearchResult:
     for url in urls[:3]:
         try:
             data = await bounded_download(client, url, MAX_PDF_BYTES)
             if not data[:1024].lstrip().startswith(b"%PDF-"):
                 raise SourceParseError("non-PDF response content")
             text, path = await asyncio.wait_for(
-                asyncio.to_thread(_extract_and_save_pdf, data, result.source.value), timeout=20)
-            updates = {"pdf_path": path, "raw_metadata": {**result.raw_metadata, "pdf_link": url,
-                                                          "content_kind": "pdf" if text else result.raw_metadata.get("content_kind", "pdf_without_text"),
-                                                          "text_scope": "linked_pdf" if text else result.raw_metadata.get("text_scope", "metadata_only")}}
+                asyncio.to_thread(_extract_and_save_pdf, data, result.source.value),
+                timeout=20,
+            )
+            updates = {
+                "pdf_path": path,
+                "raw_metadata": {
+                    **result.raw_metadata,
+                    "pdf_link": url,
+                    "content_kind": "pdf"
+                    if text
+                    else result.raw_metadata.get("content_kind", "pdf_without_text"),
+                    "text_scope": "linked_pdf"
+                    if text
+                    else result.raw_metadata.get("text_scope", "metadata_only"),
+                },
+            }
             if text:
-                updates.update(full_text=text, abstract_only=False,
-                               abstract=result.abstract or text[:1500].strip())
+                updates.update(
+                    full_text=text,
+                    abstract_only=False,
+                    abstract=result.abstract or text[:1500].strip(),
+                )
             else:
-                diagnostics.record_error(SourceParseError("PDF has no usable extracted text"), "PDF parse")
+                diagnostics.record_error(
+                    SourceParseError("PDF has no usable extracted text"), "PDF parse"
+                )
             result = result.model_copy(update=updates)
             if text:
                 break

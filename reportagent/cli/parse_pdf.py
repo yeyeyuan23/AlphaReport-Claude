@@ -56,7 +56,9 @@ def main():
 
                     async def fetch():
                         url = f"https://arxiv.org/pdf/{report.arxiv_id}"
-                        async with httpx.AsyncClient(timeout=60, follow_redirects=True) as c:
+                        async with httpx.AsyncClient(
+                            timeout=60, follow_redirects=True
+                        ) as c:
                             resp = await c.get(url)
                             resp.raise_for_status()
                             pdf_dir = Path("data/pdfs")
@@ -89,22 +91,15 @@ def main():
     if equations:
         try:
             from reportagent.processors.formula_normalizer import normalize_formulas
+
             equations = normalize_formulas(equations)
         except Exception:
             pass
 
-    result = {
-        "tables_count": len(tables),
-        "equations_count": len(equations),
-        "text_length": len(full_text) if full_text else 0,
-        "tables": tables,
-        "equations": equations,
-        "full_text": full_text,
-    }
-
     # Save to DB
     if args.save and report:
         from reportagent.db.engine import get_session_factory
+
         factory = get_session_factory()
         session = factory()
         try:

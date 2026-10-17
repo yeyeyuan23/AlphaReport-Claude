@@ -5,6 +5,7 @@ Usage:
     python -m reportagent.vector_store.populate
     python -m reportagent.vector_store.populate --report-id 42
 """
+
 from __future__ import annotations
 
 import argparse
@@ -16,18 +17,36 @@ from reportagent.db.repository import ReportRepository
 from reportagent.models.schemas import ReportListParams
 from reportagent.vector_store.store import VectorStore, get_vector_store
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 logger = logging.getLogger("vector_store_populate")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Rebuild ChromaDB index from report library")
-    parser.add_argument("--report-id", type=int, help="Index only a single report by ID")
-    parser.add_argument("--source", type=str, help="Filter by source (arxiv, eastmoney, bigquant, local_pdf)")
-    parser.add_argument("--limit", type=int, default=0, help="Max reports to index (0 = all)")
-    parser.add_argument("--has-full-text", action="store_true", default=True,
-                        help="Only index reports with full text (default: true)")
-    parser.add_argument("--clear", action="store_true", help="Clear collection before indexing")
+    parser = argparse.ArgumentParser(
+        description="Rebuild ChromaDB index from report library"
+    )
+    parser.add_argument(
+        "--report-id", type=int, help="Index only a single report by ID"
+    )
+    parser.add_argument(
+        "--source",
+        type=str,
+        help="Filter by source (arxiv, eastmoney, bigquant, local_pdf)",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=0, help="Max reports to index (0 = all)"
+    )
+    parser.add_argument(
+        "--has-full-text",
+        action="store_true",
+        default=True,
+        help="Only index reports with full text (default: true)",
+    )
+    parser.add_argument(
+        "--clear", action="store_true", help="Clear collection before indexing"
+    )
     args = parser.parse_args()
 
     store = get_vector_store()
@@ -65,7 +84,9 @@ def main():
             if not text.strip():
                 continue
 
-            quant_score, _ = compute_quant_score(db_report.title, db_report.abstract or "")
+            quant_score, _ = compute_quant_score(
+                db_report.title, db_report.abstract or ""
+            )
             chunks = store.index_report(
                 report_id=db_report.id,
                 title=db_report.title,
@@ -79,9 +100,13 @@ def main():
                 indexed_count += 1
                 chunk_count += chunks
                 if indexed_count % 10 == 0:
-                    logger.info("Indexed %d reports (%d chunks)...", indexed_count, chunk_count)
+                    logger.info(
+                        "Indexed %d reports (%d chunks)...", indexed_count, chunk_count
+                    )
 
-        logger.info("Done: indexed %d reports, %d total chunks", indexed_count, chunk_count)
+        logger.info(
+            "Done: indexed %d reports, %d total chunks", indexed_count, chunk_count
+        )
     finally:
         session.close()
 

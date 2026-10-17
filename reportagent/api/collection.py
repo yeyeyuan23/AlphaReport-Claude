@@ -78,6 +78,7 @@ def _make_progress_cb(task_id: str):
             task["phase"] = phase
             task["progress_message"] = message
             task["updated_at"] = datetime.utcnow().isoformat()
+
     return cb
 
 

@@ -23,6 +23,7 @@ def _get_mineru_parser():
     if _mineru_parser is None:
         try:
             from reportagent.processors.mineru_parser import MinerUParser
+
             _mineru_parser = MinerUParser()
             logger.info("MinerU parser loaded")
         except Exception as e:
@@ -35,6 +36,7 @@ def _get_docling_parser():
     if _docling_parser is None:
         try:
             from reportagent.processors.docling_parser import DoclingParser
+
             _docling_parser = DoclingParser()
             logger.info("Docling parser loaded")
         except Exception as e:
@@ -62,7 +64,9 @@ class LocalPDFSource(BaseSource):
 
         if not scan_dir.is_dir():
             self.last_search.unavailable = True
-            self.last_search.record_error(SourceParseError("PDF library is unavailable"), "configuration")
+            self.last_search.record_error(
+                SourceParseError("PDF library is unavailable"), "configuration"
+            )
             return []
 
         results = []
@@ -90,13 +94,15 @@ class LocalPDFSource(BaseSource):
     def _title_from_filename(self, stem: str) -> str:
         """Extract a readable title from a filename like '20250417-开源证券-xxx（12）：标题'."""
         # Remove leading date (8 digits)
-        cleaned = re.sub(r'^\d{8}[-_\s]*', '', stem)
+        cleaned = re.sub(r"^\d{8}[-_\s]*", "", stem)
         # Remove broker/org prefix before the report number pattern like （数字）
-        cleaned = re.sub(r'^.+?[（(]\d+[）)][-：:\s]*', '', cleaned)
+        cleaned = re.sub(r"^.+?[（(]\d+[）)][-：:\s]*", "", cleaned)
         # If nothing left after cleanup, return original
         return cleaned.strip() or stem
 
-    def _process_pdf(self, pdf_path: Path, criteria: UserCriteria) -> Optional[SearchResult]:
+    def _process_pdf(
+        self, pdf_path: Path, criteria: UserCriteria
+    ) -> Optional[SearchResult]:
         import json
 
         with pdf_path.open("rb") as stream:
@@ -121,7 +127,9 @@ class LocalPDFSource(BaseSource):
                 if parsed.tables:
                     tables_json_str = json.dumps(parsed.tables, ensure_ascii=False)
                 if parsed.equations:
-                    equations_json_str = json.dumps(parsed.equations, ensure_ascii=False)
+                    equations_json_str = json.dumps(
+                        parsed.equations, ensure_ascii=False
+                    )
             except Exception:
                 content = self.extractor.extract(pdf_path)
                 text = content.text
@@ -139,18 +147,26 @@ class LocalPDFSource(BaseSource):
                 if dparsed.text and len(dparsed.text) > len(text) * 0.5:
                     text = dparsed.text
                 # Merge tables: Docling tables are usually better structured
-                if dparsed.tables and (not tables_json_str or len(dparsed.tables) >= len(parsed.tables if mineru else [])):
+                if dparsed.tables and (
+                    not tables_json_str
+                    or len(dparsed.tables) >= len(parsed.tables if mineru else [])
+                ):
                     tables_json_str = json.dumps(dparsed.tables, ensure_ascii=False)
                 # Keep MinerU equations (better LaTeX); fall back to Docling if MinerU has none
                 if dparsed.equations and not equations_json_str:
-                    equations_json_str = json.dumps(dparsed.equations, ensure_ascii=False)
+                    equations_json_str = json.dumps(
+                        dparsed.equations, ensure_ascii=False
+                    )
             except Exception as e:
-                logger.warning("Docling secondary parse failed for '%s': %s", pdf_path.name, e)
+                logger.warning(
+                    "Docling secondary parse failed for '%s': %s", pdf_path.name, e
+                )
 
         # Normalize PDF extraction artifacts in formulas
         if equations_json_str:
             try:
                 from reportagent.processors.formula_normalizer import normalize_formulas
+
                 eqs = json.loads(equations_json_str)
                 eqs = normalize_formulas(eqs)
                 equations_json_str = json.dumps(eqs, ensure_ascii=False)
@@ -160,9 +176,7 @@ class LocalPDFSource(BaseSource):
         if not usable_full_text(text):
             raise SourceParseError("PDF has no usable extracted text")
 
-        search_text = (
-            (meta.get("title", "") + " " + text[:3000]).lower()
-        )
+        search_text = (meta.get("title", "") + " " + text[:3000]).lower()
 
         # Only filter if the user provided explicit keywords; topics alone
         # are English enum values that won't match Chinese PDF content.
@@ -174,7 +188,9 @@ class LocalPDFSource(BaseSource):
         title = meta.get("title", "") or pdf_path.stem
 
         # Fallback: if title is just a date or too short, use filename
-        if not title or re.match(r'^\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日?\s*$', title.strip()):
+        if not title or re.match(
+            r"^\d{4}\s*年\s*\d{1,2}\s*月\s*\d{1,2}\s*日?\s*$", title.strip()
+        ):
             title = self._title_from_filename(pdf_path.stem)
         sections = extract_paper_sections(text)
         abstract = sections["abstract"]

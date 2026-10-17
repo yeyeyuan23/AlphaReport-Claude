@@ -6,12 +6,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Request, Depends
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 
-from reportagent.chat.agent import build_chat_agent, build_chat_agent_v2
+from reportagent.chat.agent import build_chat_agent
 from reportagent.api.deps import get_or_create_user
 from reportagent.utils.config import get_config
 
@@ -27,7 +27,9 @@ class Conversation:
         self.email = email
         self.title = ""
         self.messages: list[dict[str, str]] = []
-        self.referenced_reports: dict[int, dict] = {}  # report_id → {title, source, topics}
+        self.referenced_reports: dict[
+            int, dict
+        ] = {}  # report_id → {title, source, topics}
         self.created_at = datetime.now(timezone.utc).isoformat()
         self.updated_at = self.created_at
 
@@ -38,8 +40,9 @@ _conversations: dict[str, Conversation] = {}
 def _extract_report_ids(text: str) -> list[int]:
     """Extract report IDs from text patterns like [123] or [ID: 456]."""
     import re
+
     ids = []
-    for m in re.finditer(r'\[(\d{1,6})\]', text):
+    for m in re.finditer(r"\[(\d{1,6})\]", text):
         rid = int(m.group(1))
         if rid > 0 and rid not in ids:
             ids.append(rid)
@@ -59,6 +62,7 @@ def _update_report_cache(conv: Conversation, text: str) -> None:
     try:
         from reportagent.db.engine import get_session_factory
         from reportagent.db.repository import ReportRepository
+
         factory = get_session_factory()
         session = factory()
         try:
@@ -72,7 +76,9 @@ def _update_report_cache(conv: Conversation, text: str) -> None:
                         "title": r.title,
                         "source": r.source or "",
                         "topics": r.topics or "",
-                        "date": r.published_date.strftime("%Y-%m-%d") if r.published_date else "",
+                        "date": r.published_date.strftime("%Y-%m-%d")
+                        if r.published_date
+                        else "",
                     }
         finally:
             session.close()
@@ -88,7 +94,9 @@ def _build_report_context(conv: Conversation) -> str:
     lines = ["## 本对话中已讨论的研报（可直接引用，无需重新搜索）"]
     for rid, info in conv.referenced_reports.items():
         date = info.get("date", "")
-        lines.append(f"- [{rid}] {info['title']} (来源: {info['source']}, 主题: {info['topics']}{', 日期: ' + date if date else ''})")
+        lines.append(
+            f"- [{rid}] {info['title']} (来源: {info['source']}, 主题: {info['topics']}{', 日期: ' + date if date else ''})"
+        )
     return "\n".join(lines)
 
 
@@ -99,7 +107,10 @@ class ChatRequest(BaseModel):
 
 
 def _sse(event_type: str, data: Any) -> str:
-    payload = json.dumps({"type": event_type, **(data if isinstance(data, dict) else {"content": data})}, ensure_ascii=False)
+    payload = json.dumps(
+        {"type": event_type, **(data if isinstance(data, dict) else {"content": data})},
+        ensure_ascii=False,
+    )
     return f"data: {payload}\n\n"
 
 
@@ -151,10 +162,13 @@ async def _stream_response(
 
     # Inject mode hint for brainstorm mode
     if mode == "brainstorm":
-        lc_messages.insert(0, SystemMessage(
-            content="[用户已选择创意伙伴模式] 请以研究协作者身份对话：主动使用 brainstorm_research 和 semantic_search_reports 工具，"
-                    "帮助用户从已有文献中发现研究空白、提出新思路。多问引导性问题，不要只是罗列论文。"
-        ))
+        lc_messages.insert(
+            0,
+            SystemMessage(
+                content="[用户已选择创意伙伴模式] 请以研究协作者身份对话：主动使用 brainstorm_research 和 semantic_search_reports 工具，"
+                "帮助用户从已有文献中发现研究空白、提出新思路。多问引导性问题，不要只是罗列论文。"
+            ),
+        )
 
     try:
         yield _sse("status", {"content": "thinking"})
@@ -194,19 +208,31 @@ async def _stream_response(
                 elif kind == "on_tool_start":
                     tool_name = event.get("name", "")
                     tool_input = data.get("input", {})
-                    yield _sse("tool_call", {
-                        "name": tool_name,
-                        "args": tool_input if isinstance(tool_input, dict) else {"input": str(tool_input)},
-                    })
+                    yield _sse(
+                        "tool_call",
+                        {
+                            "name": tool_name,
+                            "args": tool_input
+                            if isinstance(tool_input, dict)
+                            else {"input": str(tool_input)},
+                        },
+                    )
 
                 elif kind == "on_tool_end":
                     tool_name = event.get("name", "")
                     output = data.get("output", "")
-                    output_str = str(output.content) if hasattr(output, "content") else str(output)
-                    yield _sse("tool_result", {
-                        "name": tool_name,
-                        "result": output_str[:2000],
-                    })
+                    output_str = (
+                        str(output.content)
+                        if hasattr(output, "content")
+                        else str(output)
+                    )
+                    yield _sse(
+                        "tool_result",
+                        {
+                            "name": tool_name,
+                            "result": output_str[:2000],
+                        },
+                    )
 
         if full_response:
             conv.messages.append({"role": "assistant", "content": full_response})
@@ -233,7 +259,9 @@ async def chat_stream(req: ChatRequest, user: dict = Depends(get_or_create_user)
     conversation_id = req.conversation_id or str(uuid.uuid4())
     return StreamingResponse(
         _stream_response(
-            conversation_id, req.message, req.mode,
+            conversation_id,
+            req.message,
+            req.mode,
             user_id=str(user["id"]) if user["id"] else "",
             email=user["email"],
         ),
@@ -251,7 +279,8 @@ async def list_conversations(user: dict = Depends(get_or_create_user)):
     resolved_user_id = str(user["id"]) if user["id"] else ""
     items = sorted(
         [
-            c for c in _conversations.values()
+            c
+            for c in _conversations.values()
             if not resolved_user_id or c.user_id == resolved_user_id
         ],
         key=lambda c: c.updated_at,
@@ -277,7 +306,9 @@ async def list_conversations(user: dict = Depends(get_or_create_user)):
 
 
 @router.get("/conversations/{conversation_id}")
-async def get_conversation(conversation_id: str, user: dict = Depends(get_or_create_user)):
+async def get_conversation(
+    conversation_id: str, user: dict = Depends(get_or_create_user)
+):
     conv = _conversations.get(conversation_id)
     if not conv:
         return {"success": False, "error": "Conversation not found"}
@@ -299,7 +330,9 @@ async def get_conversation(conversation_id: str, user: dict = Depends(get_or_cre
 
 
 @router.delete("/conversations/{conversation_id}")
-async def delete_conversation(conversation_id: str, user: dict = Depends(get_or_create_user)):
+async def delete_conversation(
+    conversation_id: str, user: dict = Depends(get_or_create_user)
+):
     if conversation_id in _conversations:
         resolved_user_id = str(user["id"]) if user["id"] else ""
         conv = _conversations[conversation_id]

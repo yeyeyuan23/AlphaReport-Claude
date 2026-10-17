@@ -1,16 +1,16 @@
-import { useState, useEffect, useRef } from "react";
-import Markdown from "react-markdown";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
+import { useState, useEffect, useRef } from 'react';
+import Markdown from 'react-markdown';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 
 const markdownPlugins = { remarkPlugins: [remarkMath], rehypePlugins: [rehypeKatex] };
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Skeleton } from "@/components/ui/skeleton";
-import { getKnowledgeCard } from "@/services/api";
-import type { KnowledgeCard as KnowledgeCardType } from "@/types";
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Skeleton } from '@/components/ui/skeleton';
+import { getKnowledgeCard } from '@/services/api';
+import type { KnowledgeCard as KnowledgeCardType } from '@/types';
 
 function SectionCard({
   title,
@@ -56,25 +56,36 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
       if (res.success && res.data) {
         setData(res.data as KnowledgeCardType);
       } else {
-        setError((res as { error?: string }).error || "Failed to load knowledge card");
+        setError((res as { error?: string }).error || 'Failed to load knowledge card');
       }
     } catch (e) {
       if (requestId.current === id) setError((e as Error).message);
     } finally {
-      if (requestId.current === id) { setLoading(false); setRegenerating(false); }
+      if (requestId.current === id) {
+        setLoading(false);
+        setRegenerating(false);
+      }
     }
   };
 
   useEffect(() => {
     const id = {};
     requestId.current = id;
-    getKnowledgeCard(reportId).then(res => {
-      if (requestId.current !== id) return;
-      setData(res.data); setLoading(false);
-    }).catch((e: Error) => {
-      if (requestId.current === id) { setError(e.message); setLoading(false); }
-    });
-    return () => { requestId.current = null; };
+    getKnowledgeCard(reportId)
+      .then((res) => {
+        if (requestId.current !== id) return;
+        setData(res.data);
+        setLoading(false);
+      })
+      .catch((e: Error) => {
+        if (requestId.current === id) {
+          setError(e.message);
+          setLoading(false);
+        }
+      });
+    return () => {
+      requestId.current = null;
+    };
   }, [reportId]);
 
   if (loading && !data) {
@@ -104,10 +115,9 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
   return (
     <ScrollArea className="h-full">
       <div className="p-4 sm:p-5 space-y-4">
-
         {/* Topic & Asset Tags */}
         <div className="flex flex-wrap gap-1.5 items-center">
-          {(data.topics.length > 0 || data.asset_classes.length > 0) ? (
+          {data.topics.length > 0 || data.asset_classes.length > 0 ? (
             <>
               {data.topics.map((t) => (
                 <Badge key={t} variant="secondary" className="text-xs">
@@ -121,7 +131,9 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
               ))}
             </>
           ) : null}
-          <Badge variant="outline" className="text-xs ml-auto">{data.quality_label}</Badge>
+          <Badge variant="outline" className="text-xs ml-auto">
+            {data.quality_label}
+          </Badge>
           <Button
             variant="ghost"
             size="sm"
@@ -129,14 +141,14 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
             onClick={() => fetchCard(true)}
             disabled={regenerating}
           >
-            {regenerating ? "刷新中..." : "刷新展示"}
+            {regenerating ? '刷新中...' : '刷新展示'}
           </Button>
         </div>
         <p className="text-xs text-muted-foreground">{data.notice}</p>
 
         {/* Summary */}
         {data.summary && (
-          <SectionCard title={data.status === "ready" ? "研究问题" : "原始摘要"} icon="&#x1F4DD;">
+          <SectionCard title={data.status === 'ready' ? '研究问题' : '原始摘要'} icon="&#x1F4DD;">
             <div className="prose prose-sm max-w-none text-muted-foreground leading-relaxed">
               <Markdown {...markdownPlugins}>{data.summary}</Markdown>
             </div>
@@ -204,16 +216,30 @@ export default function KnowledgeCard({ reportId }: { reportId: number }) {
           </SectionCard>
         )}
 
-        {data.limitations?.length > 0 && <SectionCard title="局限与待核查项" icon="🔎">
-          <ul className="list-disc pl-4 space-y-2">{data.limitations.map((s, i) => <li key={i}>{s}</li>)}</ul>
-        </SectionCard>}
-        {data.evidence?.length > 0 && <SectionCard title="原文引证（供核对）" icon="📖">
-          <div className="space-y-3">{data.evidence.map((e, i) => <details key={i}>
-            <summary className="cursor-pointer">{e.claim}</summary>
-            <p className="text-xs text-muted-foreground mt-2">{e.locator}</p>
-            <blockquote className="border-l-2 pl-3 mt-2 text-xs whitespace-pre-wrap">{e.raw_quote || e.quote}</blockquote>
-          </details>)}</div>
-        </SectionCard>}
+        {data.limitations?.length > 0 && (
+          <SectionCard title="局限与待核查项" icon="🔎">
+            <ul className="list-disc pl-4 space-y-2">
+              {data.limitations.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ul>
+          </SectionCard>
+        )}
+        {data.evidence?.length > 0 && (
+          <SectionCard title="原文引证（供核对）" icon="📖">
+            <div className="space-y-3">
+              {data.evidence.map((e, i) => (
+                <details key={i}>
+                  <summary className="cursor-pointer">{e.claim}</summary>
+                  <p className="text-xs text-muted-foreground mt-2">{e.locator}</p>
+                  <blockquote className="border-l-2 pl-3 mt-2 text-xs whitespace-pre-wrap">
+                    {e.raw_quote || e.quote}
+                  </blockquote>
+                </details>
+              ))}
+            </div>
+          </SectionCard>
+        )}
 
         {/* Empty state */}
         {!data.summary && data.highlights.length === 0 && data.methodology_steps.length === 0 && (

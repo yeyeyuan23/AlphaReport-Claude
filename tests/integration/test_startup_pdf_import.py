@@ -1,4 +1,5 @@
 """Startup imports real local PDFs once, preserving retries and service availability."""
+
 import asyncio
 import sys
 from types import ModuleType, SimpleNamespace
@@ -15,9 +16,18 @@ def write_pdf(path, title="Portfolio risk model", extra=""):
     path.parent.mkdir(parents=True, exist_ok=True)
     with fitz.open() as document:
         page = document.new_page()
-        page.insert_textbox(fitz.Rect(40, 40, 550, 750),
-            title + "\nAbstract\n" + ("We model financial stock returns and portfolio risk using quantitative factors. " * 6) +
-            "\n1 Introduction\n" + "This section discusses portfolio construction and financial factors. " + extra)
+        page.insert_textbox(
+            fitz.Rect(40, 40, 550, 750),
+            title
+            + "\nAbstract\n"
+            + (
+                "We model financial stock returns and portfolio risk using quantitative factors. "
+                * 6
+            )
+            + "\n1 Introduction\n"
+            + "This section discusses portfolio construction and financial factors. "
+            + extra,
+        )
         document.set_metadata({"title": title, "author": "Fixture Author"})
         document.save(path)
 
@@ -26,6 +36,7 @@ def write_pdf(path, title="Portfolio risk model", extra=""):
 def importer(tmp_path, monkeypatch):
     from reportagent.services import local_pdf_import as module
     from reportagent.sources import local_pdf
+
     engine = create_engine(f"sqlite:///{tmp_path / 'library.db'}")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -35,7 +46,13 @@ def importer(tmp_path, monkeypatch):
     monkeypatch.setattr(module, "init_db", lambda: None)
     monkeypatch.setattr(module, "get_session_factory", lambda: factory)
     config = {"enabled": True, "import_on_startup": True, "library_path": "pdf_library"}
-    monkeypatch.setattr(module, "get_config", lambda *keys, default=None: config if keys == ("sources", "local_pdf") else default)
+    monkeypatch.setattr(
+        module,
+        "get_config",
+        lambda *keys, default=None: config
+        if keys == ("sources", "local_pdf")
+        else default,
+    )
     monkeypatch.setattr(local_pdf, "_get_mineru_parser", lambda: None)
     monkeypatch.setattr(local_pdf, "_get_docling_parser", lambda: None)
     calls = []
@@ -46,21 +63,38 @@ def importer(tmp_path, monkeypatch):
             calls.append(messages)
             if fail:
                 raise RuntimeError("model temporarily unavailable")
-            return {"markets": [], "asset_classes": ["stock"],
-                    "frequencies": [], "topics": ["risk_model"],
-                    "custom_tags": [], "confidence": 0.9, "evidence": {
-                        "asset_classes.stock": {"source": "material", "quote": "stock returns", "reason": "Stock asset"},
-                        "topics.risk_model": {"source": "material", "quote": "portfolio risk", "reason": "Risk model"}}}
+            return {
+                "markets": [],
+                "asset_classes": ["stock"],
+                "frequencies": [],
+                "topics": ["risk_model"],
+                "custom_tags": [],
+                "confidence": 0.9,
+                "evidence": {
+                    "asset_classes.stock": {
+                        "source": "material",
+                        "quote": "stock returns",
+                        "reason": "Stock asset",
+                    },
+                    "topics.risk_model": {
+                        "source": "material",
+                        "quote": "portfolio risk",
+                        "reason": "Risk model",
+                    },
+                },
+            }
 
     monkeypatch.setattr(module, "LLMClient", Client)
-    yield SimpleNamespace(module=module, factory=factory, root=root,
-                          calls=calls, fail=fail, config=config)
+    yield SimpleNamespace(
+        module=module, factory=factory, root=root, calls=calls, fail=fail, config=config
+    )
     engine.dispose()
 
 
 def test_startup_launches_import_in_background_and_cancels_on_shutdown(monkeypatch):
     import reportagent.main as main
     from reportagent.services import scheduler
+
     started = asyncio.Event()
     cancelled = []
 
@@ -81,7 +115,9 @@ def test_startup_launches_import_in_background_and_cancels_on_shutdown(monkeypat
     async def run():
         async with main.lifespan(SimpleNamespace()):
             await asyncio.sleep(0.01)
-            assert started.is_set(), "Service startup must trigger PDF import without awaiting its completion"
+            assert started.is_set(), (
+                "Service startup must trigger PDF import without awaiting its completion"
+            )
         assert cancelled == [True]
 
     asyncio.run(run())
@@ -90,6 +126,7 @@ def test_startup_launches_import_in_background_and_cancels_on_shutdown(monkeypat
 def test_standalone_bot_starts_import_without_delaying_websocket(monkeypatch):
     import reportagent.bot.feishu as bot
     import threading
+
     started = threading.Event()
     release = threading.Event()
     finished = threading.Event()
@@ -125,7 +162,9 @@ def test_standalone_bot_starts_import_without_delaying_websocket(monkeypatch):
         release.set()
         if started.is_set():
             assert finished.wait(timeout=2)
-    assert observations == [(True, False)], "Bot startup must initiate import without blocking WebSocket"
+    assert observations == [(True, False)], (
+        "Bot startup must initiate import without blocking WebSocket"
+    )
 
 
 def test_recursive_import_only_classifies_new_or_changed_files(importer):
@@ -146,7 +185,13 @@ def test_recursive_import_only_classifies_new_or_changed_files(importer):
     assert second["unchanged"] == 2
     assert len(importer.calls) == 2
     with importer.factory() as session:
-        assert session.query(Report).filter_by(title="Portfolio risk model").one().analysis_json == '{"saved": true}'
+        assert (
+            session.query(Report)
+            .filter_by(title="Portfolio risk model")
+            .one()
+            .analysis_json
+            == '{"saved": true}'
+        )
     a.unlink()
     write_pdf(a, extra="The revised paper adds a new factor experiment.")
     third = asyncio.run(importer.module.import_pdf_library())
@@ -154,7 +199,13 @@ def test_recursive_import_only_classifies_new_or_changed_files(importer):
     assert len(importer.calls) == 3
     with importer.factory() as session:
         assert session.query(Report).count() == 2
-        assert session.query(Report).filter_by(title="Portfolio risk model").one().analysis_json is None
+        assert (
+            session.query(Report)
+            .filter_by(title="Portfolio risk model")
+            .one()
+            .analysis_json
+            is None
+        )
 
 
 def test_more_than_default_collection_limit_is_imported(importer):
@@ -168,7 +219,11 @@ def test_more_than_default_collection_limit_is_imported(importer):
 def test_date_precision_and_evidence_survive_import_and_library_queries(importer):
     import json
     from reportagent.cli.db_query import _report_to_dict
-    write_pdf(importer.root / "paper.pdf", extra="\nPublished as a conference paper at ICLR 2025")
+
+    write_pdf(
+        importer.root / "paper.pdf",
+        extra="\nPublished as a conference paper at ICLR 2025",
+    )
     result = asyncio.run(importer.module.import_pdf_library())
     assert result["added"] == 1
     with importer.factory() as session:
@@ -223,13 +278,18 @@ def test_reused_database_id_does_not_hide_a_deleted_import(importer):
     with importer.factory() as session:
         old_id = session.query(Report).one().id
         session.query(Report).delete()
-        session.add(Report(title="Unrelated paper", source="arxiv", content_hash="unrelated"))
+        session.add(
+            Report(title="Unrelated paper", source="arxiv", content_hash="unrelated")
+        )
         session.commit()
         assert session.query(Report).one().id == old_id
     result = asyncio.run(importer.module.import_pdf_library())
     assert result["added"] == 1 and result["unchanged"] == 0
     with importer.factory() as session:
-        assert {r.title for r in session.query(Report)} == {"Portfolio risk model", "Unrelated paper"}
+        assert {r.title for r in session.query(Report)} == {
+            "Portfolio risk model",
+            "Unrelated paper",
+        }
 
 
 def test_disabled_import_does_not_create_library_or_call_model(importer):
@@ -255,8 +315,14 @@ def test_simultaneous_startups_do_not_duplicate_classification(importer):
             importer.calls.append(messages)
             entered.set()
             await release.wait()
-            return {"markets": ["global"], "asset_classes": ["stock"], "frequencies": [],
-                    "topics": ["risk_model"], "custom_tags": [], "confidence": 0.9}
+            return {
+                "markets": ["global"],
+                "asset_classes": ["stock"],
+                "frequencies": [],
+                "topics": ["risk_model"],
+                "custom_tags": [],
+                "confidence": 0.9,
+            }
 
     importer.module.LLMClient = Client
 

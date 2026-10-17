@@ -10,7 +10,6 @@ import hashlib
 import logging
 
 
-
 from reportagent.db.engine import init_db, get_session_factory
 from reportagent.db.repository import ReportRepository
 from reportagent.models.database import Report
@@ -26,24 +25,48 @@ logger = logging.getLogger("analyze")
 
 def analysis_cache_fingerprint(report, depth: str) -> str:
     """A cache represents this purpose, source snapshot and effective model policy."""
-    resources = {name: skill_resource("analyze-report", name).read_text(encoding="utf-8")
-                 for name in ("analysis.yaml", "summary.yaml", "grounding.md")}
-    payload = {"schema": 1, "depth": depth, "model": get_llm_model(),
-               "provider": get_llm_provider(), "endpoint": get_llm_base_url(),
-               "resources": resources,
-               "paper": {key: getattr(report, key, None) for key in (
-                   "title", "abstract", "full_text", "has_full_text", "arxiv_id", "equations_json")}}
-    return hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+    resources = {
+        name: skill_resource("analyze-report", name).read_text(encoding="utf-8")
+        for name in ("analysis.yaml", "summary.yaml", "grounding.md")
+    }
+    payload = {
+        "schema": 1,
+        "depth": depth,
+        "model": get_llm_model(),
+        "provider": get_llm_provider(),
+        "endpoint": get_llm_base_url(),
+        "resources": resources,
+        "paper": {
+            key: getattr(report, key, None)
+            for key in (
+                "title",
+                "abstract",
+                "full_text",
+                "has_full_text",
+                "arxiv_id",
+                "equations_json",
+            )
+        },
+    }
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()
+    ).hexdigest()
 
 
 def _usable_cache(raw: str | None, fingerprint: str, depth: str) -> bool:
     try:
         data = json.loads(raw or "null")
-        if not isinstance(data, dict) or data.get("analysis_fingerprint") != fingerprint or data.get("depth") != depth:
+        if (
+            not isinstance(data, dict)
+            or data.get("analysis_fingerprint") != fingerprint
+            or data.get("depth") != depth
+        ):
             return False
         if depth == "quick":
-            return all(isinstance(data.get(key), str) and data[key].strip()
-                       for key in ("research_question", "core_contribution", "summary"))
+            return all(
+                isinstance(data.get(key), str) and data[key].strip()
+                for key in ("research_question", "core_contribution", "summary")
+            )
         validate_analysis(data)
         return True
     except (ValueError, TypeError):
@@ -56,7 +79,7 @@ class AnalysisOptions:
     unanalyzed: bool = False
     report_id: int | None = None
     recent: int | None = None
-    depth: str = 'standard'
+    depth: str = "standard"
     force: bool = False
     topic: str | None = None
 
@@ -70,7 +93,9 @@ async def run_analysis(options: AnalysisOptions) -> dict:
     """
     if options.depth not in {"quick", "standard", "deep"}:
         raise ValueError("depth must be quick, standard or deep")
-    if options.topic is not None and (not options.topic.strip() or "," in options.topic):
+    if options.topic is not None and (
+        not options.topic.strip() or "," in options.topic
+    ):
         raise ValueError("topic must be one nonempty classification token")
     if options.recent is not None and options.recent < 1:
         raise ValueError("recent must be positive")
@@ -82,7 +107,9 @@ async def run_analysis(options: AnalysisOptions) -> dict:
     try:
         repo = ReportRepository(session)
 
-        query = session.query(Report).order_by(Report.created_at.desc(), Report.id.desc())
+        query = session.query(Report).order_by(
+            Report.created_at.desc(), Report.id.desc()
+        )
         if options.report_id is not None:
             reports = [repo.get_report(options.report_id)]
             if not reports[0]:
@@ -94,17 +121,28 @@ async def run_analysis(options: AnalysisOptions) -> dict:
             topic = options.topic.strip()
             # Repository topic search uses substring matching. Class batch selection
             # instead compares complete CSV tokens and scans beyond the first page.
-            reports = [r for r in query.yield_per(200)
-                       if topic in {token.strip() for token in (r.topics or "").split(",")}]
+            reports = [
+                r
+                for r in query.yield_per(200)
+                if topic in {token.strip() for token in (r.topics or "").split(",")}
+            ]
         elif options.unanalyzed:
             reports = [r for r in query.yield_per(200) if not r.analysis_json]
         else:
             reports = query.all()
 
-        audit = {"selected": len(reports), "analyzed": 0, "skipped": 0, "failed": 0,
-                 "report_ids": [r.id for r in reports], "analyzed_ids": [],
-                 "skipped_ids": [], "failed_ids": [], "errors": {},
-                 "evidence_scope_by_id": {}}
+        audit = {
+            "selected": len(reports),
+            "analyzed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "report_ids": [r.id for r in reports],
+            "analyzed_ids": [],
+            "skipped_ids": [],
+            "failed_ids": [],
+            "errors": {},
+            "evidence_scope_by_id": {},
+        }
 
         if not reports:
             logger.info("No reports to analyze")
@@ -114,16 +152,26 @@ async def run_analysis(options: AnalysisOptions) -> dict:
 
         agent = None
         for i, r in enumerate(reports):
-            evidence_scope = "full_text" if r.has_full_text and (r.full_text or "").strip() else "abstract"
+            evidence_scope = (
+                "full_text"
+                if r.has_full_text and (r.full_text or "").strip()
+                else "abstract"
+            )
             audit["evidence_scope_by_id"][r.id] = evidence_scope
             fingerprint = analysis_cache_fingerprint(r, options.depth)
-            if not options.force and _usable_cache(r.analysis_json, fingerprint, options.depth):
+            if not options.force and _usable_cache(
+                r.analysis_json, fingerprint, options.depth
+            ):
                 audit["skipped_ids"].append(r.id)
                 continue
 
-            full_text = (r.full_text if evidence_scope == "full_text" else r.abstract) or ""
+            full_text = (
+                r.full_text if evidence_scope == "full_text" else r.abstract
+            ) or ""
             if not has_screening_material({"title": r.title, "abstract": full_text}):
-                logger.warning(f"  [{i+1}/{len(reports)}] SKIP (no text): {r.title[:50]}")
+                logger.warning(
+                    f"  [{i + 1}/{len(reports)}] SKIP (no text): {r.title[:50]}"
+                )
                 audit["skipped_ids"].append(r.id)
                 continue
 
@@ -140,9 +188,14 @@ async def run_analysis(options: AnalysisOptions) -> dict:
                     equations_json=r.equations_json,
                 )
                 if options.depth == "quick":
-                    if not all(value.strip() for value in (
-                        result.research_question, result.core_contribution, result.summary
-                    )):
+                    if not all(
+                        value.strip()
+                        for value in (
+                            result.research_question,
+                            result.core_contribution,
+                            result.summary,
+                        )
+                    ):
                         raise ValueError("分析不完整：研究问题、核心贡献或总结为空")
                 else:
                     result = validate_analysis(result.model_dump())
@@ -150,28 +203,40 @@ async def run_analysis(options: AnalysisOptions) -> dict:
                 if any(call.get("complete") is not True for call in calls):
                     raise ValueError("存在失败或截断的模型调用，停止保存本篇分析")
                 analysis_dict = result.model_dump()
-                analysis_dict.update(evidence_scope=evidence_scope, model_calls=calls,
-                                     depth=options.depth, analysis_fingerprint=fingerprint)
+                analysis_dict.update(
+                    evidence_scope=evidence_scope,
+                    model_calls=calls,
+                    depth=options.depth,
+                    analysis_fingerprint=fingerprint,
+                )
                 # Save analysis, but only evidence-backed cards may populate the cache.
-                r.analysis_json = json.dumps(analysis_dict, ensure_ascii=False, indent=2)
+                r.analysis_json = json.dumps(
+                    analysis_dict, ensure_ascii=False, indent=2
+                )
                 from reportagent.services.knowledge_cards import get_knowledge_card
+
                 get_knowledge_card(r)
                 session.commit()
                 audit["analyzed_ids"].append(r.id)
-                logger.info(f"  [{i+1}/{len(reports)}] ✓ {r.title[:50]}")
+                logger.info(f"  [{i + 1}/{len(reports)}] ✓ {r.title[:50]}")
             except Exception as e:
                 session.rollback()
                 audit["failed_ids"].append(r.id)
                 audit["errors"][r.id] = str(e)
-                logger.warning(f"  [{i+1}/{len(reports)}] ✗ {r.title[:50]}: {e}")
+                logger.warning(f"  [{i + 1}/{len(reports)}] ✗ {r.title[:50]}: {e}")
 
             # Rate limit
             await asyncio.sleep(0.2)
 
         for status in ("analyzed", "skipped", "failed"):
             audit[status] = len(audit[f"{status}_ids"])
-        logger.info("Analyzed: %s, Skipped: %s, Failed: %s, Total: %s",
-                    audit["analyzed"], audit["skipped"], audit["failed"], audit["selected"])
+        logger.info(
+            "Analyzed: %s, Skipped: %s, Failed: %s, Total: %s",
+            audit["analyzed"],
+            audit["skipped"],
+            audit["failed"],
+            audit["selected"],
+        )
         return audit
 
     finally:

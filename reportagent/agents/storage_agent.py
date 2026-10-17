@@ -58,6 +58,7 @@ class StorageAgent:
             try:
                 from reportagent.models.database import Report
                 from reportagent.classifiers.quant_filter import compute_quant_score
+
                 indexed = 0
                 for cr in reports:
                     sr = cr.search_result
@@ -66,7 +67,11 @@ class StorageAgent:
                     if not text.strip():
                         continue
                     c_hash = content_hash(sr.title, sr.authors)
-                    db_report = session.query(Report).filter(Report.content_hash == c_hash).first()
+                    db_report = (
+                        session.query(Report)
+                        .filter(Report.content_hash == c_hash)
+                        .first()
+                    )
                     if not db_report:
                         continue
                     topics = ",".join(t.value for t in cl.topics)
@@ -83,7 +88,11 @@ class StorageAgent:
                     )
                     indexed += chunks
                 if indexed:
-                    logger.info("Vector store: indexed %d chunks from %d reports", indexed, len(reports))
+                    logger.info(
+                        "Vector store: indexed %d chunks from %d reports",
+                        indexed,
+                        len(reports),
+                    )
             finally:
                 session.close()
         except Exception as e:

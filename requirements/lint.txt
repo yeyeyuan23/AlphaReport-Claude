@@ -1,0 +1,2 @@
+# Keep local and GitHub format/lint checks identical.
+ruff==0.14.10

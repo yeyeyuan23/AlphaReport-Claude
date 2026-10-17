@@ -16,7 +16,9 @@ def offline_boundaries(request, monkeypatch):
         return
 
     def no_network(*args, **kwargs):
-        raise AssertionError("Offline checks must mock external API, download and message connections")
+        raise AssertionError(
+            "Offline checks must mock external API, download and message connections"
+        )
 
     monkeypatch.setattr(socket.socket, "connect", no_network)
     monkeypatch.setattr(socket.socket, "connect_ex", no_network)

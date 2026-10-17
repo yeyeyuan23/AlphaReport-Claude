@@ -41,7 +41,8 @@ class RuleClassifier:
             enum_cls = _ENUM_MAP.get(dim)
             if enum_cls:
                 matched_values[dim] = [
-                    enum_cls(v) for v, s in dim_scores.items()
+                    enum_cls(v)
+                    for v, s in dim_scores.items()
                     if s >= _MATCH_THRESHOLD and v in [e.value for e in enum_cls]
                 ]
             else:

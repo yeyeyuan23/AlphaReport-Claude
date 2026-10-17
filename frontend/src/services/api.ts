@@ -1,10 +1,19 @@
-import type { ReportSummary, ReportDetail, ReportStats, KnowledgeCard, ReproductionCard } from "../types";
+import type {
+  ReportSummary,
+  ReportDetail,
+  ReportStats,
+  KnowledgeCard,
+  ReproductionCard,
+} from '../types';
 
-const BASE = "/api/v1";
+const BASE = '/api/v1';
 
-async function request<T>(url: string, options?: RequestInit): Promise<{ success: boolean; data: T }> {
+async function request<T>(
+  url: string,
+  options?: RequestInit,
+): Promise<{ success: boolean; data: T }> {
   const res = await fetch(url, {
-    headers: { "Content-Type": "application/json" },
+    headers: { 'Content-Type': 'application/json' },
     ...options,
   });
   if (!res.ok) throw new Error(`Request failed (${res.status})`);
@@ -29,10 +38,10 @@ export interface ReportListParams {
 export async function getReports(params: ReportListParams = {}) {
   const qs = new URLSearchParams();
   Object.entries(params).forEach(([k, v]) => {
-    if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+    if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
   });
   return request<{ reports: ReportSummary[]; total: number; limit: number; offset: number }>(
-    `${BASE}/reports?${qs.toString()}`
+    `${BASE}/reports?${qs.toString()}`,
   );
 }
 
@@ -62,11 +71,16 @@ export interface ResearchBriefingResult {
 }
 
 export function getKnowledgeCard(reportId: number, force = false) {
-  return request<KnowledgeCard>(`${BASE}/reports/${reportId}/knowledge-card?force=${force}`, { method: "POST" });
+  return request<KnowledgeCard>(`${BASE}/reports/${reportId}/knowledge-card?force=${force}`, {
+    method: 'POST',
+  });
 }
 
 export function getResearchBriefing(reportId: number, force = false) {
-  return request<ResearchBriefingResult>(`${BASE}/reports/${reportId}/research-briefing?force=${force}`, { method: "POST" });
+  return request<ResearchBriefingResult>(
+    `${BASE}/reports/${reportId}/research-briefing?force=${force}`,
+    { method: 'POST' },
+  );
 }
 
 export function getReproductionCard(reportId: number) {
@@ -74,5 +88,7 @@ export function getReproductionCard(reportId: number) {
 }
 
 export function prepareReproductionCard(reportId: number, force = false) {
-  return request<ReproductionCard>(`${BASE}/reports/${reportId}/reproduction-card?force=${force}`, { method: "POST" });
+  return request<ReproductionCard>(`${BASE}/reports/${reportId}/reproduction-card?force=${force}`, {
+    method: 'POST',
+  });
 }

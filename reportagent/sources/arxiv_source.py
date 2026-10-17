@@ -10,7 +10,10 @@ import httpx
 
 from reportagent.models.schemas import UserCriteria, SearchResult, SourceType
 from reportagent.sources.base import (
-    BaseSource, SourceParseError, deduplicate_results, usable_full_text,
+    BaseSource,
+    SourceParseError,
+    deduplicate_results,
+    usable_full_text,
 )
 from reportagent.utils.topic_expansion import expand_topics
 from reportagent.sources.date_window import in_date_window, utc_datetime
@@ -111,8 +114,15 @@ class ArxivSource(BaseSource):
         self._start_search()
         # All 9 q-fin subcategories
         qfin_cats = [
-            "q-fin.CP", "q-fin.EC", "q-fin.GN", "q-fin.MF",
-            "q-fin.PM", "q-fin.PR", "q-fin.RM", "q-fin.ST", "q-fin.TR",
+            "q-fin.CP",
+            "q-fin.EC",
+            "q-fin.GN",
+            "q-fin.MF",
+            "q-fin.PM",
+            "q-fin.PR",
+            "q-fin.RM",
+            "q-fin.ST",
+            "q-fin.TR",
         ]
         cat_query = " OR ".join(f"cat:{c}" for c in qfin_cats)
 
@@ -120,9 +130,19 @@ class ArxivSource(BaseSource):
         # cs.AI: 量化论文大量散落在 AI 分类（LLM-based trading, RL agent etc.）
         # math.OC: 组合优化、最优执行等方法论论文常在优化控制分类
         finance_terms = [
-            "finance", "financial", "stock", "trading", "portfolio",
-            "quantitative", "market", "volatility", "option", "risk",
-            "asset", "equity", "factor",
+            "finance",
+            "financial",
+            "stock",
+            "trading",
+            "portfolio",
+            "quantitative",
+            "market",
+            "volatility",
+            "option",
+            "risk",
+            "asset",
+            "equity",
+            "factor",
         ]
         fin_term_query = " OR ".join(f'all:"{t}"' for t in finance_terms)
         cross_cats = ["stat.ML", "cs.LG", "cs.CL", "cs.AI", "math.OC"]
@@ -133,7 +153,9 @@ class ArxivSource(BaseSource):
         logger.info("Broad search query: %s", query[:200])
         return await self._do_search(query, criteria)
 
-    async def _do_search(self, query: str, criteria: UserCriteria) -> list[SearchResult]:
+    async def _do_search(
+        self, query: str, criteria: UserCriteria
+    ) -> list[SearchResult]:
         """Execute search with given query string."""
         partial_results: list[SearchResult] = []
         stop = Event()
@@ -143,33 +165,49 @@ class ArxivSource(BaseSource):
             if has_date_filter:
                 # The API supports submittedDate (GMT), not updatedDate. Apply the
                 # range before paging so older windows aren't hidden by newest N.
-                start = utc_datetime(criteria.date_from).strftime("%Y%m%d%H%M") if criteria.date_from else "199101010000"
-                end = utc_datetime(criteria.date_to or datetime.now(timezone.utc)).strftime("%Y%m%d%H%M")
+                start = (
+                    utc_datetime(criteria.date_from).strftime("%Y%m%d%H%M")
+                    if criteria.date_from
+                    else "199101010000"
+                )
+                end = utc_datetime(
+                    criteria.date_to or datetime.now(timezone.utc)
+                ).strftime("%Y%m%d%H%M")
                 query = f"({query}) AND submittedDate:[{start} TO {end}]"
             results = await asyncio.wait_for(
                 asyncio.to_thread(
-                    self._execute_search, query, fetch_count, sort_by_date=has_date_filter,
-                    partial_results=partial_results, stop=stop
+                    self._execute_search,
+                    query,
+                    fetch_count,
+                    sort_by_date=has_date_filter,
+                    partial_results=partial_results,
+                    stop=stop,
                 ),
                 timeout=120,
             )
         except Exception as error:
             stop.set()
-            logger.warning("ArxivSource %s", self.last_search.record_error(error, "search"))
+            logger.warning(
+                "ArxivSource %s", self.last_search.record_error(error, "search")
+            )
             results = list(partial_results)
 
         self.last_search.fetched = max(self.last_search.fetched, len(results))
         results = deduplicate_results(results)
         if criteria.date_from or criteria.date_to:
-            results = self._filter_by_date(results, criteria.date_from, criteria.date_to)
-            results = results[:criteria.max_results_per_source]
+            results = self._filter_by_date(
+                results, criteria.date_from, criteria.date_to
+            )
+            results = results[: criteria.max_results_per_source]
 
         if self.download_pdfs and results:
             results = await self._download_and_parse_pdfs(results)
 
         return results
 
-    async def _download_and_parse_pdfs(self, results: list[SearchResult]) -> list[SearchResult]:
+    async def _download_and_parse_pdfs(
+        self, results: list[SearchResult]
+    ) -> list[SearchResult]:
         import httpx
 
         updated = []
@@ -181,7 +219,9 @@ class ArxivSource(BaseSource):
                     updated.append(r)
                     continue
                 if not pdf_url:
-                    self.last_search.record_error(SourceParseError("missing PDF URL"), "PDF download")
+                    self.last_search.record_error(
+                        SourceParseError("missing PDF URL"), "PDF download"
+                    )
                     updated.append(r)
                     continue
 
@@ -190,7 +230,10 @@ class ArxivSource(BaseSource):
                         self._fetch_one_pdf(client, r, pdf_url), timeout=45
                     )
                 except Exception as error:
-                    logger.warning("ArxivSource %s", self.last_search.record_error(error, "PDF download/parse"))
+                    logger.warning(
+                        "ArxivSource %s",
+                        self.last_search.record_error(error, "PDF download/parse"),
+                    )
 
                 updated.append(r)
 
@@ -203,9 +246,13 @@ class ArxivSource(BaseSource):
 
         if not pdf_bytes[:1024].lstrip().startswith(b"%PDF-"):
             raise SourceParseError("non-PDF response content")
-        saved_path = await asyncio.to_thread(self._save_pdf_bytes, pdf_bytes, result.arxiv_id)
+        saved_path = await asyncio.to_thread(
+            self._save_pdf_bytes, pdf_bytes, result.arxiv_id
+        )
         if result.arxiv_id and not saved_path:
-            self.last_search.record_error(SourceParseError("PDF could not be saved"), "PDF save")
+            self.last_search.record_error(
+                SourceParseError("PDF could not be saved"), "PDF save"
+            )
 
         # Text extraction is optional — skip on timeout to avoid blocking
         try:
@@ -223,7 +270,9 @@ class ArxivSource(BaseSource):
             updates["full_text"] = full_text
             updates["abstract_only"] = False
         else:
-            self.last_search.record_error(SourceParseError("PDF has no usable extracted text"), "PDF parse")
+            self.last_search.record_error(
+                SourceParseError("PDF has no usable extracted text"), "PDF parse"
+            )
 
         if updates:
             result = result.model_copy(update=updates)
@@ -231,11 +280,12 @@ class ArxivSource(BaseSource):
         return result
 
     @staticmethod
-    def _save_pdf_bytes(pdf_bytes: bytes, arxiv_id  : Optional[str]) -> Optional[str]:
+    def _save_pdf_bytes(pdf_bytes: bytes, arxiv_id: Optional[str]) -> Optional[str]:
         if not arxiv_id:
             return None
         try:
             from reportagent.utils.config import PROJECT_ROOT
+
             pdf_dir = PROJECT_ROOT / "data" / "pdfs"
             pdf_dir.mkdir(parents=True, exist_ok=True)
             safe_name = arxiv_id.replace("/", "_").replace("\\", "_")
@@ -250,6 +300,7 @@ class ArxivSource(BaseSource):
     def _parse_pdf_bytes(pdf_bytes: bytes) -> Optional[str]:
         try:
             import fitz
+
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             try:
                 text = "\n".join(page.get_text() for page in doc)
@@ -264,7 +315,9 @@ class ArxivSource(BaseSource):
     def _filter_by_date(
         self, results: list[SearchResult], date_from, date_to
     ) -> list[SearchResult]:
-        return [r for r in results if in_date_window(r.published_date, date_from, date_to)]
+        return [
+            r for r in results if in_date_window(r.published_date, date_from, date_to)
+        ]
 
     def _build_query(self, criteria: UserCriteria) -> str:
         en_terms = expand_topics(criteria.topics, criteria.keywords, lang="en")
@@ -289,8 +342,12 @@ class ArxivSource(BaseSource):
         return " AND ".join(parts) if parts else ""
 
     def _execute_search(
-        self, query: str, max_results: int, sort_by_date: bool = False,
-        partial_results: list[SearchResult] | None = None, stop: Event | None = None,
+        self,
+        query: str,
+        max_results: int,
+        sort_by_date: bool = False,
+        partial_results: list[SearchResult] | None = None,
+        stop: Event | None = None,
     ) -> list[SearchResult]:
         from xml.etree import ElementTree as ET
 
@@ -304,12 +361,16 @@ class ArxivSource(BaseSource):
         with httpx.Client(timeout=30.0, follow_redirects=True) as client:
             while offset < max_results and not stop.is_set():
                 try:
-                    response = client.get("https://export.arxiv.org/api/query", params={
-                        "search_query": query, "start": offset,
-                        "max_results": min(100, max_results - offset),
-                        "sortBy": "submittedDate" if sort_by_date else "relevance",
-                        "sortOrder": "descending",
-                    })
+                    response = client.get(
+                        "https://export.arxiv.org/api/query",
+                        params={
+                            "search_query": query,
+                            "start": offset,
+                            "max_results": min(100, max_results - offset),
+                            "sortBy": "submittedDate" if sort_by_date else "relevance",
+                            "sortOrder": "descending",
+                        },
+                    )
                     if stop.is_set():
                         break
                     response.raise_for_status()
@@ -321,7 +382,9 @@ class ArxivSource(BaseSource):
                         raise SourceParseError("malformed Atom XML") from error
                     if root.tag != atom + "feed":
                         raise SourceParseError("non-Atom response content")
-                    total = root.findtext("{http://a9.com/-/spec/opensearch/1.1/}totalResults")
+                    total = root.findtext(
+                        "{http://a9.com/-/spec/opensearch/1.1/}totalResults"
+                    )
                     if total is None or not total.strip().isdigit():
                         raise SourceParseError("Atom feed missing valid totalResults")
                     entries = root.findall(atom + "entry")
@@ -344,7 +407,9 @@ class ArxivSource(BaseSource):
                         break
                     stop.wait(self.rate_limit_seconds)
                 except Exception as error:
-                    logger.warning("ArxivSource %s", diagnostics.record_error(error, "search"))
+                    logger.warning(
+                        "ArxivSource %s", diagnostics.record_error(error, "search")
+                    )
                     break  # Preserve all papers obtained before this page failed.
         return results[:max_results]
 
@@ -352,29 +417,53 @@ class ArxivSource(BaseSource):
     def _parse_atom_entry(entry) -> SearchResult:
         atom = "{http://www.w3.org/2005/Atom}"
         arxiv_ns = "{http://arxiv.org/schemas/atom}"
-        values = {name: (entry.findtext(atom + name) or "").strip()
-                  for name in ("id", "title", "updated", "published")}
+        values = {
+            name: (entry.findtext(atom + name) or "").strip()
+            for name in ("id", "title", "updated", "published")
+        }
         if not all(values.values()) or "/abs/" not in values["id"]:
-            raise SourceParseError("Atom entry missing required fields or paper identifier")
+            raise SourceParseError(
+                "Atom entry missing required fields or paper identifier"
+            )
         try:
-            published = datetime.fromisoformat(values["published"].replace("Z", "+00:00"))
+            published = datetime.fromisoformat(
+                values["published"].replace("Z", "+00:00")
+            )
             updated = datetime.fromisoformat(values["updated"].replace("Z", "+00:00"))
         except ValueError as error:
             raise SourceParseError("Atom entry has invalid publication date") from error
-        pdf_url = next((link.get("href") for link in entry.findall(atom + "link")
-                        if link.get("title") == "pdf" or link.get("type") == "application/pdf"), None)
+        pdf_url = next(
+            (
+                link.get("href")
+                for link in entry.findall(atom + "link")
+                if link.get("title") == "pdf" or link.get("type") == "application/pdf"
+            ),
+            None,
+        )
         primary = entry.find(arxiv_ns + "primary_category")
         return SearchResult(
             title=" ".join(values["title"].split()),
-            authors=[author.findtext(atom + "name") or "" for author in entry.findall(atom + "author")],
+            authors=[
+                author.findtext(atom + "name") or ""
+                for author in entry.findall(atom + "author")
+            ],
             abstract=(entry.findtext(atom + "summary") or "").strip(),
-            full_text=None, abstract_only=True, source=SourceType.ARXIV,
-            source_url=values["id"], arxiv_id=values["id"].split("/abs/", 1)[1],
-            doi=entry.findtext(arxiv_ns + "doi"), published_date=utc_datetime(published),
+            full_text=None,
+            abstract_only=True,
+            source=SourceType.ARXIV,
+            source_url=values["id"],
+            arxiv_id=values["id"].split("/abs/", 1)[1],
+            doi=entry.findtext(arxiv_ns + "doi"),
+            published_date=utc_datetime(published),
             raw_metadata={
                 "updated_date": updated.isoformat(),
-                "categories": [category.get("term", "") for category in entry.findall(atom + "category")],
-                "primary_category": primary.get("term", "") if primary is not None else "",
+                "categories": [
+                    category.get("term", "")
+                    for category in entry.findall(atom + "category")
+                ],
+                "primary_category": primary.get("term", "")
+                if primary is not None
+                else "",
                 "pdf_url": pdf_url,
             },
         )

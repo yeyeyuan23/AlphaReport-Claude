@@ -1,4 +1,5 @@
 """Incremental startup ingestion, using the same PDF parser/classifier/repository as collection."""
+
 from __future__ import annotations
 
 import asyncio
@@ -31,8 +32,11 @@ def _file_hash(path: Path) -> str:
 
 
 async def _scan(root: Path, result: dict):
-    files = await asyncio.to_thread(lambda: sorted(
-        p for p in root.rglob("*") if p.is_file() and p.suffix.lower() == ".pdf"))
+    files = await asyncio.to_thread(
+        lambda: sorted(
+            p for p in root.rglob("*") if p.is_file() and p.suffix.lower() == ".pdf"
+        )
+    )
     result["scanned"] = len(files)
     source = LocalPDFSource(str(root))
     criteria = UserCriteria(topics=["量化金融"])
@@ -46,10 +50,21 @@ async def _scan(root: Path, result: dict):
             fingerprint = await asyncio.to_thread(_file_hash, path)
             with factory() as session:
                 known = session.get(LocalPDFImport, file_path)
-                known_report = session.get(Report, known.report_id) if known and known.report_id else None
-                if known and known.file_sha256 == fingerprint and (
-                    known.status == "filtered" or (
-                        known_report is not None and known_report.content_hash == known.report_content_hash)
+                known_report = (
+                    session.get(Report, known.report_id)
+                    if known and known.report_id
+                    else None
+                )
+                if (
+                    known
+                    and known.file_sha256 == fingerprint
+                    and (
+                        known.status == "filtered"
+                        or (
+                            known_report is not None
+                            and known_report.content_hash == known.report_content_hash
+                        )
+                    )
                 ):
                     result["unchanged"] += 1
                     continue
@@ -61,15 +76,25 @@ async def _scan(root: Path, result: dict):
                 try:
                     llm = LLMClassifier(LLMClient())
                 except Exception as error:
-                    logger.warning("Local PDF %s", safe_source_error(error, "classification initialization"))
+                    logger.warning(
+                        "Local PDF %s",
+                        safe_source_error(error, "classification initialization"),
+                    )
             errors = []
             classified = await classify_for_storage(sr, rules, llm, errors)
             if await asyncio.to_thread(_file_hash, path) != fingerprint:
-                raise SourceParseError("PDF changed during import; retry on next startup")
+                raise SourceParseError(
+                    "PDF changed during import; retry on next startup"
+                )
             with factory() as session:
                 if classified is None:
-                    session.merge(LocalPDFImport(file_path=file_path, file_sha256=fingerprint,
-                                                 status="filtered"))
+                    session.merge(
+                        LocalPDFImport(
+                            file_path=file_path,
+                            file_sha256=fingerprint,
+                            status="filtered",
+                        )
+                    )
                     session.commit()
                     result["filtered"] += 1
                     continue
@@ -79,14 +104,25 @@ async def _scan(root: Path, result: dict):
                 if llm is None:
                     errors.append("classification unavailable; rule fallback used")
                 if not errors:
-                    session.merge(LocalPDFImport(file_path=file_path, file_sha256=fingerprint,
-                        report_id=report_id, report_content_hash=session.get(Report, report_id).content_hash,
-                        status="imported"))
+                    session.merge(
+                        LocalPDFImport(
+                            file_path=file_path,
+                            file_sha256=fingerprint,
+                            report_id=report_id,
+                            report_content_hash=session.get(
+                                Report, report_id
+                            ).content_hash,
+                            status="imported",
+                        )
+                    )
                     session.commit()
             if errors:
                 result["failed"] += 1
                 result["errors"].extend(errors)
-                logger.warning("Local PDF %s: classification incomplete; retry on next startup", path.name)
+                logger.warning(
+                    "Local PDF %s: classification incomplete; retry on next startup",
+                    path.name,
+                )
         except Exception as error:
             result["failed"] += 1
             message = safe_source_error(error, "local PDF import")
@@ -96,8 +132,17 @@ async def _scan(root: Path, result: dict):
 
 async def import_pdf_library() -> dict:
     """Import new/changed files in the background; never make service startup fail."""
-    result = {"status": "ok", "scanned": 0, "unchanged": 0, "added": 0,
-              "updated": 0, "filtered": 0, "failed": 0, "errors": [], "report_ids": []}
+    result = {
+        "status": "ok",
+        "scanned": 0,
+        "unchanged": 0,
+        "added": 0,
+        "updated": 0,
+        "filtered": 0,
+        "failed": 0,
+        "errors": [],
+        "report_ids": [],
+    }
     config = get_config("sources", "local_pdf", default={})
     if not config.get("enabled", True) or not config.get("import_on_startup", True):
         return {**result, "status": "disabled"}

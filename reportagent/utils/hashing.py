@@ -14,7 +14,7 @@ def normalize_text(text: str) -> str:
     return text
 
 
-def content_hash(title: str, authors  : Optional[list[str]] = None) -> str:
+def content_hash(title: str, authors: Optional[list[str]] = None) -> str:
     norm_title = normalize_text(title)
     parts = [norm_title]
     if authors:

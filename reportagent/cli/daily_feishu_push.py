@@ -1,25 +1,41 @@
 """Command-line adapter for daily_push."""
+
 import argparse
 import logging
 
 
 def main():
     parser = argparse.ArgumentParser(description="Daily Feishu Push — 每日论文简报推送")
-    parser.add_argument("--receive-ids", type=str, default="",
-                        help="飞书接收者 ID，逗号分隔（优先于环境变量）")
-    parser.add_argument("--receive-type", type=str, default="",
-                        choices=["", "open_id", "chat_id"],
-                        help="接收者类型（留空则使用 .env 配置）")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="预览模式，不实际推送")
-    parser.add_argument("--no-collect", action="store_true",
-                        help=argparse.SUPPRESS)  # Accepted for older scripts; always library-only.
-    parser.add_argument("--output", type=str, default=None,
-                        help="将简报输出到文件")
-    parser.add_argument("--report-ids", default="", help="显式指定库中论文 ID（逗号分隔）")
-    parser.add_argument("--max-reviews", type=int, default=None,
-                        help="本期全文评估上限，1–12（默认读取配置，缺省 12）")
-    parser.add_argument("--force-review", action="store_true", help="刷新已缓存的全文质量评估")
+    parser.add_argument(
+        "--receive-ids",
+        type=str,
+        default="",
+        help="飞书接收者 ID，逗号分隔（优先于环境变量）",
+    )
+    parser.add_argument(
+        "--receive-type",
+        type=str,
+        default="",
+        choices=["", "open_id", "chat_id"],
+        help="接收者类型（留空则使用 .env 配置）",
+    )
+    parser.add_argument("--dry-run", action="store_true", help="预览模式，不实际推送")
+    parser.add_argument(
+        "--no-collect", action="store_true", help=argparse.SUPPRESS
+    )  # Accepted for older scripts; always library-only.
+    parser.add_argument("--output", type=str, default=None, help="将简报输出到文件")
+    parser.add_argument(
+        "--report-ids", default="", help="显式指定库中论文 ID（逗号分隔）"
+    )
+    parser.add_argument(
+        "--max-reviews",
+        type=int,
+        default=None,
+        help="本期全文评估上限，1–12（默认读取配置，缺省 12）",
+    )
+    parser.add_argument(
+        "--force-review", action="store_true", help="刷新已缓存的全文质量评估"
+    )
 
     args = parser.parse_args()
 

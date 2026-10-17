@@ -1,40 +1,47 @@
-import { useState, useEffect } from "react";
-import { useParams, Link } from "react-router-dom";
-import { getReport } from "@/services/api";
-import type { ReportDetail } from "@/types";
-import {
-  ResizablePanelGroup,
-  ResizablePanel,
-  ResizableHandle,
-} from "@/components/ui/resizable";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import PaperViewer from "@/components/PaperViewer";
-import ResearchBriefing from "@/components/ResearchBriefing";
-import ResearchEvaluation from "@/components/ResearchEvaluation";
-import KnowledgeCard from "@/components/KnowledgeCard";
-import ReproductionCard from "@/components/ReproductionCard";
+import { useState, useEffect } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import { getReport } from '@/services/api';
+import type { ReportDetail } from '@/types';
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
+import PaperViewer from '@/components/PaperViewer';
+import ResearchBriefing from '@/components/ResearchBriefing';
+import ResearchEvaluation from '@/components/ResearchEvaluation';
+import KnowledgeCard from '@/components/KnowledgeCard';
+import ReproductionCard from '@/components/ReproductionCard';
 
 export default function ReportDetailPage() {
   const { id } = useParams<{ id: string }>();
+  return <ReportDetail key={id} id={id} />;
+}
+
+function ReportDetail({ id }: { id: string | undefined }) {
   const [report, setReport] = useState<ReportDetail | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [isMobile, setIsMobile] = useState(false);
+  const [loading, setLoading] = useState(Boolean(id));
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia('(max-width: 768px)').matches);
 
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 768px)");
-    setIsMobile(mq.matches);
+    const mq = window.matchMedia('(max-width: 768px)');
     const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
   }, []);
 
   useEffect(() => {
     if (!id) return;
-    setLoading(true);
-    getReport(Number(id)).then((res) => {
-      if (res.success && res.data) setReport(res.data);
-      setLoading(false);
-    });
+    let active = true;
+    getReport(Number(id))
+      .then((res) => {
+        if (!active) return;
+        if (res.success && res.data) setReport(res.data);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [id]);
 
   if (loading) {
@@ -70,10 +77,7 @@ export default function ReportDetailPage() {
 
       {/* Split panel area */}
       <div className="flex-1 min-h-0">
-        <ResizablePanelGroup
-          orientation={isMobile ? "vertical" : "horizontal"}
-          className="h-full"
-        >
+        <ResizablePanelGroup orientation={isMobile ? 'vertical' : 'horizontal'} className="h-full">
           {/* Left: PaperViewer / Research Briefing */}
           <ResizablePanel defaultSize={isMobile ? 50 : 55} minSize={isMobile ? 20 : 30}>
             <Tabs defaultValue="pdf" className="h-full flex flex-col">
@@ -87,10 +91,7 @@ export default function ReportDetailPage() {
                   </TabsTrigger>
                 </TabsList>
               </div>
-              <TabsContent
-                value="pdf"
-                className="flex-1 min-h-0 mt-0 data-[state=inactive]:hidden"
-              >
+              <TabsContent value="pdf" className="flex-1 min-h-0 mt-0 data-[state=inactive]:hidden">
                 <PaperViewer report={report} />
               </TabsContent>
               <TabsContent
@@ -100,10 +101,7 @@ export default function ReportDetailPage() {
                 <ResearchEvaluation evaluation={report.evaluation} />
                 {(!report.evaluation || report.analysis) && (
                   <div className="min-h-64">
-                    <ResearchBriefing
-                      reportId={report.id}
-                      analysis={report.analysis ?? null}
-                    />
+                    <ResearchBriefing reportId={report.id} analysis={report.analysis ?? null} />
                   </div>
                 )}
               </TabsContent>
@@ -120,7 +118,9 @@ export default function ReportDetailPage() {
                   <TabsTrigger value="knowledge-card" className="flex-1 text-xs">
                     论文速览
                   </TabsTrigger>
-                  <TabsTrigger value="reproduction" className="flex-1 text-xs">复现准备</TabsTrigger>
+                  <TabsTrigger value="reproduction" className="flex-1 text-xs">
+                    复现准备
+                  </TabsTrigger>
                 </TabsList>
               </div>
               <TabsContent
@@ -129,7 +129,10 @@ export default function ReportDetailPage() {
               >
                 <KnowledgeCard key={report.id} reportId={report.id} />
               </TabsContent>
-              <TabsContent value="reproduction" className="flex-1 min-h-0 mt-0 data-[state=inactive]:hidden">
+              <TabsContent
+                value="reproduction"
+                className="flex-1 min-h-0 mt-0 data-[state=inactive]:hidden"
+              >
                 <ReproductionCard key={report.id} reportId={report.id} />
               </TabsContent>
             </Tabs>

@@ -1,4 +1,5 @@
 """PDF extraction shared by command adapters and other callers."""
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -7,6 +8,7 @@ logger = logging.getLogger(__name__)
 def extract_text_pymupdf(pdf_path: str) -> str:
     """Extract text using PyMuPDF (fast, no LLM needed)."""
     import fitz
+
     doc = fitz.open(pdf_path)
     try:
         pages = []

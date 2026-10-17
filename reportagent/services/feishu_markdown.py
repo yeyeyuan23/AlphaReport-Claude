@@ -1,4 +1,5 @@
 """Adapt report Markdown to the Markdown subset used by existing Feishu cards."""
+
 from __future__ import annotations
 
 import re
@@ -12,7 +13,10 @@ def card_markdown(text: str, *, omit_leading_title: bool = False) -> str:
     for line in text.split("\n"):
         if fence is not None:
             output.append(line)
-            if re.fullmatch(r" {0,3}" + re.escape(fence[0]) + r"{" + str(fence[1]) + r",}[ \t]*", line):
+            if re.fullmatch(
+                r" {0,3}" + re.escape(fence[0]) + r"{" + str(fence[1]) + r",}[ \t]*",
+                line,
+            ):
                 fence = None
             continue
         opening = re.match(r"^ {0,3}(`{3,}|~{3,})", line)
@@ -27,7 +31,11 @@ def card_markdown(text: str, *, omit_leading_title: bool = False) -> str:
                 seen_content = True
                 continue  # The card already has its own title and date header.
             title = re.sub(r"[ \t]+#+[ \t]*$", "", heading[2])
-            line = title if title.startswith("**") and title.endswith("**") else f"**{title}**"
+            line = (
+                title
+                if title.startswith("**") and title.endswith("**")
+                else f"**{title}**"
+            )
         if line.strip():
             seen_content = True
         output.append(line)
@@ -45,7 +53,9 @@ def card_sections(text: str, *, omit_leading_title: bool = False) -> list[dict]:
     fence = None
 
     def flush():
-        content = card_markdown("\n".join(section), omit_leading_title=omit_leading_title and not elements).strip("\n")
+        content = card_markdown(
+            "\n".join(section), omit_leading_title=omit_leading_title and not elements
+        ).strip("\n")
         if content.strip():
             if elements:
                 elements.append({"tag": "hr"})
@@ -55,7 +65,10 @@ def card_sections(text: str, *, omit_leading_title: bool = False) -> list[dict]:
     for line in text.split("\n"):
         if fence is not None:
             section.append(line)
-            if re.fullmatch(r" {0,3}" + re.escape(fence[0]) + r"{" + str(fence[1]) + r",}[ \t]*", line):
+            if re.fullmatch(
+                r" {0,3}" + re.escape(fence[0]) + r"{" + str(fence[1]) + r",}[ \t]*",
+                line,
+            ):
                 fence = None
             continue
         opening = re.match(r"^ {0,3}(`{3,}|~{3,})", line)

@@ -125,7 +125,7 @@ def _pass_normalize_braces(latex: str) -> str:
             inner = latex[i + 1 : j - 1]
             # If inner is a single LaTeX command or single token, strip spaces
             stripped = inner.strip()
-            if stripped and not " " in stripped:
+            if stripped and " " not in stripped:
                 result.append("{" + stripped + "}")
             elif stripped and len(stripped) < 3:
                 result.append("{" + stripped + "}")

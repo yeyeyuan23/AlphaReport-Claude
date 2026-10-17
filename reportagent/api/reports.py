@@ -10,15 +10,13 @@ from sqlalchemy.orm import Session
 
 from reportagent.api.deps import get_db
 from reportagent.db.repository import ReportRepository
-from reportagent.models.schemas import ReportListParams, ReportSummary, KnowledgeCard
+from reportagent.models.schemas import ReportListParams
 
 router = APIRouter(prefix="/api/v1/reports", tags=["reports"])
 
 
 def _report_to_summary(r) -> dict:
-    custom_tags = [
-        t.value for t in r.tags if t.dimension == "custom"
-    ] if r.tags else []
+    custom_tags = [t.value for t in r.tags if t.dimension == "custom"] if r.tags else []
 
     return {
         "id": r.id,
@@ -200,7 +198,9 @@ def _build_summary_from_analysis(analysis: dict, title: str) -> str:
     strengths = "\n".join(f"- {s}" for s in assessment.get("strengths", []))
     weaknesses = "\n".join(f"- {w}" for w in assessment.get("weaknesses", []))
     marginal_summary = assessment.get("marginal_contribution_summary", "")
-    implications = "\n".join(f"- {imp}" for imp in assessment.get("practical_implications", []))
+    implications = "\n".join(
+        f"- {imp}" for imp in assessment.get("practical_implications", [])
+    )
 
     return (
         "你是一位量化金融研究总结专家。请根据以下结构化的论文分析结果，"
@@ -277,10 +277,13 @@ def _build_summary_from_content(report, content: str) -> str:
     content = _strip_boilerplate(content)
     extra_hints = ""
     import json as _json
+
     if report.tables_json:
         try:
             tables = _json.loads(report.tables_json)
-            extra_hints += f"\n\n该研报包含 {len(tables)} 个表格，请在总结中提及关键表格数据。"
+            extra_hints += (
+                f"\n\n该研报包含 {len(tables)} 个表格，请在总结中提及关键表格数据。"
+            )
         except Exception:
             pass
     if report.equations_json:
@@ -335,6 +338,7 @@ async def deep_parse_report(report_id: int, db: Session = Depends(get_db)):
             pdf_bytes = Path(pdf_path).read_bytes()
         elif pdf_url:
             import httpx
+
             async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
                 resp = await client.get(pdf_url)
                 resp.raise_for_status()
@@ -354,6 +358,7 @@ async def deep_parse_report(report_id: int, db: Session = Depends(get_db)):
     # Normalize PDF extraction artifacts in formulas
     if equations_data:
         from reportagent.processors.formula_normalizer import normalize_formulas
+
         equations_data = normalize_formulas(equations_data)
 
     # Enrich equations with LLM explanations
@@ -407,10 +412,12 @@ def _mineru_parse_bytes(pdf_bytes: bytes):
             return parsed.tables, parsed.equations, parsed.full_text_with_tables
     except Exception as e:
         import logging
+
         logging.getLogger(__name__).warning("MinerU deep parse failed: %s", e)
 
     try:
         import fitz
+
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         try:
             text = "\n".join(page.get_text() for page in doc)
@@ -453,12 +460,6 @@ async def analyze_report(
             if depth == "quick"
             else ["metadata", "methodology", "assessment"]
         )
-        phase_labels = {
-            "metadata": "提取元数据",
-            "methodology": "方法论+公式深度解析",
-            "assessment": "综合评估",
-            "summary": "生成总结",
-        }
 
         yield f"data: {json.dumps({'type': 'start', 'depth': depth, 'phases': phases_order})}\n\n"
 
@@ -508,6 +509,7 @@ def get_knowledge_card(
     db: Session = Depends(get_db),
 ):
     from reportagent.services.knowledge_cards import get_knowledge_card as prepare_card
+
     report = ReportRepository(db).get_report(report_id)
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
@@ -516,6 +518,7 @@ def get_knowledge_card(
     if report.knowledge_card_json != previous:
         db.commit()
     return {"success": True, "data": card}
+
 
 # ── Per-Paper Ask AI ────────────────────────────────────────────
 
@@ -612,12 +615,14 @@ async def get_report_pdf(report_id: int, db: Session = Depends(get_db)):
         pdf_url = f"https://arxiv.org/pdf/{arxiv_id}"
 
         import httpx
+
         async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
             resp = await client.get(pdf_url)
             resp.raise_for_status()
             pdf_bytes = resp.content
 
         from reportagent.utils.config import PROJECT_ROOT
+
         pdf_dir = PROJECT_ROOT / "data" / "pdfs"
         pdf_dir.mkdir(parents=True, exist_ok=True)
         safe_name = arxiv_id.replace("/", "_").replace("\\", "_")

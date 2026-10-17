@@ -1,4 +1,5 @@
 """Daily content depends on publication/screening, never legacy send markers."""
+
 import json
 from datetime import datetime, timedelta, timezone
 
@@ -18,13 +19,29 @@ def legacy_library(monkeypatch):
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     now = datetime.now(timezone.utc)
     with factory() as session:
-        for rid, date, score in [(1, now, 8), (2, now - timedelta(days=10), 8),
-                                 (3, now, 3), (4, None, 8), (5, now, 8)]:
-            row = Report(id=rid, title=f"Portfolio study {rid}", source="arxiv", content_hash=str(rid),
-                         published_date=date, selection_relevance=score,
-                         abstract="We study portfolio allocation and test financial return prediction.")
-            row.selection_provenance_json = json.dumps({"fingerprint": scoring_fingerprint(), "status": "scored",
-                "evidence_fingerprint": evidence_fingerprint(vars(row))})
+        for rid, date, score in [
+            (1, now, 8),
+            (2, now - timedelta(days=10), 8),
+            (3, now, 3),
+            (4, None, 8),
+            (5, now, 8),
+        ]:
+            row = Report(
+                id=rid,
+                title=f"Portfolio study {rid}",
+                source="arxiv",
+                content_hash=str(rid),
+                published_date=date,
+                selection_relevance=score,
+                abstract="We study portfolio allocation and test financial return prediction.",
+            )
+            row.selection_provenance_json = json.dumps(
+                {
+                    "fingerprint": scoring_fingerprint(),
+                    "status": "scored",
+                    "evidence_fingerprint": evidence_fingerprint(vars(row)),
+                }
+            )
             if rid == 5:
                 row.abstract = "Changed evidence invalidates the earlier score."
             session.add(row)
@@ -35,9 +52,15 @@ def legacy_library(monkeypatch):
         columns = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(reports)")}
         if "pushed_at" not in columns:
             conn.exec_driver_sql("ALTER TABLE reports ADD COLUMN pushed_at TEXT")
-        conn.exec_driver_sql("CREATE TABLE IF NOT EXISTS report_deliveries (report_id INTEGER, receive_type TEXT, receive_id TEXT, delivered_at TEXT)")
-        conn.exec_driver_sql("UPDATE reports SET pushed_at='2026-10-16T00:00:00Z' WHERE id=1")
-        conn.exec_driver_sql("INSERT INTO report_deliveries VALUES (1,'chat_id','A','2026-10-16T00:00:00Z')")
+        conn.exec_driver_sql(
+            "CREATE TABLE IF NOT EXISTS report_deliveries (report_id INTEGER, receive_type TEXT, receive_id TEXT, delivered_at TEXT)"
+        )
+        conn.exec_driver_sql(
+            "UPDATE reports SET pushed_at='2026-10-16T00:00:00Z' WHERE id=1"
+        )
+        conn.exec_driver_sql(
+            "INSERT INTO report_deliveries VALUES (1,'chat_id','A','2026-10-16T00:00:00Z')"
+        )
     monkeypatch.setattr(daily, "init_db", lambda: None)
     monkeypatch.setattr(daily, "get_session_factory", lambda: factory)
     monkeypatch.setattr(daily, "PUSH_SETTINGS", {"llm_filter_threshold": 6})

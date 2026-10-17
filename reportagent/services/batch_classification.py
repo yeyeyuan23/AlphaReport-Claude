@@ -42,7 +42,9 @@ class ClassificationOptions:
     dry_run: bool = False
 
 
-def _merge_results(rule: ClassificationResult, llm: ClassificationResult) -> ClassificationResult:
+def _merge_results(
+    rule: ClassificationResult, llm: ClassificationResult
+) -> ClassificationResult:
     """Model evidence is authoritative; rule guesses cannot restore rejected labels."""
     return llm.model_copy(update={"method": "hybrid"})
 
@@ -85,15 +87,30 @@ async def classify_async(options: ClassificationOptions) -> dict:
                 logger.error(f"Report {options.report_id} not found")
                 raise ValueError("Report not found")
         elif options.recent:
-            reports = session.query(Report).order_by(Report.created_at.desc(), Report.id.desc()).limit(options.recent).all()
+            reports = (
+                session.query(Report)
+                .order_by(Report.created_at.desc(), Report.id.desc())
+                .limit(options.recent)
+                .all()
+            )
         else:
             reports = session.query(Report).order_by(Report.id).all()
 
-        logger.info(f"Processing {len(reports)} reports "
-                    f"(method: {'hybrid' if options.hybrid else 'llm' if options.llm else 'rule'})...")
+        logger.info(
+            f"Processing {len(reports)} reports "
+            f"(method: {'hybrid' if options.hybrid else 'llm' if options.llm else 'rule'})..."
+        )
 
-        audit = {"selected": len(reports), "classified": 0, "failed": 0, "updated": 0,
-                 "report_ids": [r.id for r in reports], "classified_ids": [], "failed_ids": [], "errors": {}}
+        audit = {
+            "selected": len(reports),
+            "classified": 0,
+            "failed": 0,
+            "updated": 0,
+            "report_ids": [r.id for r in reports],
+            "classified_ids": [],
+            "failed_ids": [],
+            "errors": {},
+        }
         updated = 0
         for i, r in enumerate(reports):
             title = r.title or ""
@@ -112,14 +129,18 @@ async def classify_async(options: ClassificationOptions) -> dict:
             except Exception as error:
                 audit["failed_ids"].append(r.id)
                 audit["errors"][r.id] = str(error)[:500]
-                logger.error("Classification failed for paper %s; existing tags retained: %s", r.id, error)
+                logger.error(
+                    "Classification failed for paper %s; existing tags retained: %s",
+                    r.id,
+                    error,
+                )
                 continue
             audit["classified_ids"].append(r.id)
 
             if repo.apply_classification(r, result, dry_run=options.dry_run):
                 updated += 1
                 summary = _summary(r)
-                logger.info(f"  [{i+1}/{len(reports)}] {r.title[:50]} → {summary}")
+                logger.info(f"  [{i + 1}/{len(reports)}] {r.title[:50]} → {summary}")
 
             # Rate limit for LLM: small delay between calls
             if (options.llm or options.hybrid) and i < len(reports) - 1:
@@ -132,7 +153,11 @@ async def classify_async(options: ClassificationOptions) -> dict:
             logger.info(f"[DRY RUN] Would update {updated}/{len(reports)} reports")
         else:
             logger.info("No changes needed")
-        audit.update(classified=len(audit["classified_ids"]), failed=len(audit["failed_ids"]), updated=updated)
+        audit.update(
+            classified=len(audit["classified_ids"]),
+            failed=len(audit["failed_ids"]),
+            updated=updated,
+        )
         return audit
 
     finally:

@@ -9,14 +9,11 @@ may trigger replanning), and the responder synthesises a final answer.
 
 from __future__ import annotations
 
-import json
 import logging
-import time
-from typing import Any, Literal
+from typing import Literal
 
 from langgraph.graph import StateGraph, END
-from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage, ToolMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langchain_core.tools import BaseTool
 
 from reportagent.chat.tools import ALL_TOOLS
@@ -27,8 +24,10 @@ logger = logging.getLogger(__name__)
 
 # ── State ────────────────────────────────────────────────────────────
 
+
 class AgentState(dict):
     """Mutable agent state shared across graph nodes."""
+
     pass
 
 
@@ -47,11 +46,18 @@ def init_state(messages: list, max_iterations: int | None = None) -> dict:
 
 def _load_system_prompt() -> str:
     """Load the chat system prompt for the current agent version."""
-    rel = get_config("chat", "system_prompt_path", default="configs/prompts/chat_system.txt")
+    rel = get_config(
+        "chat", "system_prompt_path", default="configs/prompts/chat_system.txt"
+    )
     path = PROJECT_ROOT / rel
     if path.exists():
-        return path.read_text(encoding="utf-8").strip() + format_skills_context(load_all_skills())
-    return "你是 ResearchAgent 智能助手，专注于量化金融研报的收集和分析。" + format_skills_context(load_all_skills())
+        return path.read_text(encoding="utf-8").strip() + format_skills_context(
+            load_all_skills()
+        )
+    return (
+        "你是 ResearchAgent 智能助手，专注于量化金融研报的收集和分析。"
+        + format_skills_context(load_all_skills())
+    )
 
 
 # ── Tool registry ────────────────────────────────────────────────────
@@ -80,7 +86,12 @@ def _format_tools_for_llm() -> str:
 # ── Planner ──────────────────────────────────────────────────────────
 
 
-def _plan_prompt(user_query: str, tool_manifest: str, history_summary: str = "", system_prompt: str = "") -> str:
+def _plan_prompt(
+    user_query: str,
+    tool_manifest: str,
+    history_summary: str = "",
+    system_prompt: str = "",
+) -> str:
     return f"""{system_prompt}
 
 根据用户请求，制定一个多步骤执行计划。
@@ -127,7 +138,9 @@ async def _llm_plan(messages: list) -> list[dict]:
             break
 
     if not user_query:
-        user_query = str(messages[-1].content if hasattr(messages[-1], "content") else messages[-1])
+        user_query = str(
+            messages[-1].content if hasattr(messages[-1], "content") else messages[-1]
+        )
 
     tool_manifest = _format_tools_for_llm()
 
@@ -165,24 +178,30 @@ async def _llm_plan(messages: list) -> list[dict]:
     except Exception as e:
         logger.warning("Planner LLM failed: %s", e)
         # Fallback: single-step plan using chat directly
-        return [{
-            "step": 1,
-            "description": "直接回答",
-            "tool": "none",
-            "arguments": {},
-            "reason": "规划失败，直接回复",
-        }]
+        return [
+            {
+                "step": 1,
+                "description": "直接回答",
+                "tool": "none",
+                "arguments": {},
+                "reason": "规划失败，直接回复",
+            }
+        ]
 
 
 # ── Executor ─────────────────────────────────────────────────────────
 
 
-def _resolve_dependent_args(args: dict, plan: list[dict], current_step_idx: int) -> dict:
+def _resolve_dependent_args(
+    args: dict, plan: list[dict], current_step_idx: int
+) -> dict:
     """Fill in null arguments by extracting values from previous step results."""
     resolved = dict(args)
     previous_steps = plan[:current_step_idx]
     previous = previous_steps[-1] if previous_steps else {}
-    prev_results = [previous.get("result", "")] if previous.get("status") == "done" else []
+    prev_results = (
+        [previous.get("result", "")] if previous.get("status") == "done" else []
+    )
 
     for key, val in resolved.items():
         if val is not None and str(val).strip():
@@ -191,15 +210,28 @@ def _resolve_dependent_args(args: dict, plan: list[dict], current_step_idx: int)
         # Try to extract report_id from previous results
         if key == "report_id" and prev_results:
             import re
+
             # Only the immediate prerequisite may supply an ID. An empty new
             # search must not resurrect a result from an earlier search.
-            ids = {int(value) for value in re.findall(r'\[(?:ID:\s*)?(\d+)\]', str(prev_results[-1])) if int(value) > 0}
+            ids = {
+                int(value)
+                for value in re.findall(r"\[(?:ID:\s*)?(\d+)\]", str(prev_results[-1]))
+                if int(value) > 0
+            }
             if len(ids) == 1:
                 resolved[key] = ids.pop()
             elif len(ids) > 1:
-                raise ValueError("report_id is ambiguous; choose a specific report before continuing")
-        if key == "report_id" and (not isinstance(resolved[key], int) or isinstance(resolved[key], bool) or resolved[key] <= 0):
-            raise ValueError("report_id could not be resolved; search returned no unique report")
+                raise ValueError(
+                    "report_id is ambiguous; choose a specific report before continuing"
+                )
+        if key == "report_id" and (
+            not isinstance(resolved[key], int)
+            or isinstance(resolved[key], bool)
+            or resolved[key] <= 0
+        ):
+            raise ValueError(
+                "report_id could not be resolved; search returned no unique report"
+            )
 
     return resolved
 
@@ -277,18 +309,17 @@ async def _llm_reflect(state: dict, user_query: str) -> dict:
     from reportagent.llm.client import LLMClient
 
     plan = state.get("plan", [])
-    step_idx = state.get("step_index", 0)
 
     # Summarize completed steps
     executed = [s for s in plan if s.get("status") in ("done", "error", "skipped")]
     pending = [s for s in plan if s.get("status") not in ("done", "error", "skipped")]
 
     plan_summary = "\n".join(
-        f"  步骤{s['step']}: {s.get('description','')} [工具: {s.get('tool','')}] → {s.get('status','pending')}"
+        f"  步骤{s['step']}: {s.get('description', '')} [工具: {s.get('tool', '')}] → {s.get('status', 'pending')}"
         for s in plan
     )
     step_results = "\n".join(
-        f"  步骤{s['step']} ({s.get('tool','')}): {s.get('result','')[:300]}"
+        f"  步骤{s['step']} ({s.get('tool', '')}): {s.get('result', '')[:300]}"
         for s in executed
     )
 
@@ -352,9 +383,9 @@ async def _llm_respond(state: dict, user_query: str) -> str:
 
     plan = state.get("plan", [])
     results_summary = "\n\n".join(
-        f"### 步骤{s['step']}: {s.get('description','')}\n"
-        f"工具: {s.get('tool','')}\n"
-        f"结果: {s.get('result','')[:2500]}"
+        f"### 步骤{s['step']}: {s.get('description', '')}\n"
+        f"工具: {s.get('tool', '')}\n"
+        f"结果: {s.get('result', '')[:2500]}"
         for s in plan
         if s.get("status") in ("done", "error", "skipped")
     )
@@ -378,8 +409,9 @@ async def _llm_respond(state: dict, user_query: str) -> str:
         logger.warning("Responder LLM failed: %s", e)
         # Fallback: concatenate raw results
         return "\n\n".join(
-            f"## 步骤{s['step']}\n{s.get('result','')}"
-            for s in plan if s.get("status") == "done"
+            f"## 步骤{s['step']}\n{s.get('result', '')}"
+            for s in plan
+            if s.get("status") == "done"
         )
 
 
@@ -420,7 +452,9 @@ async def _execute_node(state: dict) -> dict:
         return state
 
     step = plan[step_idx]
-    logger.debug("Execute node: step %d/%d (%s)", step_idx + 1, len(plan), step.get("tool", "?"))
+    logger.debug(
+        "Execute node: step %d/%d (%s)", step_idx + 1, len(plan), step.get("tool", "?")
+    )
 
     result = await _execute_step(step, plan)
     plan[step_idx].update(result)
@@ -559,7 +593,11 @@ async def run_with_stream(
     yield {
         "type": "plan",
         "steps": [
-            {"step": s.get("step"), "description": s.get("description"), "tool": s.get("tool")}
+            {
+                "step": s.get("step"),
+                "description": s.get("description"),
+                "tool": s.get("tool"),
+            }
             for s in plan
         ],
     }
@@ -586,7 +624,7 @@ async def run_with_stream(
     response = final_state.get("final_response", "")
     if response:
         for i in range(0, len(response), 30):
-            yield {"type": "token", "content": response[i:i + 30]}
+            yield {"type": "token", "content": response[i : i + 30]}
 
     yield {
         "type": "done",

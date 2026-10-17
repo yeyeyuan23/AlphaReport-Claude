@@ -56,43 +56,53 @@ class DoclingParser:
             max_page = max(max_page, page_no)
 
             if item.label == "table":
-                body = item.export_to_markdown(doc=doc) if hasattr(item, 'export_to_markdown') else ""
+                body = (
+                    item.export_to_markdown(doc=doc)
+                    if hasattr(item, "export_to_markdown")
+                    else ""
+                )
                 caption = ""
-                if hasattr(item, 'caption_text') and callable(item.caption_text):
+                if hasattr(item, "caption_text") and callable(item.caption_text):
                     caption = item.caption_text(doc) or ""
-                tables.append({
-                    "table_body": body,
-                    "table_caption": [caption] if caption else [],
-                    "page_idx": page_no,
-                })
+                tables.append(
+                    {
+                        "table_body": body,
+                        "table_caption": [caption] if caption else [],
+                        "page_idx": page_no,
+                    }
+                )
 
             elif item.label == "formula":
                 # Docling stores formula text in `orig`, not `text`
-                orig = getattr(item, 'orig', '') or ''
-                text_val = item.text if hasattr(item, 'text') else ''
+                orig = getattr(item, "orig", "") or ""
+                text_val = item.text if hasattr(item, "text") else ""
                 latex = orig or text_val
                 # Try to get LaTeX from the referenced text item
-                if hasattr(item, 'self_ref') and item.self_ref:
+                if hasattr(item, "self_ref") and item.self_ref:
                     txt = text_lookup.get(item.self_ref)
-                    if txt and getattr(txt, 'orig', ''):
-                        orig_text = txt.orig or ''
+                    if txt and getattr(txt, "orig", ""):
+                        orig_text = txt.orig or ""
                         if orig_text.strip():
                             latex = orig_text
-                equations.append({
-                    "latex": latex,
-                    "text": text_val or orig,
-                    "page_idx": page_no,
-                })
+                equations.append(
+                    {
+                        "latex": latex,
+                        "text": text_val or orig,
+                        "page_idx": page_no,
+                    }
+                )
 
             elif item.label == "picture":
                 caption = ""
-                if hasattr(item, 'caption_text') and callable(item.caption_text):
+                if hasattr(item, "caption_text") and callable(item.caption_text):
                     caption = item.caption_text(doc) or ""
-                images.append({
-                    "img_path": "",
-                    "image_caption": [caption] if caption else [],
-                    "page_idx": page_no,
-                })
+                images.append(
+                    {
+                        "img_path": "",
+                        "image_caption": [caption] if caption else [],
+                        "page_idx": page_no,
+                    }
+                )
 
         # Full text as clean markdown
         try:
@@ -120,7 +130,7 @@ class DoclingParser:
             entry: dict = {"type": label, "page_idx": page_no}
 
             if label == "text":
-                entry["text"] = item.text if hasattr(item, 'text') else ''
+                entry["text"] = item.text if hasattr(item, "text") else ""
             elif label == "table":
                 try:
                     entry["table_body"] = item.export_to_markdown(doc=doc)
@@ -128,8 +138,12 @@ class DoclingParser:
                     entry["table_body"] = ""
                 entry["table_caption"] = []
             elif label == "formula":
-                entry["latex"] = getattr(item, 'orig', '') or item.text if hasattr(item, 'text') else ''
-                entry["text"] = item.text if hasattr(item, 'text') else ''
+                entry["latex"] = (
+                    getattr(item, "orig", "") or item.text
+                    if hasattr(item, "text")
+                    else ""
+                )
+                entry["text"] = item.text if hasattr(item, "text") else ""
             elif label == "picture":
                 entry["img_path"] = ""
                 entry["image_caption"] = []

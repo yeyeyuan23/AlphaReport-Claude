@@ -1,12 +1,21 @@
-export type SourceType = "local_pdf" | "arxiv" | "ssrn" | "eastmoney" | "bigquant" | "broker" | "other_web";
+export type SourceType =
+  'local_pdf' | 'arxiv' | 'ssrn' | 'eastmoney' | 'bigquant' | 'broker' | 'other_web';
 
-export type Market = "china" | "overseas" | "global";
-export type AssetClass = "stock" | "futures" | "options" | "fixed_income" | "crypto" | "multi_asset";
-export type Frequency = "hft" | "mid_freq" | "low_freq" | "mixed";
+export type Market = 'china' | 'overseas' | 'global';
+export type AssetClass =
+  'stock' | 'futures' | 'options' | 'fixed_income' | 'crypto' | 'multi_asset';
+export type Frequency = 'hft' | 'mid_freq' | 'low_freq' | 'mixed';
 export type Topic =
-  | "risk_model" | "factor_model" | "ai_ml_model" | "execution_algo"
-  | "portfolio_optimization" | "market_microstructure" | "alternative_data"
-  | "volatility" | "statistical_arbitrage" | "other";
+  | 'risk_model'
+  | 'factor_model'
+  | 'ai_ml_model'
+  | 'execution_algo'
+  | 'portfolio_optimization'
+  | 'market_microstructure'
+  | 'alternative_data'
+  | 'volatility'
+  | 'statistical_arbitrage'
+  | 'other';
 
 export interface UserCriteria {
   topics: string[];
@@ -62,21 +71,21 @@ export interface ResearchEvidence {
 }
 
 export interface ResearchEvaluation {
-  tier: "focus" | "browse" | "pending" | "exclude";
+  tier: 'focus' | 'browse' | 'pending' | 'exclude';
   label: string;
-  status: "reviewed" | "needs_verification" | "pending";
-  source_category: "academic" | "broker" | "community" | "other";
+  status: 'reviewed' | 'needs_verification' | 'pending';
+  source_category: 'academic' | 'broker' | 'community' | 'other';
   relevance: number | null;
   relevance_reason: string;
-  research_type?: "empirical" | "theoretical" | "methodological" | "broker" | "community";
+  research_type?: 'empirical' | 'theoretical' | 'methodological' | 'broker' | 'community';
   research_question: string;
   method: ResearchEvidence | null;
   findings: ResearchEvidence[];
   strengths: ResearchEvidence[];
   limitations: string[];
   critical_concerns: string[];
-  quality: "strong" | "sound" | "weak" | "unknown";
-  confidence: "high" | "medium" | "low";
+  quality: 'strong' | 'sound' | 'weak' | 'unknown';
+  confidence: 'high' | 'medium' | 'low';
   text_complete: boolean;
   validation_issues: string[];
   reading_advice: string;
@@ -197,7 +206,7 @@ export interface KnowledgeCard {
   topics: string[];
   asset_classes: string[];
   quality_score: number | null;
-  status: "ready" | "pending";
+  status: 'ready' | 'pending';
   quality_label: string;
   notice: string;
   limitations: string[];
@@ -205,13 +214,16 @@ export interface KnowledgeCard {
 }
 
 export interface ReproductionCard {
-  status: "ready" | "pending" | "retryable_error";
+  status: 'ready' | 'pending' | 'retryable_error';
   notice: string;
-  fields?: Record<string, {
-    status: "documented" | "needs_verification" | "not_applicable";
-    value: string;
-    evidence: { quote: string; raw_quote: string; locator: string }[];
-  }>;
+  fields?: Record<
+    string,
+    {
+      status: 'documented' | 'needs_verification' | 'not_applicable';
+      value: string;
+      evidence: { quote: string; raw_quote: string; locator: string }[];
+    }
+  >;
   minimum_check?: string;
   falsification?: string;
   proposal_label?: string;
@@ -219,26 +231,26 @@ export interface ReproductionCard {
 }
 
 export const BIAS_RISK_LABELS: Record<string, string> = {
-  none: "无风险",
-  low: "低风险",
-  medium: "中风险",
-  high: "高风险",
-  unknown: "未知",
+  none: '无风险',
+  low: '低风险',
+  medium: '中风险',
+  high: '高风险',
+  unknown: '未知',
 };
 
 export const METHOD_CATEGORY_LABELS: Record<string, string> = {
-  factor_model: "因子模型",
-  ai_ml_model: "AI/机器学习",
-  statistical_method: "统计方法",
-  theoretical: "理论推导",
-  empirical: "实证研究",
-  other: "其他",
+  factor_model: '因子模型',
+  ai_ml_model: 'AI/机器学习',
+  statistical_method: '统计方法',
+  theoretical: '理论推导',
+  empirical: '实证研究',
+  other: '其他',
 };
 
 export interface CollectionTask {
   task_id: string;
-  status: "pending" | "running" | "completed" | "failed" | "cancelled";
-  phase: "collecting" | "classifying" | "storing" | "complete";
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  phase: 'collecting' | 'classifying' | 'storing' | 'complete';
   progress_message: string;
   results_count: number;
   storage_result?: {
@@ -265,42 +277,42 @@ export interface ApiResponse<T = unknown> {
 }
 
 export const SOURCE_LABELS: Record<SourceType, string> = {
-  local_pdf: "本地PDF",
-  arxiv: "arXiv",
-  ssrn: "SSRN",
-  eastmoney: "东方财富",
-  bigquant: "BigQuant",
-  broker: "券商",
-  other_web: "其他网络",
+  local_pdf: '本地PDF',
+  arxiv: 'arXiv',
+  ssrn: 'SSRN',
+  eastmoney: '东方财富',
+  bigquant: 'BigQuant',
+  broker: '券商',
+  other_web: '其他网络',
 };
 
 export const MARKET_LABELS: Record<Market, string> = {
-  china: "中国市场",
-  overseas: "海外市场",
-  global: "全球市场",
+  china: '中国市场',
+  overseas: '海外市场',
+  global: '全球市场',
 };
 
 export const ASSET_LABELS: Record<AssetClass, string> = {
-  stock: "股票",
-  futures: "期货/CTA",
-  options: "期权/衍生品",
-  fixed_income: "固收/债券",
-  crypto: "加密货币",
-  multi_asset: "多资产",
+  stock: '股票',
+  futures: '期货/CTA',
+  options: '期权/衍生品',
+  fixed_income: '固收/债券',
+  crypto: '加密货币',
+  multi_asset: '多资产',
 };
 
 export const FREQUENCY_LABELS: Record<Frequency, string> = {
-  hft: "高频",
-  mid_freq: "中频",
-  low_freq: "低频/日频+",
-  mixed: "混合",
+  hft: '高频',
+  mid_freq: '中频',
+  low_freq: '低频/日频+',
+  mixed: '混合',
 };
 
 // ── Chat ──
 
 export interface ChatMessage {
   id: string;
-  role: "user" | "assistant";
+  role: 'user' | 'assistant';
   content: string;
   thinking?: string;
   toolCalls?: ToolCallEvent[];
@@ -325,14 +337,14 @@ export interface ChatConversation {
 }
 
 export const TOPIC_LABELS: Record<Topic, string> = {
-  risk_model: "风险模型",
-  factor_model: "因子模型/Alpha",
-  ai_ml_model: "AI/机器学习",
-  execution_algo: "执行算法",
-  portfolio_optimization: "组合优化",
-  market_microstructure: "微观结构",
-  alternative_data: "另类数据",
-  volatility: "波动率",
-  statistical_arbitrage: "统计套利",
-  other: "其他",
+  risk_model: '风险模型',
+  factor_model: '因子模型/Alpha',
+  ai_ml_model: 'AI/机器学习',
+  execution_algo: '执行算法',
+  portfolio_optimization: '组合优化',
+  market_microstructure: '微观结构',
+  alternative_data: '另类数据',
+  volatility: '波动率',
+  statistical_arbitrage: '统计套利',
+  other: '其他',
 };

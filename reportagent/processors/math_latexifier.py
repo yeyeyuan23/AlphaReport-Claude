@@ -55,12 +55,14 @@ async def latexify_text(
     if math_count > max_math_paragraphs:
         logger.info(
             "Skipping latexify: %d math paragraphs exceeds limit %d",
-            math_count, max_math_paragraphs,
+            math_count,
+            max_math_paragraphs,
         )
         return text
 
     if llm_client is None:
         from reportagent.llm.client import LLMClient
+
         llm_client = LLMClient()
 
     result_parts: list[str] = []
@@ -76,7 +78,9 @@ async def latexify_text(
                     [paragraphs[j] for j in batch], batch, title, llm_client
                 )
                 for bi, pi in enumerate(batch):
-                    paragraphs[pi] = processed[bi] if bi < len(processed) else paragraphs[pi]
+                    paragraphs[pi] = (
+                        processed[bi] if bi < len(processed) else paragraphs[pi]
+                    )
                 batch = []
                 batch_chars = 0
         else:
@@ -104,9 +108,7 @@ async def _latexify_batch(
     Uses a delimiter-based output format (instead of JSON) to avoid escaping
     issues with backslashes in LaTeX content.
     """
-    numbered = "\n\n".join(
-        f"<p idx={i}>{p}</p>" for i, p in zip(indices, paragraphs)
-    )
+    numbered = "\n\n".join(f"<p idx={i}>{p}</p>" for i, p in zip(indices, paragraphs))
 
     prompt = (
         "你是一位数学排版专家。以下是一篇量化金融论文中的段落，"
@@ -136,7 +138,10 @@ async def _latexify_batch(
     try:
         raw = await llm_client.chat(
             [
-                {"role": "system", "content": "你是数学LaTeX排版专家。请严格按格式输出。"},
+                {
+                    "role": "system",
+                    "content": "你是数学LaTeX排版专家。请严格按格式输出。",
+                },
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,

@@ -24,7 +24,6 @@ from reportagent.models.schemas import (
     PortfolioConstruction,
     Reproducibility,
 )
-from reportagent.utils.config import PROJECT_ROOT
 from reportagent.skills.registry import skill_resource
 from reportagent.services.text_evidence import text_chunks
 
@@ -34,9 +33,9 @@ logger = logging.getLogger(__name__)
 def _normalize_latex_delimiters(text: str) -> str:
     """Convert \\(...\\) to $...$ and \\[...\\] to $$...$$ for consistent rendering."""
     # Inline: \(...\) → $...$
-    text = re.sub(r'\\\(\s*(.+?)\s*\\\)', r'$\1$', text)
+    text = re.sub(r"\\\(\s*(.+?)\s*\\\)", r"$\1$", text)
     # Display: \[...\] → $$...$$
-    text = re.sub(r'\\\[\s*(.+?)\s*\\\]', r'$$\1$$', text, flags=re.DOTALL)
+    text = re.sub(r"\\\[\s*(.+?)\s*\\\]", r"$$\1$$", text, flags=re.DOTALL)
     return text
 
 
@@ -67,7 +66,7 @@ async def explain_equations(
     enriched: list[dict] = []
 
     for batch_start in range(0, len(equations), batch_size):
-        batch = equations[batch_start:batch_start + batch_size]
+        batch = equations[batch_start : batch_start + batch_size]
         eq_lines = []
         for i, eq in enumerate(batch):
             idx = batch_start + i
@@ -88,7 +87,10 @@ async def explain_equations(
         try:
             resp = await llm_client.chat_json(
                 [
-                    {"role": "system", "content": "你是量化金融数学专家，擅长解读公式。所有输出必须用中文，包括公式含义、符号说明、作用描述。"},
+                    {
+                        "role": "system",
+                        "content": "你是量化金融数学专家，擅长解读公式。所有输出必须用中文，包括公式含义、符号说明、作用描述。",
+                    },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.1,
@@ -96,16 +98,21 @@ async def explain_equations(
             )
             for eq_exp in resp.get("equations", []):
                 orig_idx = eq_exp.get("index", 0)
-                actual_idx = batch_start + orig_idx
                 orig_eq = batch[orig_idx] if orig_idx < len(batch) else {}
-                enriched.append({
-                    "latex": orig_eq.get("latex", "") if isinstance(orig_eq, dict) else str(orig_eq),
-                    "page_idx": orig_eq.get("page_idx") if isinstance(orig_eq, dict) else None,
-                    "meaning": eq_exp.get("meaning", ""),
-                    "symbols": eq_exp.get("symbols", {}),
-                    "role_in_paper": eq_exp.get("role_in_paper", ""),
-                    "is_key_formula": eq_exp.get("is_key_formula", False),
-                })
+                enriched.append(
+                    {
+                        "latex": orig_eq.get("latex", "")
+                        if isinstance(orig_eq, dict)
+                        else str(orig_eq),
+                        "page_idx": orig_eq.get("page_idx")
+                        if isinstance(orig_eq, dict)
+                        else None,
+                        "meaning": eq_exp.get("meaning", ""),
+                        "symbols": eq_exp.get("symbols", {}),
+                        "role_in_paper": eq_exp.get("role_in_paper", ""),
+                        "is_key_formula": eq_exp.get("is_key_formula", False),
+                    }
+                )
         except Exception:
             for eq in batch:
                 enriched.append(eq if isinstance(eq, dict) else {"latex": str(eq)})
@@ -130,11 +137,18 @@ class AnalysisAgent:
         if Path(path).exists():
             with open(path, encoding="utf-8") as f:
                 config = yaml.safe_load(f)
-            grounding = skill_resource("analyze-report", "grounding.md").read_text(encoding="utf-8")
+            grounding = skill_resource("analyze-report", "grounding.md").read_text(
+                encoding="utf-8"
+            )
             for phase in config.get("analysis", {}).get("phases", {}).values():
-                phase["system_prompt"] = phase.get("system_prompt", "") + "\n" + grounding
+                phase["system_prompt"] = (
+                    phase.get("system_prompt", "") + "\n" + grounding
+                )
             config.setdefault("analysis", {})["summary"] = yaml.safe_load(
-                skill_resource("analyze-report", "summary.yaml").read_text(encoding="utf-8"))
+                skill_resource("analyze-report", "summary.yaml").read_text(
+                    encoding="utf-8"
+                )
+            )
             return config
         return {}
 
@@ -156,8 +170,12 @@ class AnalysisAgent:
     def _phase_content(self, text: str, cfg: dict) -> str:
         limit = cfg.get("max_input_chars", 240000)
         if len(text) > limit:
-            raise ValueError(f"全文 {len(text)} 字符超过阶段输入上限 {limit}，停止分析；未截取部分正文")
-        return "\n\n".join(f"[{key}]\n{value}" for key, value in text_chunks(text).items())
+            raise ValueError(
+                f"全文 {len(text)} 字符超过阶段输入上限 {limit}，停止分析；未截取部分正文"
+            )
+        return "\n\n".join(
+            f"[{key}]\n{value}" for key, value in text_chunks(text).items()
+        )
 
     def _phase_model(self, cfg: dict) -> str | None:
         """Return model override if phase specifies a non-default model."""
@@ -191,7 +209,9 @@ class AnalysisAgent:
                 continue
 
             try:
-                result = await self._analyze_single(title, sr.abstract or "", full_text, sr.equations_json)
+                result = await self._analyze_single(
+                    title, sr.abstract or "", full_text, sr.equations_json
+                )
             except Exception as e:
                 logger.warning("Analysis failed for '%s': %s", title[:50], e)
                 result = AnalysisResult(summary=f"Analysis failed: {e}")
@@ -217,7 +237,9 @@ class AnalysisAgent:
         progress_cb=None,
     ) -> AnalysisResult:
         self._current_depth = depth
-        return await self._analyze_single(title, abstract, full_text, equations_json, progress_cb=progress_cb)
+        return await self._analyze_single(
+            title, abstract, full_text, equations_json, progress_cb=progress_cb
+        )
 
     async def _analyze_single(
         self,
@@ -231,9 +253,14 @@ class AnalysisAgent:
 
         # Phase 0: Convert inline formulas to LaTeX
         latexify_cfg = self._config.get("analysis", {}).get("latexify", {})
-        if latexify_cfg.get("enabled", True) and full_text and self._current_depth != "quick":
+        if (
+            latexify_cfg.get("enabled", True)
+            and full_text
+            and self._current_depth != "quick"
+        ):
             try:
                 from reportagent.processors.math_latexifier import latexify_text
+
                 full_text = await latexify_text(
                     full_text,
                     title=title,
@@ -254,7 +281,9 @@ class AnalysisAgent:
 
         # Phase 2: Methodology deep dive with formula analysis
         if self._phase_enabled("methodology"):
-            result = await self._run_phase_methodology(title, full_text, result, equations_json)
+            result = await self._run_phase_methodology(
+                title, full_text, result, equations_json
+            )
         if progress_cb and self._phase_enabled("assessment"):
             await progress_cb("assessment", "综合评估...")
 
@@ -322,7 +351,10 @@ class AnalysisAgent:
     # ---- Phase 2: Methodology ----
 
     async def _run_phase_methodology(
-        self, title: str, full_text: str, result: AnalysisResult,
+        self,
+        title: str,
+        full_text: str,
+        result: AnalysisResult,
         equations_json: str | None = None,
     ) -> AnalysisResult:
         cfg = self._phase_config("methodology")
@@ -336,7 +368,7 @@ class AnalysisAgent:
                 eqs = json.loads(equations_json)
                 if eqs:
                     eq_lines = []
-                    for i, eq in enumerate(eqs[:cfg.get("max_context_equations", 20)]):
+                    for i, eq in enumerate(eqs[: cfg.get("max_context_equations", 20)]):
                         latex = eq.get("latex", "") if isinstance(eq, dict) else str(eq)
                         eq_lines.append(f"公式{i}：$${latex}$$")
                     if eq_lines:
@@ -423,6 +455,7 @@ class AnalysisAgent:
 
         # Normalize PDF extraction artifacts in formulas
         from reportagent.processors.formula_normalizer import normalize_formulas
+
         equations = normalize_formulas(equations)
 
         cfg = self._phase_config("equations")
@@ -434,7 +467,7 @@ class AnalysisAgent:
         equations_to_process = equations[:max_equations]
 
         for batch_start in range(0, len(equations_to_process), batch_size):
-            batch = equations_to_process[batch_start:batch_start + batch_size]
+            batch = equations_to_process[batch_start : batch_start + batch_size]
             eq_list = []
             for i, eq in enumerate(batch):
                 idx = batch_start + i
@@ -449,7 +482,9 @@ class AnalysisAgent:
             )
             schema = cfg.get("output_schema", "")
             if schema:
-                prompt += f"\n\n请严格按照以下 JSON Schema 返回，只返回 JSON：\n{schema}"
+                prompt += (
+                    f"\n\n请严格按照以下 JSON Schema 返回，只返回 JSON：\n{schema}"
+                )
 
             try:
                 resp = await self._get_llm().chat_json(
@@ -464,17 +499,27 @@ class AnalysisAgent:
                 for eq_exp in resp.get("equations", []):
                     orig_idx = eq_exp.get("index", 0)
                     actual_idx = batch_start + orig_idx
-                    latex = batch[orig_idx].get("latex", "") if isinstance(batch[orig_idx], dict) else str(batch[orig_idx]) if orig_idx < len(batch) else ""
-                    all_explanations.append(EquationExplanation(
-                        index=actual_idx,
-                        latex=latex,
-                        meaning=eq_exp.get("meaning", ""),
-                        symbols=eq_exp.get("symbols", {}),
-                        role_in_paper=eq_exp.get("role_in_paper", ""),
-                        is_key_formula=eq_exp.get("is_key_formula", False),
-                    ))
+                    latex = (
+                        batch[orig_idx].get("latex", "")
+                        if isinstance(batch[orig_idx], dict)
+                        else str(batch[orig_idx])
+                        if orig_idx < len(batch)
+                        else ""
+                    )
+                    all_explanations.append(
+                        EquationExplanation(
+                            index=actual_idx,
+                            latex=latex,
+                            meaning=eq_exp.get("meaning", ""),
+                            symbols=eq_exp.get("symbols", {}),
+                            role_in_paper=eq_exp.get("role_in_paper", ""),
+                            is_key_formula=eq_exp.get("is_key_formula", False),
+                        )
+                    )
             except Exception:
-                logger.warning("Phase 3 batch %d failed for '%s'", batch_start, title[:50])
+                logger.warning(
+                    "Phase 3 batch %d failed for '%s'", batch_start, title[:50]
+                )
 
         result.equations = all_explanations
         return result
@@ -499,7 +544,9 @@ class AnalysisAgent:
             research_question=result.research_question or "未知",
             core_contribution=result.core_contribution or "未知",
             method_category=result.method_category or "未知",
-            benchmarks=", ".join(result.benchmark_models) if result.benchmark_models else "未知",
+            benchmarks=", ".join(result.benchmark_models)
+            if result.benchmark_models
+            else "未知",
             extra_context=extra,
         )
         schema = cfg.get("output_schema", "")
@@ -549,7 +596,9 @@ class AnalysisAgent:
                 bias_risks=bias_risks,
                 reproducibility=reproducibility,
                 a_share_applicability=a_share,
-                marginal_contribution_summary=resp.get("marginal_contribution_summary", ""),
+                marginal_contribution_summary=resp.get(
+                    "marginal_contribution_summary", ""
+                ),
                 practical_implications=resp.get("practical_implications", []),
                 key_contributions=resp.get("key_contributions", []),
             )
@@ -597,12 +646,14 @@ class AnalysisAgent:
                     )
 
             if eq_context_parts:
-                merge_tasks.append({
-                    "step_idx": i,
-                    "title": point.get("title", ""),
-                    "analysis": point.get("analysis", ""),
-                    "formulas": "\n\n".join(eq_context_parts),
-                })
+                merge_tasks.append(
+                    {
+                        "step_idx": i,
+                        "title": point.get("title", ""),
+                        "analysis": point.get("analysis", ""),
+                        "formulas": "\n\n".join(eq_context_parts),
+                    }
+                )
 
         if not merge_tasks:
             return
@@ -611,7 +662,7 @@ class AnalysisAgent:
         sections = []
         for i, task in enumerate(merge_tasks):
             sections.append(
-                f"### 分析点{i+1}：{task['title']}\n"
+                f"### 分析点{i + 1}：{task['title']}\n"
                 f"原分析：{task['analysis']}\n"
                 f"关联公式解读：\n{task['formulas']}"
             )
@@ -634,7 +685,10 @@ class AnalysisAgent:
         try:
             resp = await self._get_llm().chat_json(
                 [
-                    {"role": "system", "content": "你是量化金融方法论专家。所有输出用中文。严格按照 JSON 格式返回。"},
+                    {
+                        "role": "system",
+                        "content": "你是量化金融方法论专家。所有输出用中文。严格按照 JSON 格式返回。",
+                    },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.2,
@@ -652,10 +706,12 @@ class AnalysisAgent:
 
     # ---- Output latexify ----
 
-    async def _latexify_result(self, result: AnalysisResult, title: str) -> AnalysisResult:
+    async def _latexify_result(
+        self, result: AnalysisResult, title: str
+    ) -> AnalysisResult:
         """Post-process: normalize LaTeX delimiters and convert any remaining
         plain-math text in output fields via LLM."""
-        from reportagent.processors.math_latexifier import latexify_text, has_math
+        from reportagent.processors.math_latexifier import latexify_text
 
         # Phase A: fast regex normalization on all text fields
         fields = self._collect_result_fields(result)
@@ -668,7 +724,9 @@ class AnalysisAgent:
         if result.summary:
             try:
                 result.summary = _normalize_latex_delimiters(
-                    await latexify_text(result.summary, title=title, llm_client=self._get_llm())
+                    await latexify_text(
+                        result.summary, title=title, llm_client=self._get_llm()
+                    )
                 )
             except Exception:
                 pass
@@ -690,21 +748,43 @@ class AnalysisAgent:
             for i, c in enumerate(result.assessment.key_contributions):
                 fields.append((f"assessment.key_contributions.{i}", c))
             if result.assessment.marginal_contribution_summary:
-                fields.append(("assessment.marginal_contribution_summary", result.assessment.marginal_contribution_summary))
+                fields.append(
+                    (
+                        "assessment.marginal_contribution_summary",
+                        result.assessment.marginal_contribution_summary,
+                    )
+                )
             for i, imp in enumerate(result.assessment.practical_implications):
                 fields.append((f"assessment.practical_implications.{i}", imp))
         if result.methodology:
             for i, point in enumerate(result.methodology.analysis_points):
                 if isinstance(point, dict):
                     if point.get("analysis"):
-                        fields.append((f"methodology.analysis_points.{i}.analysis", point["analysis"]))
+                        fields.append(
+                            (
+                                f"methodology.analysis_points.{i}.analysis",
+                                point["analysis"],
+                            )
+                        )
                     if point.get("marginal_contribution"):
-                        fields.append((f"methodology.analysis_points.{i}.marginal_contribution", point["marginal_contribution"]))
+                        fields.append(
+                            (
+                                f"methodology.analysis_points.{i}.marginal_contribution",
+                                point["marginal_contribution"],
+                            )
+                        )
                     if point.get("practical_implication"):
-                        fields.append((f"methodology.analysis_points.{i}.practical_implication", point["practical_implication"]))
+                        fields.append(
+                            (
+                                f"methodology.analysis_points.{i}.practical_implication",
+                                point["practical_implication"],
+                            )
+                        )
             for i, f in enumerate(result.methodology.factor_list):
                 if f.construction:
-                    fields.append((f"methodology.factor_list.{i}.construction", f.construction))
+                    fields.append(
+                        (f"methodology.factor_list.{i}.construction", f.construction)
+                    )
         # Phase 3 equation explanations — often contain \(...\) from LLM output
         for i, eq in enumerate(result.equations):
             if eq.meaning:
@@ -754,9 +834,13 @@ class AnalysisAgent:
                         f"洞察-{point.get('title', '')}：{point.get('analysis', '')}"
                     )
                     if point.get("marginal_contribution"):
-                        context_parts.append(f"  边际贡献：{point['marginal_contribution']}")
+                        context_parts.append(
+                            f"  边际贡献：{point['marginal_contribution']}"
+                        )
                     if point.get("practical_implication"):
-                        context_parts.append(f"  实践推论：{point['practical_implication']}")
+                        context_parts.append(
+                            f"  实践推论：{point['practical_implication']}"
+                        )
             for f in result.methodology.factor_list:
                 context_parts.append(f"因子-{f.name}（{f.type}）：{f.construction}")
 
@@ -779,12 +863,16 @@ class AnalysisAgent:
 
         cfg = self._config["analysis"]["summary"]
         profile = cfg["profiles"][self._current_depth]
-        grounding = skill_resource("analyze-report", "grounding.md").read_text(encoding="utf-8")
+        grounding = skill_resource("analyze-report", "grounding.md").read_text(
+            encoding="utf-8"
+        )
         prompt = cfg["user_prompt_template"].format(title=title, context=context)
         prompt += "\n\n" + profile["instruction"]
         summary = await self._get_llm().chat(
-            [{"role": "system", "content": cfg["system_prompt"] + "\n" + grounding},
-             {"role": "user", "content": prompt}],
+            [
+                {"role": "system", "content": cfg["system_prompt"] + "\n" + grounding},
+                {"role": "user", "content": prompt},
+            ],
             temperature=cfg.get("temperature", 0.1),
             max_tokens=profile["max_tokens"],
         )

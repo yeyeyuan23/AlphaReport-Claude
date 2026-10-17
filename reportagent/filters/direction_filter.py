@@ -8,33 +8,38 @@ LLM Direction Filter — 基于6大研究方向对论文评分过滤
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 from dataclasses import dataclass, field
 
 
 from reportagent.skills.registry import skill_resource
 from reportagent.services.paper_scoring import (
-    _valid_score, _configured_threshold, _load_scoring_config,
-    load_enabled_directions, has_screening_material,
+    _valid_score,
+    _configured_threshold,
+    _load_scoring_config,
+    load_enabled_directions,
+    has_screening_material,
 )
 
 logger = logging.getLogger(__name__)
 
 # ── 6大研究方向定义（从 push_directions.yaml 加载）──
 
+
 @dataclass
 class DirectionScore:
     """单篇论文在某一方向上的评分"""
+
     direction_id: str
     direction_name: str
-    score: float          # 0-10 分
-    reason: str           # 一句话理由
+    score: float  # 0-10 分
+    reason: str  # 一句话理由
 
 
 @dataclass
 class PaperDirectionResult:
     """单篇论文的多方向评分结果"""
+
     report_id: int
     title: str
     abstract: str
@@ -49,7 +54,11 @@ class PaperDirectionResult:
     @property
     def is_selected(self) -> bool:
         """是否被选中推送：至少有一个方向 >= 阈值"""
-        return self.status == "scored" and self.max_score is not None and self.max_score >= self.threshold
+        return (
+            self.status == "scored"
+            and self.max_score is not None
+            and self.max_score >= self.threshold
+        )
 
 
 class DirectionFilter:
@@ -74,7 +83,9 @@ class DirectionFilter:
     def _load_directions(self):
         """从 configs/push_directions.yaml 加载研究方向定义。"""
         self._directions = list(load_enabled_directions().values())
-        logger.info("Loaded %d push directions for LLM filtering", len(self._directions))
+        logger.info(
+            "Loaded %d push directions for LLM filtering", len(self._directions)
+        )
 
     @property
     def direction_names(self) -> list[str]:
@@ -103,8 +114,13 @@ class DirectionFilter:
                 f"已有分类: {p.get('topics', '')}\n"
             )
 
-        prompt = skill_resource("paper-selection", "direction-scoring.md").read_text(encoding="utf-8").format(
-            directions_desc="\n".join(directions_desc), papers_desc="\n".join(papers_desc),
+        prompt = (
+            skill_resource("paper-selection", "direction-scoring.md")
+            .read_text(encoding="utf-8")
+            .format(
+                directions_desc="\n".join(directions_desc),
+                papers_desc="\n".join(papers_desc),
+            )
         )
         return prompt
 
@@ -120,27 +136,36 @@ class DirectionFilter:
         _valid_score(self.SELECTION_THRESHOLD, "threshold")
         eligible = [p for p in papers if has_screening_material(p)]
         if not eligible:
-            return self._empty_results(papers, "pending_needs_material", "缺少可用摘要，待补充材料")
+            return self._empty_results(
+                papers, "pending_needs_material", "缺少可用摘要，待补充材料"
+            )
 
         # Lazy init LLM client
         if self._llm_client is None:
             from reportagent.llm.client import LLMClient
+
             try:
                 self._llm_client = LLMClient()
             except Exception:
-                return [self._empty_results([p], reason="模型初始化失败，待重试")[0]
-                        if has_screening_material(p) else self._empty_results(
-                            [p], "pending_needs_material", "缺少可用摘要，待补充材料")[0]
-                        for p in papers]
+                return [
+                    self._empty_results([p], reason="模型初始化失败，待重试")[0]
+                    if has_screening_material(p)
+                    else self._empty_results(
+                        [p], "pending_needs_material", "缺少可用摘要，待补充材料"
+                    )[0]
+                    for p in papers
+                ]
 
         results: list[PaperDirectionResult] = []
 
         # Batch process
         for batch_start in range(0, len(eligible), self.BATCH_SIZE):
-            batch = eligible[batch_start:batch_start + self.BATCH_SIZE]
+            batch = eligible[batch_start : batch_start + self.BATCH_SIZE]
             logger.info(
                 "Scoring batch %d-%d/%d papers...",
-                batch_start + 1, batch_start + len(batch), len(papers)
+                batch_start + 1,
+                batch_start + len(batch),
+                len(papers),
             )
 
             try:
@@ -157,25 +182,36 @@ class DirectionFilter:
             except Exception as e:
                 logger.error("LLM direction scoring failed for batch: %s", e)
                 # Fallback: empty scores for this batch
-                results.extend(self._empty_results(batch, reason="模型评分失败，待重试"))
+                results.extend(
+                    self._empty_results(batch, reason="模型评分失败，待重试")
+                )
 
             # Rate limit between batches
             if batch_start + self.BATCH_SIZE < len(eligible):
                 await asyncio.sleep(0.5)
 
         by_id = {r.report_id: r for r in results}
-        results = [by_id[p["id"]] if p["id"] in by_id else
-                   self._empty_results([p], "pending_needs_material", "缺少可用摘要，待补充材料")[0]
-                   for p in papers]
+        results = [
+            by_id[p["id"]]
+            if p["id"] in by_id
+            else self._empty_results(
+                [p], "pending_needs_material", "缺少可用摘要，待补充材料"
+            )[0]
+            for p in papers
+        ]
 
         # Log summary
         selected = [r for r in results if r.is_selected]
         logger.info(
             "Direction scoring complete: %d/%d papers selected (threshold %.1f)",
-            len(selected), len(results), self.SELECTION_THRESHOLD
+            len(selected),
+            len(results),
+            self.SELECTION_THRESHOLD,
         )
         for r in selected:
-            logger.info("  ✓ [%s] %.1f — %s", r.best_direction, r.max_score, r.title[:50])
+            logger.info(
+                "  ✓ [%s] %.1f — %s", r.best_direction, r.max_score, r.title[:50]
+            )
 
         return results
 
@@ -183,7 +219,15 @@ class DirectionFilter:
         self, resp: dict | list, papers: list[dict]
     ) -> list[PaperDirectionResult]:
         """Parse LLM response into PaperDirectionResult list."""
-        items = resp if isinstance(resp, list) else (resp.get("papers", resp.get("results", [])) if isinstance(resp, dict) else [])
+        items = (
+            resp
+            if isinstance(resp, list)
+            else (
+                resp.get("papers", resp.get("results", []))
+                if isinstance(resp, dict)
+                else []
+            )
+        )
         if not isinstance(items, list):
             items = []
         indexed = {}
@@ -199,7 +243,10 @@ class DirectionFilter:
                 if len(matches) != 1:
                     raise ValueError("论文评分缺失或重复")
                 item = matches[0]
-                if item.get("status", "scored") not in ("scored", "pending_needs_material"):
+                if item.get("status", "scored") not in (
+                    "scored",
+                    "pending_needs_material",
+                ):
                     raise ValueError("未知或失败的评分状态")
                 if item.get("status") == "pending_needs_material":
                     if item.get("scores") not in (None, []):
@@ -222,7 +269,9 @@ class DirectionFilter:
                     reason = score_item.get("reason")
                     if not isinstance(reason, str) or not reason.strip():
                         raise ValueError("缺少评分依据")
-                    checked[did] = DirectionScore(did, dir_map[did], score, reason.strip())
+                    checked[did] = DirectionScore(
+                        did, dir_map[did], score, reason.strip()
+                    )
                 if set(checked) != set(dir_map):
                     raise ValueError("未覆盖全部启用方向")
                 result.direction_scores = list(checked.values())
@@ -235,12 +284,21 @@ class DirectionFilter:
             results.append(result)
         return results
 
-    def _empty_results(self, papers: list[dict], status="retryable_error", reason="尚未完成方向评分") -> list[PaperDirectionResult]:
-        return [PaperDirectionResult(
-            report_id=p["id"], title=p.get("title", ""), abstract=p.get("abstract", "") or "",
-            topics=p.get("topics", ""), status=status, reason=reason,
-            threshold=_valid_score(self.SELECTION_THRESHOLD, "threshold"),
-        ) for p in papers]
+    def _empty_results(
+        self, papers: list[dict], status="retryable_error", reason="尚未完成方向评分"
+    ) -> list[PaperDirectionResult]:
+        return [
+            PaperDirectionResult(
+                report_id=p["id"],
+                title=p.get("title", ""),
+                abstract=p.get("abstract", "") or "",
+                topics=p.get("topics", ""),
+                status=status,
+                reason=reason,
+                threshold=_valid_score(self.SELECTION_THRESHOLD, "threshold"),
+            )
+            for p in papers
+        ]
 
     def get_selected_papers(
         self, results: list[PaperDirectionResult], threshold: float | None = None
@@ -248,20 +306,24 @@ class DirectionFilter:
         """返回被选中的论文（至少一个方向 >= 阈值）。"""
         t = threshold if threshold is not None else self.SELECTION_THRESHOLD
         _valid_score(t, "threshold")
-        return [r for r in results if r.status == "scored" and r.max_score is not None and r.max_score >= t]
+        return [
+            r
+            for r in results
+            if r.status == "scored" and r.max_score is not None and r.max_score >= t
+        ]
 
-    def format_scores_for_briefing(
-        self, results: list[PaperDirectionResult]
-    ) -> str:
+    def format_scores_for_briefing(self, results: list[PaperDirectionResult]) -> str:
         """格式化方向评分信息，供 Claude 简报使用。"""
         lines = ["## 🎯 LLM 方向评分结果\n"]
-        for r in sorted(results, key=lambda x: x.max_score if x.max_score is not None else -1, reverse=True):
+        for r in sorted(
+            results,
+            key=lambda x: x.max_score if x.max_score is not None else -1,
+            reverse=True,
+        ):
             if not r.is_selected:
                 continue
             top3 = sorted(r.direction_scores, key=lambda x: x.score, reverse=True)[:3]
-            score_str = " | ".join(
-                f"{s.direction_name}: {s.score:.1f}" for s in top3
-            )
+            score_str = " | ".join(f"{s.direction_name}: {s.score:.1f}" for s in top3)
             lines.append(f"- **{r.title[:60]}**")
             lines.append(f"  最高分: {score_str}")
         return "\n".join(lines)
