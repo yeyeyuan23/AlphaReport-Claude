@@ -39,7 +39,7 @@
 
 ### 1. 安装本机依赖
 
-- Python 3.10+。
+- Python 3.12+。
 - 构建网页需要 Node.js 和 npm。当前锁文件的 Vite 要求 Node 20.19+ 或 22.12+；若也运行 lint，Node 22 应至少为 22.13。
 - 普通飞书聊天需要在同一个运行账户的 `PATH` 中找到 `claude`。安装方式见 [Claude Code 官方文档](https://code.claude.com/docs/en/setup)。
 
@@ -486,7 +486,7 @@ bash -n start.sh scripts/ops/run_bot.sh scripts/ops/keepalive.sh scripts/ops/syn
 
 ## 自动检查（CI）
 
-每次推送、提交 PR 或在 GitHub Actions 手动运行时，`CI` 工作流执行：Python 格式与 lint、Python 3.10/3.12 离线测试、前端格式与 ESLint、前端组件测试和 TypeScript/生产构建。检查完整源码；首次接入已统一现有文件格式。GitHub 检查只读代码，不发布网站，也不需要模型或飞书密钥。
+每次推送、提交 PR 或在 GitHub Actions 手动运行时，`CI` 工作流执行：Python 格式与 lint、Python 3.12 离线测试、前端格式与 ESLint、前端组件测试和 TypeScript/生产构建。检查完整源码；首次接入已统一现有文件格式。GitHub 检查只读代码，不发布网站，也不需要模型或飞书密钥。
 
 本地运行同一套检查：
 
