@@ -38,7 +38,7 @@ def main():
         "--max-papers",
         type=int,
         default=200,
-        help="Maximum papers to score (default: 200)",
+        help="Maximum papers to score (default: 200; 0 = unlimited)",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="Preview scores without writing to DB"

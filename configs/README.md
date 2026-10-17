@@ -20,5 +20,7 @@
 
 Web 的监听地址与端口由 `ALPHAREPORT_BIND_HOST`、`ALPHAREPORT_PORT` 环境变量控制。
 `push_directions.yaml` 中实际生效的 `push_settings` 包括：相关性阈值 `llm_filter_threshold`、
-日报评分批量 `llm_batch_size`、日报新全文评估预算 `max_reviews` 和日报重点推荐数 `max_featured`。
-周报评估预算使用其 CLI 的 `--max-reviews`（默认 12）。
+日报评分批量 `llm_batch_size`、日/周报共用的新全文评估预算 `max_reviews` 和日报重点推荐数 `max_featured`。
+`max_reviews` 省略或为 `null` 时，日/周报默认评估所有符合条件且需更新的论文；
+正整数只限制新发起的全文评估，命中有效缓存不占预算。各 CLI 的 `--max-reviews N` 优先于配置，
+不限最大值；0、负数、布尔值和字符串均不接受。

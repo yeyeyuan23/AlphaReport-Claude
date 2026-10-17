@@ -90,9 +90,9 @@ def test_missing_material_and_current_caches_do_not_starve_two_review_runs(
             papers = weekly.get_weekly_papers(
                 datetime(2020, 1, 1), datetime(2030, 1, 1)
             )
-            asyncio.run(weekly.prepare_weekly_evidence(papers))
+            asyncio.run(weekly.prepare_weekly_evidence(papers, max_reviews=12))
         else:
-            daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
+            daily.run_daily_push(daily.DailyPushOptions(dry_run=True, max_reviews=12))
         assert len(model.requests) - before == 12
         with factory() as session:
             for rid in range(1, 13):
@@ -162,3 +162,122 @@ def test_cache_without_current_complete_material_is_not_reused(
         assert result[13]["status"] == "reviewed"
         assert 14 not in result
     assert len(model.requests) == 1
+
+
+@pytest.mark.parametrize("flow", ["weekly", "daily"])
+@pytest.mark.parametrize("configured_budget", [None, 2, 20])
+def test_reporting_budget_defaults_to_all_and_explicit_limits_accept_more_than_twelve(
+    queue_library, monkeypatch, flow, configured_budget
+):
+    from reportagent.services import paper_scoring
+
+    factory, model, _ = queue_library
+    config = paper_scoring._load_scoring_config()
+    config["push_settings"]["max_reviews"] = configured_budget
+    monkeypatch.setattr(paper_scoring, "_load_scoring_config", lambda: config)
+    monkeypatch.setattr(daily, "_load_push_settings", lambda: config["push_settings"])
+    monkeypatch.setattr(
+        weekly,
+        "get_previous_week_range",
+        lambda *args: (
+            datetime(2020, 1, 1),
+            datetime(2030, 1, 1),
+            "2020-01-01",
+            "2030-01-01",
+        ),
+    )
+    expected = 25 if configured_budget is None else configured_budget
+    if flow == "weekly":
+        result = weekly.run_weekly_report(weekly.WeeklyReportOptions(dry_run=True))
+        audit = result["preparation"]
+    else:
+        result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
+        audit = result["stages"]["review"]
+    assert len(model.requests) == expected
+    assert len(audit["review_ids"]) == expected
+    assert result["review_budget"] == configured_budget
+    assert len(audit["deferred_ids"]) == 25 - expected
+    with factory() as db:
+        assert all(
+            db.get(Report, rid).evaluation_json for rid in range(13, 14 + expected)
+        )
+    if configured_budget is None:
+        # Repeating a fully reviewed report must not launch any new model call.
+        if flow == "weekly":
+            weekly.run_weekly_report(weekly.WeeklyReportOptions(dry_run=True))
+        else:
+            daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
+        assert len(model.requests) == 25
+
+
+@pytest.mark.parametrize("flow", ["weekly", "daily"])
+def test_cli_review_budget_overrides_configured_limit(queue_library, monkeypatch, flow):
+    from reportagent.services import paper_scoring
+
+    _, model, _ = queue_library
+    config = paper_scoring._load_scoring_config()
+    config["push_settings"]["max_reviews"] = 1
+    monkeypatch.setattr(paper_scoring, "_load_scoring_config", lambda: config)
+    monkeypatch.setattr(daily, "_load_push_settings", lambda: config["push_settings"])
+    monkeypatch.setattr(
+        weekly,
+        "get_previous_week_range",
+        lambda *args: (
+            datetime(2020, 1, 1),
+            datetime(2030, 1, 1),
+            "2020-01-01",
+            "2030-01-01",
+        ),
+    )
+    if flow == "weekly":
+        result = weekly.run_weekly_report(
+            weekly.WeeklyReportOptions(dry_run=True, max_reviews=20)
+        )
+    else:
+        result = daily.run_daily_push(
+            daily.DailyPushOptions(dry_run=True, max_reviews=20)
+        )
+    assert len(model.requests) == 20
+    assert result["review_budget"] == 20
+
+
+def test_default_candidate_ordering_does_not_truncate_after_twelve():
+    rows = [
+        paper(id=rid, selection_direction="portfolio_optimization")
+        for rid in range(1, 31)
+    ]
+    assert len(quality.select_candidates(rows)) == 30
+
+
+def test_daily_query_keeps_more_than_two_hundred_current_candidates(queue_library):
+    factory, _, _ = queue_library
+    with factory() as db:
+        for rid in range(39, 242):
+            db.add(
+                Report(
+                    **paper(
+                        id=rid,
+                        title=f"Portfolio study {rid}",
+                        content_hash=str(rid),
+                        published_date=datetime.now(timezone.utc),
+                    )
+                )
+            )
+        db.commit()
+    assert len(daily.get_todays_papers()[0]) == 241
+
+
+def test_daily_relevance_refresh_requests_an_unlimited_window(
+    queue_library, monkeypatch
+):
+    commands = []
+    monkeypatch.setattr(
+        daily.subprocess,
+        "run",
+        lambda args, **kwargs: commands.append((args, kwargs))
+        or subprocess.CompletedProcess(args, 0),
+    )
+    daily.run_daily_push(daily.DailyPushOptions(dry_run=True, max_reviews=1))
+    command, kwargs = commands[0]
+    assert command[command.index("--max-papers") + 1] == "0"
+    assert kwargs.get("timeout") is None

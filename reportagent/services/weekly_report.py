@@ -22,6 +22,7 @@ from reportagent.services.report_quality import (
     pending_review,
     review_fingerprint,
     cached_review_is_current,
+    resolve_review_budget,
 )
 from reportagent.services.feishu_markdown import card_sections
 
@@ -49,7 +50,7 @@ class WeeklyReportOptions:
     receive_type: str = ""
     output: str | None = None
     no_llm: bool = False
-    max_reviews: int = 12
+    max_reviews: int | None = None
     force_review: bool = False
 
 
@@ -187,7 +188,7 @@ def fallback_weekly_report(papers: list[dict], week_start: str, week_end: str) -
 
 
 async def prepare_weekly_evidence(
-    papers: list[dict], *, max_reviews: int = 12, force_review: bool = False
+    papers: list[dict], *, max_reviews: int | None = None, force_review: bool = False
 ) -> dict:
     """Refresh relevance and complete reviews through the same Python API as daily."""
     from reportagent.llm.client import LLMClient
@@ -201,8 +202,7 @@ async def prepare_weekly_evidence(
     )
     from reportagent.services.report_quality import review_report_ids, select_candidates
 
-    if not 1 <= max_reviews <= 12:
-        raise ValueError("max_reviews must be between 1 and 12")
+    max_reviews = resolve_review_budget(max_reviews)
     stale = [p for p in papers if not screening_is_current(p)]
     audit = {
         "screened": 0,
@@ -367,6 +367,11 @@ def send_feishu_card(
 
 
 def run_weekly_report(options: WeeklyReportOptions) -> dict:
+    from reportagent.services.paper_scoring import _load_scoring_config
+
+    max_reviews = resolve_review_budget(
+        options.max_reviews, _load_scoring_config().get("push_settings", {})
+    )
     week_start, week_end, start_label, end_label = get_previous_week_range(
         options.weeks_ago
     )
@@ -391,7 +396,7 @@ def run_weekly_report(options: WeeklyReportOptions) -> dict:
         preparation = asyncio.run(
             prepare_weekly_evidence(
                 papers,
-                max_reviews=options.max_reviews,
+                max_reviews=max_reviews,
                 force_review=options.force_review,
             )
         )
@@ -402,7 +407,7 @@ def run_weekly_report(options: WeeklyReportOptions) -> dict:
         text += f"\n\n本期有 {len(failures)} 项筛选或全文阅读评估未完成；相关条目保留待核验，可重试。"
     unattempted = len(preparation.get("deferred_ids", []))
     if unattempted > 0:
-        text += f"\n\n本次全文核验预算为 {options.max_reviews} 篇，另有 {unattempted} 篇候选尚未核验；重跑可继续处理。"
+        text += f"\n\n本次全文评估预算为 {max_reviews} 篇，另有 {unattempted} 篇候选尚未评估；重跑可继续处理。"
     if options.output:
         output = Path(options.output)
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -418,6 +423,7 @@ def run_weekly_report(options: WeeklyReportOptions) -> dict:
         "paper_ids": [p["id"] for p in papers],
         "model_refresh": not options.no_llm,
         "preparation": preparation,
+        "review_budget": max_reviews,
         "sent": 0,
         "failed_recipients": [],
     }

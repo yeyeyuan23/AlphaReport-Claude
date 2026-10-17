@@ -199,6 +199,8 @@ bash scripts/ops/run_bot.sh           # 只启动飞书机器人
 .venv/bin/python -m reportagent.cli.db_query --list --json-output data/reports-export.json
 ```
 
+单独运行 `cli.llm_filter` 默认最多评分 200 篇，`--max-papers 0` 可处理窗口内全部待评分条目；日报的相关性刷新与候选读取均不设此条数上限。
+
 分析深度包括 `quick`、`standard`、`deep`；`--force` 可重新分析或生成卡片。`db_query` 还支持读取全文、手动更新分析/摘要/知识卡片。本地 PDF 默认在服务启动时导入，`collect --sources local_pdf` 用于运行中主动补导，无需单独运行解析命令。
 
 网页提供关键词搜索、市场/资产/频率/主题筛选、统计、分页、PDF、研究简报、知识卡片和复现准备卡。关键词搜索不使用语义索引。研究简报展示已有分析，知识卡片展示当前有效的全文评估；无有效评估时只显示摘要和待核验状态。`cli.narrative_brief` 准备同一份知识卡片，不重做论文分析或质量评估。
@@ -223,7 +225,7 @@ ALPHAREPORT_BASE_URL=https://your-report-site.example
 
 ### 日报
 
-流程：读取论文库最近四个 UTC 日期的资料 → 按当前启用方向刷新摘要相关性初筛 → 从评分指纹有效的论文中轮流选取各方向候选 → 复用有效评估，最多新发起 12 篇全文质量评估 → 最多 5 篇重点阅读推荐 → 模板排版与按目标投递。`/daily`、日报 CLI 和 09:00 自动日报都不触发采集。
+流程：读取论文库最近四个 UTC 日期的资料 → 按当前启用方向刷新摘要相关性初筛 → 从评分指纹有效的论文中轮流选取各方向候选 → 复用有效评估，对所有符合条件且需更新的论文完成全文质量评估 → 最多 5 篇重点阅读推荐 → 模板排版与按目标投递。`/daily`、日报 CLI 和 09:00 自动日报都不触发采集。
 
 “重点推荐”表示值得优先阅读：当前方向相关性至少 6 分，研究质量为“基本扎实”或“较强”、评估把握为“中”或“高”，且没有明确影响核心结论的关键疑虑，即可进入候选。普通局限与推荐一同展示；学术论文、券商研报和社区研究均可入选，并明确标注材料类型。材料不足、质量未知或评估把握低的内容保留在其他栏目，不靠放宽规则凑满 5 篇。
 
@@ -238,17 +240,21 @@ ALPHAREPORT_BASE_URL=https://your-report-site.example
 .venv/bin/python -m reportagent.cli.daily_feishu_push --dry-run --output data/daily-preview.md
 # 检查指定论文并强制刷新全文评估；跳过日期和摘要相关性初筛
 .venv/bin/python -m reportagent.cli.daily_feishu_push --report-ids 12,18 --force-review --dry-run
+# 可选：只新评估最多 20 篇，其他候选留待下次处理
+.venv/bin/python -m reportagent.cli.daily_feishu_push --max-reviews 20 --dry-run
 # 确认配置与目标后实际发送
 .venv/bin/python -m reportagent.cli.daily_feishu_push --receive-ids oc_your_chat_id --receive-type chat_id
 ```
 
-`--max-reviews` 控制本期新发起全文评估的上限，默认读取 `push_settings.max_reviews`（12），允许 1–12；有效缓存不占预算，缺全文项不会堵住后续有全文候选。库中 arXiv 资料缺少全文时可尝试补取 PDF，这不等于搜索和采集新条目。`--force-review` 刷新全文评估缓存。`--dry-run` 不投递，但会保存评分、评估和运行记录；产物保存在 `data/daily_reports/`，JSON 包含最终状态、阶段错误和逐收件人发送结果。进程锁阻止同时运行两个日报；顺序重跑会重新发送，不做跨运行去重。
+日报和周报默认评估本期所有通过相关性筛选、具有可用全文且需要更新评估的论文。`push_settings.max_reviews` 可省略或设为 `null`，表示不限数量；设为任意正整数时，作为两种报告共用的新全文评估预算。CLI 的 `--max-reviews N` 优先于配置。有效缓存不占预算，缺全文项不会堵住后续有全文候选；预算用尽时，报告会说明未完成评估的数量，重跑可继续处理。库中 arXiv 资料缺少全文时可尝试补取 PDF，这不等于搜索和采集新条目。`--force-review` 刷新全文评估缓存。`--dry-run` 不投递，但会保存评分、评估和运行记录；产物保存在 `data/daily_reports/`，JSON 包含最终状态、阶段错误和逐收件人发送结果。进程锁阻止同时运行两个日报；顺序重跑会重新发送，不做跨运行去重。
 
-研究方向读取 `configs/push_directions.yaml` 中启用的定义；修改方向、筛选提示词或阈值后，失效的相关性评分须重新计算。`llm_filter_threshold` 控制初筛门槛，`llm_batch_size` 控制评分批量；日报窗口为最近四个 UTC 日期。采集回溯配置属于 `configs/app.yaml` 的 `daily_collection.lookback_days`，与日报命令分离。`max_featured` 控制日报重点推荐数量，上限为 5；周报最多推荐 5 篇，评估预算由周报自己的 `--max-reviews` 控制。
+研究方向读取 `configs/push_directions.yaml` 中启用的定义；修改方向、筛选提示词或阈值后，失效的相关性评分须重新计算。`llm_filter_threshold` 控制初筛门槛，`llm_batch_size` 控制评分批量；日报窗口为最近四个 UTC 日期。采集回溯配置属于 `configs/app.yaml` 的 `daily_collection.lookback_days`，与日报命令分离。`max_featured` 控制日报重点推荐数量，上限为 5；周报最多推荐 5 篇，评估预算与日报共用配置，可由各自的 `--max-reviews` 覆盖。
+
+日/周报的整批筛选和生成任务不设固定总时限；单篇全文评估仍限时 240 秒，PDF 下载、解析和模型请求保留各自的超时保护。论文较多时，生成报告所需时间和模型费用会相应增加。
 
 ### 周报
 
-按发表日期查询上一个完整 **UTC 周一至周日**的全部库中论文，不采集新条目，也不限于精选。默认通过配置的模型 API 更新过期相关性与最多 12 篇新全文评估，复用保存的阅读评估分层排版；只凭摘要相关性不能进入重点推荐。已有有效评估不占本期预算；库中 arXiv 条目缺正文时可尝试补取 PDF。缺正文、材料不足或评估未完成的条目单独列出。`--max-reviews` 可设 1–12，`--force-review` 刷新评估，`--no-llm` 仅读取缓存，过期或缺失的评估保留待核验。
+按发表日期查询上一个完整 **UTC 周一至周日**的全部库中论文，不采集新条目，也不限于精选。默认通过配置的模型 API 刷新过期相关性，并评估全部符合条件且需更新的论文，复用保存的阅读评估分层排版；只凭摘要相关性不能进入重点推荐。已有有效评估不占本期预算；库中 arXiv 条目缺正文时可尝试补取 PDF。缺正文、材料不足或评估未完成的条目单独列出。可通过共享的 `push_settings.max_reviews` 或 `--max-reviews N` 显式设置正整数预算，`--force-review` 刷新评估，`--no-llm` 仅读取缓存，过期或缺失的评估保留待核验。
 
 在机器人私聊发送 `/weekly` 即可生成并发送到当前会话，无需配置推送目标；空周会明确告知暂无资料。与 `/daily`、`/report` 共用任务锁，同一时间处理一个任务。命令在后台运行，不占用普通聊天的 300 秒调用窗口。此命令不安装周报定时任务。
 

@@ -31,7 +31,7 @@ def main():
         "--max-reviews",
         type=int,
         default=None,
-        help="本期全文评估上限，1–12（默认读取配置，缺省 12）",
+        help="可选的新全文评估预算，正整数；优先于配置，未配置时评估全部符合条件的论文",
     )
     parser.add_argument(
         "--force-review", action="store_true", help="刷新已缓存的全文质量评估"

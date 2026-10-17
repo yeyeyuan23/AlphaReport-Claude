@@ -29,6 +29,16 @@ TIER_LABELS = {
 }
 
 
+def resolve_review_budget(
+    override: int | None = None, settings: dict | None = None
+) -> int | None:
+    """CLI overrides configuration; missing/null means all eligible new reviews."""
+    value = override if override is not None else (settings or {}).get("max_reviews")
+    if value is not None and (type(value) is not int or value < 1):
+        raise ValueError("max_reviews must be a positive integer or null")
+    return value
+
+
 class Evidence(BaseModel):
     """A reading observation with optional references for the reader to consult."""
 
@@ -255,7 +265,9 @@ async def evaluate_paper(
 
 
 def select_candidates(
-    papers: list[dict], max_reviews: int = 12, directions: list[str] | None = None
+    papers: list[dict],
+    max_reviews: int | None = None,
+    directions: list[str] | None = None,
 ) -> list[dict]:
     """Round-robin directions after ranking within them, preserving academic priority."""
     ordered = sorted(
@@ -269,15 +281,16 @@ def select_candidates(
     groups: dict[str, deque] = {d: deque() for d in (directions or [])}
     for p in ordered:
         groups.setdefault(p.get("selection_direction") or "other", deque()).append(p)
+    limit = len(papers) if max_reviews is None else max_reviews
     selected, seen = [], set()
-    while len(selected) < max_reviews and any(groups.values()):
+    while len(selected) < limit and any(groups.values()):
         for queue in groups.values():
             if queue:
                 p = queue.popleft()
                 if p["id"] not in seen:
                     selected.append(p)
                     seen.add(p["id"])
-                    if len(selected) >= max_reviews:
+                    if len(selected) >= limit:
                         break
     return selected
 
@@ -289,7 +302,7 @@ async def review_report_ids(
     max_reviews: int | None = None,
     audit: dict | None = None,
 ) -> dict[int, dict]:
-    """Walk requested IDs; reporting callers explicitly bound real model reviews."""
+    """Review all requested IDs by default; explicit budgets count only new model calls."""
     from reportagent.db.engine import get_session_factory
     from reportagent.models.database import Report
     from reportagent.llm.client import LLMClient
@@ -317,8 +330,7 @@ async def review_report_ids(
     def snapshot(row):
         return {key: getattr(row, key) for key in fields}
 
-    if max_reviews is not None and (type(max_reviews) is not int or max_reviews < 1):
-        raise ValueError("max_reviews must be a positive integer")
+    max_reviews = resolve_review_budget(max_reviews)
     audit = audit if audit is not None else {}
     audit.update(review_ids=[], cached_ids=[], pending_material_ids=[], deferred_ids=[])
     factory, results, llm = get_session_factory(), {}, None

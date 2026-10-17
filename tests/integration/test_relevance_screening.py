@@ -313,3 +313,49 @@ def test_failed_persistence_is_visible_and_keeps_paper_retryable(
         asyncio.run(scoring.score_reports(scoring.ScoringOptions(all_unjudged=True)))
     with memory_db() as session:
         assert session.get(Report, 1).selection_reason is None
+
+
+def test_unlimited_scoring_reads_all_window_candidates(
+    memory_session_factory, monkeypatch
+):
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    factory = memory_session_factory
+    with factory() as db:
+        db.add_all(
+            [
+                Report(
+                    title=f"Portfolio research {rid}",
+                    source="arxiv",
+                    content_hash=str(rid),
+                    abstract="We study portfolio risk forecasting and compare allocations out of sample.",
+                    published_date=datetime.now(timezone.utc),
+                )
+                for rid in range(205)
+            ]
+        )
+        db.commit()
+    monkeypatch.setattr(scoring, "init_db", lambda: None)
+    monkeypatch.setattr(scoring, "get_session_factory", lambda: factory)
+    client = SimpleNamespace(
+        provider="offline",
+        model="fixture",
+        calls=[],
+        _client=SimpleNamespace(close=AsyncMock()),
+    )
+    monkeypatch.setattr(scoring, "LLMClient", lambda: client)
+    seen = []
+
+    async def observe(client, papers, **kwargs):
+        seen.extend(row.id for row in papers)
+        return [], []
+
+    monkeypatch.setattr(scoring, "score_papers_batch", observe)
+    asyncio.run(
+        scoring.score_reports(
+            scoring.ScoringOptions(published_days=4, max_papers=0, dry_run=True)
+        )
+    )
+    assert len(seen) == 205

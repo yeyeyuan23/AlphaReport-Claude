@@ -553,6 +553,9 @@ def apply_scores(
 
 
 async def score_reports(options: ScoringOptions) -> None:
+    if type(options.max_papers) is not int or options.max_papers < 0:
+        raise ValueError("max_papers must be a nonnegative integer; 0 means unlimited")
+    limit = options.max_papers or None
     init_db()
     factory = get_session_factory()
     session = factory()
@@ -580,16 +583,16 @@ async def score_reports(options: ScoringOptions) -> None:
             ) - timedelta(days=options.published_days - 1)
             papers = repo.get_unjudged_reports(
                 published_since=published_since,
-                limit=options.max_papers,
+                limit=limit,
                 scoring_fingerprint=fingerprint,
             )
         elif options.all_unjudged:
             papers = repo.get_unjudged_reports(
-                limit=options.max_papers, scoring_fingerprint=fingerprint
+                limit=limit, scoring_fingerprint=fingerprint
             )
         else:
             papers = repo.get_unjudged_reports(
-                since=since, limit=options.max_papers, scoring_fingerprint=fingerprint
+                since=since, limit=limit, scoring_fingerprint=fingerprint
             )
 
         logger.info(

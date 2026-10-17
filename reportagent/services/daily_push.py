@@ -27,6 +27,7 @@ from reportagent.services.report_quality import (
     select_candidates,
     pending_review,
     review_fingerprint,
+    resolve_review_budget,
 )
 from reportagent.services.report_briefing import render_briefing
 from reportagent.services.feishu_markdown import card_sections
@@ -240,7 +241,7 @@ def get_todays_papers(
         q = q.order_by(desc(Report.selection_relevance), desc(Report.published_date))
         reports = q.all()
         if not report_ids:
-            reports = [r for r in reports if screening_is_current(r)][:200]
+            reports = [r for r in reports if screening_is_current(r)]
 
         if not reports:
             date_label = today_start.strftime("%Y-%m-%d")
@@ -520,11 +521,8 @@ def save_run_record(result: dict) -> None:
 
 
 def run_daily_push(options: DailyPushOptions) -> dict:
-    """One bounded, recorded workflow; analysis always precedes delivery."""
-    if options.max_reviews is not None and (
-        type(options.max_reviews) is not int or not 1 <= options.max_reviews <= 12
-    ):
-        raise ValueError("每期全文评估数量必须在 1 到 12 之间")
+    """One recorded workflow; analysis always precedes delivery."""
+    resolve_review_budget(options.max_reviews)
     with daily_run_lock():
         result = {
             "run_id": str(uuid.uuid4()),
@@ -566,13 +564,8 @@ def run_daily_push(options: DailyPushOptions) -> dict:
 def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
     global UI_BASE_URL, PUSH_SETTINGS
     PUSH_SETTINGS = _load_push_settings()
-    max_reviews = (
-        options.max_reviews
-        if options.max_reviews is not None
-        else PUSH_SETTINGS.get("max_reviews", 12)
-    )
-    if type(max_reviews) is not int or not 1 <= max_reviews <= 12:
-        raise ValueError("每期全文评估数量必须在 1 到 12 之间")
+    max_reviews = resolve_review_budget(options.max_reviews, PUSH_SETTINGS)
+    run["review_budget"] = max_reviews
     max_featured = min(5, int(PUSH_SETTINGS.get("max_featured", 5)))
     # Preview must not rewrite .env or discover a new public tunnel.
     if not options.dry_run:
@@ -618,12 +611,13 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
                     "reportagent.cli.llm_filter",
                     "--published-days",
                     str(PUSH_WINDOW_DAYS),
+                    "--max-papers",
+                    "0",
                     "--batch-size",
                     str(PUSH_SETTINGS.get("llm_batch_size", 10)),
                 ],
                 capture_output=True,
                 text=True,
-                timeout=300,
                 cwd=str(PROJECT_ROOT),
             )
             run["stages"]["relevance"] = {
@@ -675,6 +669,9 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
             max_featured=max_featured,
             source_checked_at=checked_at,
         )
+        deferred = len(review_audit.get("deferred_ids", []))
+        if deferred:
+            text += f"\n\n本次全文评估预算为 {max_reviews} 篇，另有 {deferred} 篇候选尚未评估；重跑可继续处理。"
         if not papers:
             text += "\n\n本期暂无符合日期范围与筛选条件的论文。"
         if run["warnings"]:

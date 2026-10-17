@@ -45,7 +45,7 @@ def offline_daily(tmp_path, monkeypatch, memory_session_factory):
     async def review(ids, **kwargs):
         assessments = {}
         with factory() as session:
-            for rid in ids[: kwargs.get("max_reviews", 12)]:
+            for rid in ids[: kwargs.get("max_reviews")]:
                 assessment = {
                     "tier": "browse",
                     "label": "值得浏览",

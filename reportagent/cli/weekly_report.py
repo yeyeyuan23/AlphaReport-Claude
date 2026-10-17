@@ -28,7 +28,10 @@ def main():
     )
 
     parser.add_argument(
-        "--max-reviews", type=int, default=12, help="全文评估数量，1–12"
+        "--max-reviews",
+        type=int,
+        default=None,
+        help="可选的新全文评估预算，正整数；优先于配置，未配置时评估全部符合条件的论文",
     )
     parser.add_argument("--force-review", action="store_true", help="强制刷新全文评估")
     args = parser.parse_args()

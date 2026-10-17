@@ -408,7 +408,7 @@ class ReportRepository:
     def get_unjudged_reports(
         self,
         since=None,
-        limit: int = 200,
+        limit: int | None = 200,
         published_since=None,
         scoring_fingerprint: str | None = None,
     ) -> list[Report]:
@@ -450,7 +450,7 @@ class ReportRepository:
                 or stale_material
             ):
                 results.append(row)
-                if len(results) >= limit:
+                if limit is not None and len(results) >= limit:
                     break
         return results
 

@@ -86,9 +86,22 @@ def test_weekly_worker_uses_existing_cli_and_explicit_current_chat(worker, monke
     assert command[command.index("--receive-ids") + 1] == "current-chat"
     assert command[command.index("--receive-type") + 1] == "chat_id"
     assert run.call_args.kwargs["cwd"] == str(root)
-    assert run.call_args.kwargs["timeout"] == 5400
+    assert run.call_args.kwargs.get("timeout") is None
     assert (root / "data/report-jobs.log").exists()
     send.assert_not_called()  # The existing CLI delivers the actual card.
+    assert not bot._report_lock.locked()
+
+
+def test_daily_worker_has_no_whole_job_deadline(worker):
+    run, send, root = worker
+    bot.run_daily_job("current-chat")
+    command = run.call_args.args[0]
+    assert command[3] == "reportagent.cli.daily_feishu_push"
+    assert command[command.index("--receive-ids") + 1] == "current-chat"
+    assert command[command.index("--receive-type") + 1] == "chat_id"
+    assert run.call_args.kwargs["cwd"] == str(root)
+    assert run.call_args.kwargs.get("timeout") is None
+    send.assert_not_called()
     assert not bot._report_lock.locked()
 
 
@@ -126,3 +139,13 @@ def test_weekly_worker_reports_failure_and_always_releases_lock(
     bot.run_weekly_job("current-chat")
     assert expected in send.call_args.args[1]
     assert not bot._report_lock.locked()
+
+
+@pytest.mark.parametrize("command", ["/daily", "/weekly"])
+def test_report_acknowledgement_does_not_promise_a_fixed_review_count(
+    monkeypatch, command
+):
+    monkeypatch.setattr(bot.threading, "Thread", MagicMock())
+    text = bot.handle_cmd(command, "test-chat", "p2p")
+    assert "开始" in text
+    assert "12" not in text

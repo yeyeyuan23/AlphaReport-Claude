@@ -82,7 +82,6 @@ def run_daily_job(chat_id):
                 cwd=str(PROJECT_ROOT),
                 stdout=log,
                 stderr=log,
-                timeout=5400,
             )
         if result.returncode:
             send_chat(chat_id, "日报未完整完成，已保存运行记录；可稍后重试。")
@@ -125,7 +124,6 @@ def run_weekly_job(chat_id):
                 cwd=str(PROJECT_ROOT),
                 stdout=log,
                 stderr=log,
-                timeout=5400,
             )
         if result.returncode:
             send_chat(chat_id, "周报未完整完成，部分评估或投递可能未完成，可稍后重试。")
@@ -194,7 +192,7 @@ def handle_cmd(text, chat_id, chat_type):
         except Exception:
             _report_lock.release()
             raise
-        return "开始生成上一完整 UTC 周的周报：使用库中资料，刷新相关性与最多12篇全文评估，完成后推送到当前私聊。"
+        return "开始生成上一完整 UTC 周的周报：使用库中资料，刷新相关性并评估符合条件的论文，完成后推送到当前私聊。"
 
     if text == "/daily":
         if chat_type != "p2p":
@@ -206,7 +204,7 @@ def handle_cmd(text, chat_id, chat_type):
         except Exception:
             _report_lock.release()
             raise
-        return "开始生成日报：使用库中近期资料，刷新相关性与最多12篇全文评估，完成后推送到当前私聊。"
+        return "开始生成日报：使用库中近期资料，刷新相关性并评估符合条件的论文，完成后推送到当前私聊。"
 
     if text == "/report" or text.startswith("/report "):
         if chat_type != "p2p":
