@@ -11,6 +11,7 @@ from reportagent.processors.pdf_extractor import PDFExtractor
 from reportagent.processors.metadata_extractor import MetadataExtractor
 from reportagent.processors.paper_sections import extract_paper_sections
 from reportagent.sources.base import BaseSource, SourceParseError, usable_full_text
+from reportagent.sources.date_window import in_date_window
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +176,9 @@ class LocalPDFSource(BaseSource):
 
         if not usable_full_text(text):
             raise SourceParseError("PDF has no usable extracted text")
+
+        if not in_date_window(meta.get("date"), criteria.date_from, criteria.date_to):
+            return None
 
         search_text = (meta.get("title", "") + " " + text[:3000]).lower()
 

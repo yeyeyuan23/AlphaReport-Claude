@@ -176,6 +176,11 @@ class ReportRepository:
             if sr.abstract or checked_abstract:
                 existing.abstract = sr.abstract
             self.apply_classification(existing, cl)
+            # Save analysis of the accepted material after invalidating stale outputs.
+            # A metadata-only reimport without analysis must preserve the current one.
+            if report.analysis is not None:
+                existing.analysis_json = report.analysis.model_dump_json()
+                existing.summary = report.analysis.summary
             if commit:
                 self.session.commit()
             else:
@@ -209,6 +214,10 @@ class ReportRepository:
             topics=topics_str,
             classification_confidence=cl.confidence,
             classification_method=cl.method,
+            analysis_json=report.analysis.model_dump_json()
+            if report.analysis is not None
+            else None,
+            summary=report.analysis.summary if report.analysis is not None else None,
         )
         self.session.add(db_report)
         self.apply_classification(db_report, cl)

@@ -5,9 +5,8 @@ import logging
 
 from reportagent.agents.state import AgentState
 from reportagent.models.schemas import SearchResult
-from reportagent.sources.base import BaseSource
+from reportagent.sources.base import BaseSource, deduplicate_results
 from reportagent.llm.client import LLMClient
-from reportagent.utils.hashing import normalize_text
 
 logger = logging.getLogger(__name__)
 
@@ -73,30 +72,4 @@ class CollectionAgent:
         return state
 
     def _deduplicate(self, results: list[SearchResult]) -> list[SearchResult]:
-        seen: dict[str, SearchResult] = {}
-        for r in results:
-            key = normalize_text(r.title)
-
-            if r.doi:
-                doi_key = f"doi:{r.doi}"
-                if doi_key in seen:
-                    self._merge_into(seen[doi_key], r)
-                    continue
-                seen[doi_key] = r
-
-            if key in seen:
-                self._merge_into(seen[key], r)
-                continue
-
-            seen[key] = r
-
-        return list(seen.values())
-
-    def _merge_into(self, existing: SearchResult, new: SearchResult) -> None:
-        if new.full_text and not existing.full_text:
-            existing.full_text = new.full_text
-            existing.abstract_only = False
-        if new.abstract and not existing.abstract:
-            existing.abstract = new.abstract
-        if new.doi and not existing.doi:
-            existing.doi = new.doi
+        return deduplicate_results(results)

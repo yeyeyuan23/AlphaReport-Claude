@@ -169,9 +169,9 @@ def _build_summary_from_analysis(analysis: dict, title: str) -> str:
     if methodology.get("analysis_points"):
         for point in methodology["analysis_points"]:
             if isinstance(point, dict):
-                title = point.get("title", "")
-                analysis = point.get("analysis", "")
-                steps_text += f"\n- **{title}**：{analysis}"
+                point_title = point.get("title", "")
+                point_analysis = point.get("analysis", "")
+                steps_text += f"\n- **{point_title}**：{point_analysis}"
                 if point.get("marginal_contribution"):
                     steps_text += f"\n  边际贡献：{point['marginal_contribution']}"
                 if point.get("practical_implication"):

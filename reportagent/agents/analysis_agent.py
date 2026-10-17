@@ -39,6 +39,57 @@ def _normalize_latex_delimiters(text: str) -> str:
     return text
 
 
+def _equation_explanation_fields(explanation: dict) -> dict:
+    """Keep only well-typed explanation fields, including from older saved output."""
+    fields = {}
+    for name in ("meaning", "role_in_paper"):
+        if isinstance(explanation.get(name), str):
+            fields[name] = explanation[name]
+    symbols = explanation.get("symbols")
+    if isinstance(symbols, dict) and all(
+        isinstance(key, str) and isinstance(value, str)
+        for key, value in symbols.items()
+    ):
+        fields["symbols"] = symbols
+    if isinstance(explanation.get("is_key_formula"), bool):
+        fields["is_key_formula"] = explanation["is_key_formula"]
+    return fields
+
+
+def _merge_equation_explanations(
+    batch: list[dict], response: Any, batch_start: int
+) -> list[dict]:
+    """Merge valid explanations by global index without changing source evidence."""
+    enriched = [
+        dict(eq) if isinstance(eq, dict) else {"latex": str(eq)} for eq in batch
+    ]
+    if not isinstance(response, dict) or not isinstance(
+        response.get("equations"), list
+    ):
+        return enriched
+
+    seen: set[int] = set()
+    for explanation in response["equations"]:
+        if not isinstance(explanation, dict):
+            continue
+        index = explanation.get("index")
+        if (
+            type(index) is not int
+            or not batch_start <= index < batch_start + len(batch)
+            or index in seen
+        ):
+            continue
+
+        # Model output may enrich a source formula, never replace its LaTeX or page.
+        fields = _equation_explanation_fields(explanation)
+        if fields:
+            # Keep the first valid reply for an index; never duplicate its source.
+            enriched[index - batch_start].update(fields)
+            seen.add(index)
+
+    return enriched
+
+
 async def explain_equations(
     equations: list[dict],
     title: str,
@@ -50,7 +101,7 @@ async def explain_equations(
 
     Takes MinerU-extracted equations (latex + page_idx) and returns them
     enriched with meaning, symbol definitions, and role-in-paper.
-    Used by both the /parse endpoint and AnalysisAgent Phase 3.
+    Used by the /parse endpoint; shares source-preserving merging with Phase 3.
     """
     if not equations:
         return []
@@ -78,12 +129,14 @@ async def explain_equations(
             f"论文标题：{title}\n\n"
             f"论文上下文（部分）：\n{context_text[:3000]}\n\n"
             "公式列表：\n" + "\n".join(eq_lines) + "\n\n"
+            "index 必须使用公式列表中的原始编号，不要按本批次从 0 重新编号。\n"
             f"请对这 {len(batch)} 个公式逐一解读，所有文本用中文输出，返回 JSON：\n"
-            '{"equations": [{"index": 0, "meaning": "公式含义（一句话）", '
+            f'{{"equations": [{{"index": {batch_start}, "meaning": "公式含义（一句话）", '
             '"symbols": {"符号": "含义", ...}, '
             '"role_in_paper": "在论文中的作用", "is_key_formula": true/false}]}'
         )
 
+        resp = None
         try:
             resp = await llm_client.chat_json(
                 [
@@ -96,26 +149,9 @@ async def explain_equations(
                 temperature=0.1,
                 max_tokens=1500,
             )
-            for eq_exp in resp.get("equations", []):
-                orig_idx = eq_exp.get("index", 0)
-                orig_eq = batch[orig_idx] if orig_idx < len(batch) else {}
-                enriched.append(
-                    {
-                        "latex": orig_eq.get("latex", "")
-                        if isinstance(orig_eq, dict)
-                        else str(orig_eq),
-                        "page_idx": orig_eq.get("page_idx")
-                        if isinstance(orig_eq, dict)
-                        else None,
-                        "meaning": eq_exp.get("meaning", ""),
-                        "symbols": eq_exp.get("symbols", {}),
-                        "role_in_paper": eq_exp.get("role_in_paper", ""),
-                        "is_key_formula": eq_exp.get("is_key_formula", False),
-                    }
-                )
         except Exception:
-            for eq in batch:
-                enriched.append(eq if isinstance(eq, dict) else {"latex": str(eq)})
+            logger.warning("Equation batch %d failed for '%s'", batch_start, title[:50])
+        enriched.extend(_merge_equation_explanations(batch, resp, batch_start))
 
     return enriched
 
@@ -456,6 +492,16 @@ class AnalysisAgent:
         # Normalize PDF extraction artifacts in formulas
         from reportagent.processors.formula_normalizer import normalize_formulas
 
+        # Missing/non-text extraction is unknown, not a formula to stringify.
+        equations = [
+            {
+                **eq,
+                "latex": eq["latex"] if isinstance(eq.get("latex"), str) else "",
+            }
+            if isinstance(eq, dict)
+            else eq
+            for eq in equations
+        ]
         equations = normalize_formulas(equations)
 
         cfg = self._phase_config("equations")
@@ -480,12 +526,16 @@ class AnalysisAgent:
                 equations="\n".join(eq_list),
                 count=len(batch),
             )
+            prompt += (
+                "\nindex 必须使用公式列表中的原始编号，不要按本批次从 0 重新编号。"
+            )
             schema = cfg.get("output_schema", "")
             if schema:
                 prompt += (
                     f"\n\n请严格按照以下 JSON Schema 返回，只返回 JSON：\n{schema}"
                 )
 
+            resp = None
             try:
                 resp = await self._get_llm().chat_json(
                     [
@@ -496,29 +546,19 @@ class AnalysisAgent:
                     max_tokens=cfg.get("max_tokens", 1500),
                     model=self._phase_model(cfg),
                 )
-                for eq_exp in resp.get("equations", []):
-                    orig_idx = eq_exp.get("index", 0)
-                    actual_idx = batch_start + orig_idx
-                    latex = (
-                        batch[orig_idx].get("latex", "")
-                        if isinstance(batch[orig_idx], dict)
-                        else str(batch[orig_idx])
-                        if orig_idx < len(batch)
-                        else ""
-                    )
-                    all_explanations.append(
-                        EquationExplanation(
-                            index=actual_idx,
-                            latex=latex,
-                            meaning=eq_exp.get("meaning", ""),
-                            symbols=eq_exp.get("symbols", {}),
-                            role_in_paper=eq_exp.get("role_in_paper", ""),
-                            is_key_formula=eq_exp.get("is_key_formula", False),
-                        )
-                    )
             except Exception:
                 logger.warning(
                     "Phase 3 batch %d failed for '%s'", batch_start, title[:50]
+                )
+            for offset, eq in enumerate(
+                _merge_equation_explanations(batch, resp, batch_start)
+            ):
+                all_explanations.append(
+                    EquationExplanation(
+                        index=batch_start + offset,
+                        latex=eq.get("latex", ""),
+                        **_equation_explanation_fields(eq),
+                    )
                 )
 
         result.equations = all_explanations
