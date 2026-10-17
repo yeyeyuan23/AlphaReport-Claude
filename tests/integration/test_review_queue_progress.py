@@ -41,11 +41,6 @@ def queue_library(tmp_path, monkeypatch, memory_session_factory):
     (tmp_path / "configs").mkdir()
     (tmp_path / "configs/push_directions.yaml").write_text("push_settings: {}")
     monkeypatch.setattr(
-        daily.subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess([], 0),
-    )
-    monkeypatch.setattr(
         daily,
         "send_feishu_card",
         lambda *args, **kwargs: pytest.fail("No real delivery"),
@@ -240,19 +235,13 @@ def test_daily_query_keeps_more_than_two_hundred_current_candidates(queue_librar
     assert len(daily.get_todays_papers()[0]) == 241
 
 
-def test_daily_relevance_refresh_requests_all_publications_for_its_report_date(
+def test_daily_reuses_screening_and_keeps_optional_fulltext_budget(
     queue_library, monkeypatch
 ):
-    commands = []
-    monkeypatch.setattr(
-        daily.subprocess,
-        "run",
-        lambda args, **kwargs: commands.append((args, kwargs))
-        or subprocess.CompletedProcess(args, 0),
-    )
+    def forbidden(*args, **kwargs):
+        pytest.fail("Report generation must not launch a relevance scoring subprocess")
+
+    monkeypatch.setattr(subprocess, "run", forbidden)
     result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True, max_reviews=1))
-    command, kwargs = commands[0]
-    assert command[command.index("--max-papers") + 1] == "0"
-    assert command[command.index("--published-date") + 1] == result["report_date"]
-    assert "--published-days" not in command
-    assert kwargs.get("timeout") is None
+    assert result["stages"]["relevance"]["status"] == "not_run"
+    assert result["review_budget"] == 1

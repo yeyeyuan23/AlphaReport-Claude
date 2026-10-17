@@ -240,3 +240,26 @@ def test_weekly_review_budget_advances_past_current_cached_papers(library, monke
     result = asyncio.run(weekly.prepare_weekly_evidence(papers, max_reviews=12))
     assert result["review_ids"] == [13]
     review.assert_awaited_once_with([13], force=False, max_reviews=12, audit={})
+
+
+def test_weekly_does_not_rescore_stale_relevance(library, monkeypatch):
+    from reportagent.services import paper_scoring, report_quality
+
+    with library() as session:
+        values = paper(rid=1, published_date=datetime(2026, 10, 9))
+        stored = {
+            k: v for k, v in values.items() if k in Report.__table__.columns.keys()
+        }
+        row = Report(**stored, content_hash="stale")
+        row.selection_provenance_json = None
+        session.add(row)
+        session.commit()
+
+    async def forbidden(*args, **kwargs):
+        pytest.fail("A report cannot rescore relevance or review a stale decision")
+
+    monkeypatch.setattr(paper_scoring, "score_papers_batch", forbidden)
+    monkeypatch.setattr(report_quality, "review_report_ids", forbidden)
+    result = asyncio.run(weekly.prepare_weekly_evidence([values]))
+    assert result["screened"] == 0
+    assert result["review_ids"] == []

@@ -10,8 +10,6 @@ import fcntl
 from contextlib import contextmanager
 import logging
 import os
-import subprocess
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -492,39 +490,10 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
     if notice:
         run["warnings"].append(notice)
     ids = [int(s.strip()) for s in options.report_ids.split(",") if s.strip()]
-    run["stages"]["relevance"] = {"status": "skipped", "reason": "explicit_report_ids"}
-    if not ids:
-        # Apply the current rubric to unjudged/stale library rows.
-        try:
-            scored = subprocess.run(
-                [
-                    sys.executable,
-                    "-m",
-                    "reportagent.cli.llm_filter",
-                    "--published-date",
-                    report_date,
-                    "--max-papers",
-                    "0",
-                    "--batch-size",
-                    str(PUSH_SETTINGS.get("llm_batch_size", 10)),
-                ],
-                capture_output=True,
-                text=True,
-                cwd=str(PROJECT_ROOT),
-            )
-            run["stages"]["relevance"] = {
-                "status": "failed" if scored.returncode else "ok",
-                "returncode": scored.returncode,
-            }
-        except (subprocess.SubprocessError, OSError) as exc:
-            run["stages"]["relevance"] = {
-                "status": "failed",
-                "error": type(exc).__name__,
-            }
-        if run["stages"]["relevance"]["status"] == "failed":
-            warning = "相关性筛选未完整成功；本期只包含已通过当前筛选标准的有效候选，覆盖可能不完整。"
-            run["warnings"].append(warning)
-            logger.warning(warning)
+    run["stages"]["relevance"] = {
+        "status": "not_run",
+        "reason": "use_saved_collection_screening",
+    }
     papers, date_label, _ = get_todays_papers(
         report_ids=ids or None, report_date=report_date
     )
@@ -534,8 +503,6 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
         )
     candidates = select_candidates(papers, len(papers), list(load_enabled_directions()))
     run["report_ids"] = [p["id"] for p in candidates]
-    if not candidates and run["stages"]["relevance"]["status"] == "failed":
-        raise RuntimeError("相关性筛选失败且没有可用候选，本次不能作为正常空日报。")
     review_audit = {}
     assessments = (
         asyncio.run(

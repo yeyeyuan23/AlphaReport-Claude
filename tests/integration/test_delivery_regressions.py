@@ -1,5 +1,4 @@
 import json
-import subprocess
 import unittest
 import tempfile
 from pathlib import Path
@@ -61,11 +60,6 @@ class DeliveryTests(unittest.TestCase):
             patch.object(daily, "get_session_factory", return_value=self.factory),
             patch.object(daily, "PROJECT_ROOT", root),
             patch.object(daily, "review_report_ids", side_effect=reviews),
-            patch.object(
-                daily.subprocess,
-                "run",
-                return_value=subprocess.CompletedProcess([], 0, "", ""),
-            ),
         ]
         for item in self.patches:
             item.start()
@@ -103,11 +97,6 @@ class DeliveryTests(unittest.TestCase):
     def run_daily(self, send):
         with (
             patch.object(daily, "sync_public_url"),
-            patch.object(
-                daily.subprocess,
-                "run",
-                return_value=subprocess.CompletedProcess([], 0, "", ""),
-            ),
             patch.object(daily, "send_feishu_card", side_effect=send),
         ):
             daily.run_daily_push(daily.DailyPushOptions(receive_ids="A,B"))

@@ -18,7 +18,7 @@ from reportagent.sources.base import SourceParseError
 
 
 # The q-fin archive includes all nine q-fin subcategories and their cross-lists.
-ANNOUNCEMENT_CATEGORIES = ("q-fin", "cs.LG", "stat.ML", "cs.CL", "cs.AI", "math.OC")
+ANNOUNCEMENT_CATEGORIES = ("q-fin",)
 logger = logging.getLogger(__name__)
 
 

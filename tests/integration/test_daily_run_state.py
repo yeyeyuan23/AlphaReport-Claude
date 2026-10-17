@@ -35,11 +35,6 @@ def offline_daily(tmp_path, monkeypatch, memory_session_factory):
     monkeypatch.setattr(daily, "sync_public_url", lambda: None)
     monkeypatch.setattr(daily, "load_dotenv", lambda **kwargs: None)
     monkeypatch.setattr(daily, "load_enabled_directions", lambda: {"portfolio": {}})
-    monkeypatch.setattr(
-        daily.subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess([], 0, "", ""),
-    )
     monkeypatch.setattr(daily, "send_feishu_card", lambda *args, **kwargs: True)
     monkeypatch.delenv("FEISHU_DAILY_PUSH_IDS", raising=False)
 
@@ -108,45 +103,28 @@ def assert_final_artifact(result):
     return saved
 
 
-def test_failed_relevance_without_candidates_cannot_be_successful_empty(
-    offline_daily, monkeypatch
+@pytest.mark.parametrize("has_candidate", [False, True])
+def test_daily_reuses_collection_screening_without_running_scorer(
+    offline_daily, monkeypatch, has_candidate
 ):
+    from reportagent.services import paper_scoring
+
     factory, _ = offline_daily
-    monkeypatch.setattr(
-        daily.subprocess,
-        "run",
-        lambda *args, **kwargs: subprocess.CompletedProcess(
-            [], 1, "", "fixture failure"
-        ),
-    )
-    with pytest.raises(RuntimeError, match="相关性"):
-        daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
-    result = read_saved_run(factory)
-    assert result["status"] == "failed"
-    assert result["stages"]["relevance"]["status"] == "failed"
-    assert_final_artifact(result)
+    if has_candidate:
+        insert_paper(factory)
 
+    def forbidden(*args, **kwargs):
+        pytest.fail("Reports must reuse saved collection screening")
 
-@pytest.mark.parametrize("timeout", [False, True])
-def test_failed_relevance_with_valid_candidates_is_explicit_partial(
-    offline_daily, monkeypatch, timeout
-):
-    factory, _ = offline_daily
-    insert_paper(factory)
-
-    def scoring(*args, **kwargs):
-        if timeout:
-            raise subprocess.TimeoutExpired("offline-scoring", 300)
-        return subprocess.CompletedProcess([], 2, "", "fixture failure")
-
-    monkeypatch.setattr(daily.subprocess, "run", scoring)
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    monkeypatch.setattr(paper_scoring, "score_papers_batch", forbidden)
     result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
-    assert result["status"] == "partial"
-    assert result["outcome"] == "preview"
-    assert result["stages"]["relevance"]["status"] == "failed"
-    assert result["report_ids"] == [1]
-    assert result["warnings"] and "相关性" in result["warnings"][0]
-    assert "相关性" in Path(result["artifact_path"]).read_text()
+    assert result["status"] == "preview"
+    assert result["stages"]["relevance"] == {
+        "status": "not_run",
+        "reason": "use_saved_collection_screening",
+    }
+    assert result["report_ids"] == ([1] if has_candidate else [])
     assert_final_artifact(result)
 
 
@@ -279,11 +257,6 @@ def test_default_daily_generates_from_library_without_triggering_collection(
 
     monkeypatch.setattr(collection, "collect_reports", collection_forbidden)
 
-    def run(command, **kwargs):
-        assert "reportagent.cli.collect" not in command
-        return subprocess.CompletedProcess(command, 0, "", "")
-
-    monkeypatch.setattr(daily.subprocess, "run", run)
     result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
     assert result["report_ids"] == [1] and result["status"] == "preview"
     assert result["stages"]["collection"]["status"] == "not_run"

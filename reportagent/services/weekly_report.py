@@ -173,54 +173,22 @@ def generate_weekly_report(
 async def prepare_weekly_evidence(
     papers: list[dict], *, max_reviews: int | None = None, force_review: bool = False
 ) -> dict:
-    """Refresh relevance and complete reviews through the same Python API as daily."""
-    from reportagent.llm.client import LLMClient
+    """Reuse collection screening and complete full-text reviews as daily does."""
     from reportagent.services.paper_scoring import (
         screening_is_current,
-        has_screening_material,
-        score_papers_batch,
-        apply_scores,
         _load_scoring_config,
         _configured_threshold,
     )
     from reportagent.services.report_quality import review_report_ids, select_candidates
 
     max_reviews = resolve_review_budget(max_reviews)
-    stale = [p for p in papers if not screening_is_current(p)]
     audit = {
         "screened": 0,
         "pending_needs_material": 0,
         "review_ids": [],
         "failures": [],
     }
-    if stale:
-        client = None
-        try:
-            if any(has_screening_material(p) for p in stale):
-                client = LLMClient()
-            results, failures = await score_papers_batch(client, stale, batch_size=5)
-            stats = apply_scores(results)
-            audit.update(
-                screened=stats["total_scored"],
-                pending_needs_material=stats["pending_needs_material"],
-            )
-            audit["failures"].extend(
-                {"stage": "screening", "count": n, "error": error}
-                for _, n, error in failures
-            )
-            if stats["errors"]:
-                audit["failures"].append(
-                    {"stage": "persistence", "count": stats["errors"]}
-                )
-        except Exception as error:
-            audit["failures"].append(
-                {"stage": "screening", "error": type(error).__name__}
-            )
-            logger.warning("Weekly screening failed: %s", type(error).__name__)
-        finally:
-            if client is not None:
-                await client._client.close()
-    # Reload only the requested IDs so partial scoring failures cannot use stale scores.
+    # Only current, saved collection decisions can qualify for full-text review.
     from reportagent.models.database import Report
 
     with get_session_factory()() as session:

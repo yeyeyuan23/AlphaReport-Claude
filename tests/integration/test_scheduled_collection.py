@@ -50,6 +50,7 @@ def test_scheduled_collection_saves_source_results_without_generating_reports(
     assert saved == result
     assert result["status"] == ("failed" if outcome == "exception" else outcome)
     assert result["completed_at"] and result["run_id"]
+    assert result["elapsed_ms"] >= 0
     assert (
         "report_ids" not in result
     )  # This result is ingestion, not a report/send job.

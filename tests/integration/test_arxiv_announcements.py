@@ -43,7 +43,6 @@ def recorded(name):
 
 def install_http(monkeypatch, respond):
     mock_http(monkeypatch, respond)
-    monkeypatch.setattr(announcements, "ANNOUNCEMENT_CATEGORIES", ("q-fin",))
 
 
 def test_weekend_rerun_reads_complete_previous_public_batch(monkeypatch):
@@ -52,6 +51,7 @@ def test_weekend_rerun_reads_complete_previous_public_batch(monkeypatch):
     def respond(request):
         urls.append(str(request.url))
         if request.url.host == "arxiv.org":
+            assert request.url.path == "/list/q-fin/recent"
             return httpx.Response(200, content=recorded("q-fin-recent.html"))
         assert len(request.url.params["id_list"].split(",")) == 17
         return httpx.Response(200, content=recorded("q-fin-metadata.xml"))

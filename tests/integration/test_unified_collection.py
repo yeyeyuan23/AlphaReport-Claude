@@ -80,6 +80,18 @@ def test_criteria_keep_precise_times_lists_and_directory(
         assert result["report_ids"] == [row.id]
         assert row.title == "Quantitative portfolio optimization risk model 1"
     assert result["topics"] == ["portfolio, allocation", "risk"]
+    timing = result["timing"]
+    assert timing["started_at"] <= timing["completed_at"]
+    assert timing["elapsed_ms"] >= 0
+    assert {
+        "metadata",
+        "relevance",
+        "classification",
+        "storage",
+        "download_parse",
+    } <= timing["stages_ms"].keys()
+    assert all(ms >= 0 for ms in timing["stages_ms"].values())
+    assert result["source_statuses"][0]["timing"]["stages_ms"] == timing["stages_ms"]
 
 
 def test_cancellation_after_scoring_prevents_persistence_and_download(

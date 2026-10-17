@@ -12,7 +12,7 @@ Do not maintain a second copy of task instructions or analysis prompts in a tran
 - Skill catalog: `python -m reportagent.cli.skills list`.
 - Batch collection: `python -m reportagent.cli.collect`.
 - Daily / weekly delivery: `python -m reportagent.cli.daily_feishu_push` / `python -m reportagent.cli.weekly_report`.
-- Business commands use `python -m reportagent.cli.<command>`; scripts/ contains only ops and dev helpers.
+- Business commands use `python -m reportagent.cli.<command>`; scripts/ contains ops and dev helpers plus collect.py, a thin adapter to scheduled collection.
 
 Run commands from the repository root with `.venv/bin/python`. Read README.md and docs/architecture.md for the maintained architecture.
 

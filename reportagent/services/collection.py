@@ -8,7 +8,6 @@ from typing import Callable
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from time import monotonic
 
 
 from reportagent.models.schemas import (
@@ -35,6 +34,8 @@ from reportagent.classifiers.quant_filter import is_quant_finance
 from reportagent.llm.client import LLMClient
 from reportagent.db.engine import init_db, get_session_factory
 from reportagent.db.repository import ReportRepository
+
+from reportagent.services.collection_timing import CollectionTiming
 
 logger = logging.getLogger("collect")
 
@@ -156,6 +157,7 @@ async def collect_reports(
     journals, brokers and local paths are never serialized through CLI strings.
     Cancellation preserves the receipt for metadata already committed.
     """
+    collection_timing = CollectionTiming()
     if isinstance(options, CollectionOptions):
         sources = build_sources(
             [name.strip() for name in options.sources.split(",") if name.strip()]
@@ -213,8 +215,8 @@ async def collect_reports(
         if cancelled():
             break
         progress("collecting", f"Searching {source.source_type.value}")
-        started = monotonic()
         source_name = source.source_type.value
+        source_timing = CollectionTiming(source_name)
         errors = []
         results = []
         valid = 0
@@ -254,10 +256,11 @@ async def collect_reports(
                 if online and download_pdfs is not None:
                     source.download_pdfs = False
                 try:
-                    if broad and hasattr(source, "search_broad"):
-                        results = await source.search_broad(criteria)
-                    else:
-                        results = await source.search(criteria)
+                    with source_timing.measure("metadata"):
+                        if broad and hasattr(source, "search_broad"):
+                            results = await source.search_broad(criteria)
+                        else:
+                            results = await source.search(criteria)
                 finally:
                     if download_pdfs is not None:
                         source.download_pdfs = download_pdfs
@@ -313,13 +316,14 @@ async def collect_reports(
                             )
                             continue
                         progress("classifying", f"Classifying {source_name} metadata")
-                        classified = await classify_for_storage(
-                            sr,
-                            classifier,
-                            llm_classifier,
-                            errors,
-                            model_unavailable=model_unavailable,
-                        )
+                        with source_timing.measure("classification"):
+                            classified = await classify_for_storage(
+                                sr,
+                                classifier,
+                                llm_classifier,
+                                errors,
+                                model_unavailable=model_unavailable,
+                            )
                         if classified is None:
                             screening["checked"] += 1
                             screening["rejected"] += 1
@@ -334,21 +338,22 @@ async def collect_reports(
                 )
 
                 progress("screening", f"Screening {source_name} metadata")
-                selected = (
-                    []
-                    if cancelled()
-                    else (
-                        await select_metadata(
-                            classified_results,
-                            llm_client,
-                            get_session_factory(),
-                            errors,
-                            screening,
+                with source_timing.measure("relevance"):
+                    selected = (
+                        []
+                        if cancelled()
+                        else (
+                            await select_metadata(
+                                classified_results,
+                                llm_client,
+                                get_session_factory(),
+                                errors,
+                                screening,
+                            )
+                            if online
+                            else [(item, None) for item in classified_results]
                         )
-                        if online
-                        else [(item, None) for item in classified_results]
                     )
-                )
                 for item, decision in selected:
                     if cancelled():
                         break
@@ -361,39 +366,42 @@ async def collect_reports(
                                 "classifying",
                                 f"Classifying accepted {source_name} metadata",
                             )
-                            item = await classify_for_storage(
-                                item.search_result,
-                                classifier,
-                                llm_classifier,
-                                errors,
-                                model_unavailable=model_unavailable,
-                                check_domain=False,
-                            )
+                            with source_timing.measure("classification"):
+                                item = await classify_for_storage(
+                                    item.search_result,
+                                    classifier,
+                                    llm_classifier,
+                                    errors,
+                                    model_unavailable=model_unavailable,
+                                    check_domain=False,
+                                )
                             if cancelled():
                                 break
-                        if online:
-                            action, rid, item = store_selected(
-                                item,
-                                decision,
-                                get_session_factory(),
-                            )
-                        else:
-                            with get_session_factory()() as session:
-                                action, rid = ReportRepository(session).upsert_report(
-                                    item
+                        with source_timing.measure("storage"):
+                            if online:
+                                action, rid, item = store_selected(
+                                    item,
+                                    decision,
+                                    get_session_factory(),
                                 )
+                            else:
+                                with get_session_factory()() as session:
+                                    action, rid = ReportRepository(
+                                        session
+                                    ).upsert_report(item)
                         storage_result["added" if action == "added" else "updated"] += 1
                         report_ids.append(rid)
                         all_results.append(item)
                         if online and not cancelled():
-                            item = await hydrate_selected(
-                                source,
-                                item,
-                                rid,
-                                get_session_factory(),
-                                errors,
-                                cancel_check=cancel_check,
-                            )
+                            with source_timing.measure("download_parse"):
+                                item = await hydrate_selected(
+                                    source,
+                                    item,
+                                    rid,
+                                    get_session_factory(),
+                                    errors,
+                                    cancel_check=cancel_check,
+                                )
                             all_results[-1] = item
                         valid += 1
                         sr = item.search_result
@@ -422,6 +430,8 @@ async def collect_reports(
             status = "partial" if succeeded else "error"
         else:
             status = "ok" if valid else "empty"
+        collection_timing.include(source_timing)
+        source_clock = source_timing.snapshot()
         source_statuses.append(
             {
                 "source": source_name,
@@ -429,7 +439,8 @@ async def collect_reports(
                 "fetched": fetched,
                 "valid": valid,
                 "full_text": full_text_count,
-                "elapsed_ms": round((monotonic() - started) * 1000),
+                "elapsed_ms": source_clock["elapsed_ms"],
+                "timing": source_clock,
                 "errors": errors,
                 "screening": screening,
             }
@@ -532,4 +543,5 @@ async def collect_reports(
         "results_count": len(all_results),
         "storage": storage_result,
         "collected_at": datetime.now(timezone.utc).isoformat(),
+        "timing": collection_timing.snapshot(),
     }

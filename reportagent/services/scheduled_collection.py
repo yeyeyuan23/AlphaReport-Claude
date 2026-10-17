@@ -9,6 +9,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from time import monotonic
 
 from reportagent.utils.config import PROJECT_ROOT, get_config
 from reportagent.services.report_periods import REPORT_TIMEZONE
@@ -146,6 +147,7 @@ def run_scheduled_collection() -> dict:
             "source_statuses": [],
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
+        started = monotonic()
         try:
             sources = config.get("sources", ["arxiv", "eastmoney", "bigquant"])
             start, end, report_date, _ = get_daily_range()
@@ -183,6 +185,7 @@ def run_scheduled_collection() -> dict:
             logger.error("Scheduled collection failed: %s", type(error).__name__)
         finally:
             result["completed_at"] = datetime.now(timezone.utc).isoformat()
+            result["elapsed_ms"] = round((monotonic() - started) * 1000)
             _save(directory / f"{result['run_id']}.json", result)
             _save(directory / "latest.json", result)
         logger.info("Scheduled collection %s: %s", result["run_id"], result["status"])
