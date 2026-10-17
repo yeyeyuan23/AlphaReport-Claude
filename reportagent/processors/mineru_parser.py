@@ -2,11 +2,33 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+_MATH_EXPRESSION = re.compile(
+    r"(?<!\\)\$\$(.*?)\$\$|\\\[(.*?)\\\]|\\\((.*?)\\\)"
+    r"|(?<![\\$])\$(?!\$)(.*?)(?<!\\)\$(?!\$)",
+    re.DOTALL,
+)
+_MATH_STRUCTURE = re.compile(r"\S\s*[-+*/=^]\s*\S|\\(?:sum|prod|int|frac|sqrt|begin)\b")
+
+
+def _normalized_block(text: str | None) -> str:
+    """Ignore export line endings/indentation, not cell values or math content."""
+    return "\n".join(line.strip() for line in (text or "").splitlines()).strip()
+
+
+def _equation_body(latex: str | None) -> str:
+    latex = (latex or "").strip()
+    match = _MATH_EXPRESSION.fullmatch(latex)
+    if match:
+        latex = next(group for group in match.groups() if group is not None)
+    return _normalized_block(latex)
 
 
 @dataclass
@@ -24,18 +46,63 @@ class ParsedContent:
 
     @property
     def full_text_with_tables(self) -> str:
+        """Supplement prose or full Markdown with only missing structured content.
+
+        Docling exports tables/formulas in its text already, while MinerU keeps
+        them separate. Check the actual content so mixed-parser results retain
+        unique structures; parser identity alone cannot establish completeness.
+        """
         parts = [self.text]
+        text_blocks = f"\n{_normalized_block(self.text)}\n"
+        appended_blocks: set[str] = set()
+
+        def missing_block(value: str) -> bool:
+            block = _normalized_block(value)
+            if not block or block in appended_blocks or f"\n{block}\n" in text_blocks:
+                return False
+            appended_blocks.add(block)
+            return True
+
         for t in self.tables:
-            caption = ", ".join(t.get("table_caption", []))
+            # Captions may be absent even when the table body is already present.
+            caption = ", ".join(
+                value for value in t.get("table_caption", []) if missing_block(value)
+            )
             body = t.get("table_body", "")
+            if not missing_block(body):
+                body = ""
             if caption:
                 parts.append(f"\n[Table: {caption}]\n{body}")
             elif body:
                 parts.append(f"\n[Table]\n{body}")
+
+        # Compare complete math expressions, never arbitrary substrings: a prose
+        # digit or x in $$x^2$$ does not represent a separate equation "1" or "x".
+        composed = "\n".join(parts)
+        # Bare standalone formulas are common in Docling's fallback text. Exclude
+        # delimited math first so one line of a larger expression cannot match.
+        outside_math = _MATH_EXPRESSION.sub("\n", composed)
+        equation_blocks = f"\n{_normalized_block(outside_math)}\n"
+        embedded_equations = {
+            _normalized_block(next(g for g in match.groups() if g is not None))
+            for match in _MATH_EXPRESSION.finditer(composed)
+        }
         for eq in self.equations:
             latex = eq.get("latex", "")
-            if latex:
+            body = _equation_body(latex)
+            # A bare atom may be a page number or heading. Require mathematical
+            # structure before treating an unmarked standalone line as a formula.
+            standalone_math = bool(_MATH_STRUCTURE.search(body)) and (
+                f"\n{body}\n" in equation_blocks
+            )
+            if (
+                body
+                and body not in embedded_equations
+                and not standalone_math
+                and f"\n[Equation] {body}\n" not in equation_blocks
+            ):
                 parts.append(f"\n[Equation] {latex}")
+                embedded_equations.add(body)
         return "\n".join(parts)
 
 
