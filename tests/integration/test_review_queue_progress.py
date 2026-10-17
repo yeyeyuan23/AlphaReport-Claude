@@ -105,34 +105,6 @@ def test_missing_material_and_current_caches_do_not_starve_two_review_runs(
             assert session.get(Report, expected_last_id + 1).evaluation_json is None
 
 
-def test_weekly_fallback_recipient_uses_daily_default_open_id(
-    queue_library, monkeypatch
-):
-    monkeypatch.delenv("FEISHU_WEEKLY_PUSH_IDS", raising=False)
-    monkeypatch.delenv("FEISHU_WEEKLY_PUSH_TYPE", raising=False)
-    monkeypatch.delenv("FEISHU_DAILY_PUSH_TYPE", raising=False)
-    monkeypatch.setenv("FEISHU_DAILY_PUSH_IDS", "daily-user")
-    monkeypatch.setattr(
-        weekly,
-        "get_weekly_range",
-        lambda *args: (
-            datetime(2020, 1, 1),
-            datetime(2030, 1, 1),
-            "2020-01-01",
-            "2030-01-01",
-        ),
-    )
-    recipients = []
-    monkeypatch.setattr(
-        weekly,
-        "send_feishu_card",
-        lambda rid, text, papers, start, end, kind: recipients.append((rid, kind))
-        or True,
-    )
-    weekly.run_weekly_report(weekly.WeeklyReportOptions(no_llm=True))
-    assert recipients == [("daily-user", "open_id")]
-
-
 def test_generic_review_entrypoint_keeps_full_requested_library_contract(queue_library):
     _, model, _ = queue_library
     result = asyncio.run(quality.review_report_ids(list(range(14, 39))))

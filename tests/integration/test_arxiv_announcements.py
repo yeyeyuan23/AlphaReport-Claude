@@ -6,6 +6,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from tests.support.source_fixtures import mock_http
 
 from reportagent.models.schemas import UserCriteria
 from reportagent.sources import arxiv_announcements as announcements
@@ -41,12 +42,7 @@ def recorded(name):
 
 
 def install_http(monkeypatch, respond):
-    client = httpx.AsyncClient
-    monkeypatch.setattr(
-        httpx,
-        "AsyncClient",
-        lambda **kw: client(transport=httpx.MockTransport(respond), **kw),
-    )
+    mock_http(monkeypatch, respond)
     monkeypatch.setattr(announcements, "ANNOUNCEMENT_CATEGORIES", ("q-fin",))
 
 

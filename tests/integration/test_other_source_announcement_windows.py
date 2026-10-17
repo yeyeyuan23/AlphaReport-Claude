@@ -10,6 +10,7 @@ from tests.support.source_fixtures import (
     bigquant_info,
     bigquant_document,
     bigquant_page,
+    mock_http,
 )
 
 from reportagent.models.schemas import UserCriteria
@@ -32,15 +33,6 @@ def criteria(**updates):
             "max_results_per_source": None,
             **updates,
         }
-    )
-
-
-def mock_http(monkeypatch, handler):
-    client = httpx.AsyncClient
-    monkeypatch.setattr(
-        httpx,
-        "AsyncClient",
-        lambda **kwargs: client(transport=httpx.MockTransport(handler), **kwargs),
     )
 
 
