@@ -5,13 +5,14 @@ import { deferred, report } from '@/test/fixtures';
 
 describe('PaperViewer', () => {
   it.each([
-    [404, 'application/json'],
-    [200, 'text/html'],
-  ])('shows body without an iframe error event for PDF HTTP %s / %s', async (status, type) => {
+    { failure: 'HTTP 404', status: 404, type: 'application/json', body: 'unavailable' },
+    { failure: 'non-PDF MIME type', status: 200, type: 'text/html', body: 'unavailable' },
+    { failure: 'empty PDF body', status: 200, type: 'application/pdf', body: '' },
+  ])('shows body without an iframe error event for $failure', async ({ status, type, body }) => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue(
-        new Response('unavailable', {
+        new Response(body, {
           status,
           headers: { 'Content-Type': type },
         }),
@@ -62,20 +63,6 @@ describe('PaperViewer', () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it('falls back when a successful PDF response has no bytes', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(
-        new Response('', {
-          headers: { 'Content-Type': 'application/pdf' },
-        }),
-      ),
-    );
-    render(<PaperViewer report={report()} />);
-    expect(await screen.findByText('论文完整正文')).toBeVisible();
-    expect(screen.queryByTitle('PDF Viewer')).not.toBeInTheDocument();
   });
 
   it('ignores a prior report PDF check that completes after the report changes', async () => {

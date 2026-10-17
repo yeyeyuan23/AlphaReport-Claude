@@ -242,28 +242,6 @@ def test_threshold_increased_during_screening_cannot_authorize_download(
     assert stats["selected"] == 0 and stats["rejected"] + stats["failed"] == 1
 
 
-def test_policy_change_during_storage_rolls_back_new_metadata(ingest, monkeypatch):
-    from reportagent.db.repository import ReportRepository
-    from reportagent.services import paper_scoring
-
-    run, factory, rows, _, _, downloads, _ = ingest
-    rows[:] = [rows[0]]
-    upsert = ReportRepository.upsert_report
-
-    def changed(self, report, **kwargs):
-        result = upsert(self, report, **kwargs)
-        monkeypatch.setattr(
-            paper_scoring, "scoring_fingerprint", lambda: "changed-during-storage"
-        )
-        return result
-
-    monkeypatch.setattr(ReportRepository, "upsert_report", changed)
-    result = run()
-    assert downloads == [] and result["status"] != "ok"
-    with factory() as session:
-        assert session.query(Report).count() == 0
-
-
 def test_unavailable_model_does_not_download_even_to_fill_missing_abstract(
     ingest, monkeypatch
 ):

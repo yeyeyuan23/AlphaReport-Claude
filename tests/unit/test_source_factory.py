@@ -1,8 +1,6 @@
 """Collection and default source construction share configuration semantics."""
 
 import asyncio
-import importlib
-import importlib.util
 from pathlib import Path
 
 import pytest
@@ -28,13 +26,7 @@ def configure(monkeypatch, sources):
     monkeypatch.setattr(config, "load_config", lambda: {"sources": sources})
 
 
-def shared_factory():
-    module = "reportagent.sources.factory"
-    assert importlib.util.find_spec(module), "Source configuration needs one factory"
-    return importlib.import_module(module)
-
-
-def test_both_callers_apply_configured_constructor_options(
+def test_collection_applies_configured_constructor_options(
     build_sources, monkeypatch, tmp_path
 ):
     library = tmp_path / "papers with spaces" / "未下载"
@@ -67,7 +59,7 @@ def test_both_callers_apply_configured_constructor_options(
     assert bigquant.download_pdfs is False
 
 
-def test_both_callers_preserve_missing_configuration_defaults(
+def test_collection_preserves_missing_configuration_defaults(
     build_sources, monkeypatch
 ):
     configure(monkeypatch, {})
@@ -124,14 +116,13 @@ def test_explicit_selection_keeps_order_duplicates_and_unknown_name_behavior(
 
 
 @pytest.mark.parametrize("path", ["./papers/../library", "~/papers"])
-def test_both_callers_keep_local_path_semantics(build_sources, monkeypatch, path):
+def test_collection_keeps_local_path_semantics(build_sources, monkeypatch, path):
     configure(monkeypatch, {"local_pdf": {"library_path": path}})
 
     assert build_sources()[0].pdf_library_path == Path(path)
 
 
 def test_collection_delegates_to_shared_factory(monkeypatch):
-    factory = shared_factory()
     expected = [object()]
     calls = []
 
@@ -139,7 +130,7 @@ def test_collection_delegates_to_shared_factory(monkeypatch):
         calls.append(names)
         return expected
 
-    monkeypatch.setattr(factory, "build_sources", build)
+    monkeypatch.setattr(source_factory, "build_sources", build)
     names = ["arxiv", "unknown"]
     assert collection.build_sources(names) is expected
     assert calls == [names]
@@ -148,14 +139,13 @@ def test_collection_delegates_to_shared_factory(monkeypatch):
 def test_collection_workflow_uses_shared_factory_and_keeps_no_valid_sources_error(
     monkeypatch,
 ):
-    factory = shared_factory()
     selected = []
 
     def build(names):
         selected.extend(names)
         return []
 
-    monkeypatch.setattr(factory, "build_sources", build)
+    monkeypatch.setattr(source_factory, "build_sources", build)
     monkeypatch.setattr(collection, "init_db", lambda: None)
 
     with pytest.raises(ValueError, match="^No valid sources specified$"):

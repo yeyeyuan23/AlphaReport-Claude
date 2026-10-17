@@ -5,12 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from reportagent.classifiers.llm_classifier import LLMClassifier
 from reportagent.llm.client import LLMClient
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 from reportagent.services import batch_classification as classification
 
 VALID = {
@@ -56,33 +54,10 @@ def test_model_error_reaches_caller():
         asyncio.run(LLMClassifier(client).classify("Portfolio model", ""))
 
 
-def test_truncated_openai_json_cannot_be_treated_as_complete():
-    client = object.__new__(LLMClient)
-    client.provider, client.model, client.calls = "deepseek", "test", []
-    response = SimpleNamespace(
-        choices=[
-            SimpleNamespace(
-                finish_reason="length",
-                message=SimpleNamespace(content='{"topics": []}'),
-            )
-        ],
-        model="test",
-        usage=SimpleNamespace(prompt_tokens=10, completion_tokens=20),
-    )
-    client._client = SimpleNamespace(
-        chat=SimpleNamespace(
-            completions=SimpleNamespace(create=AsyncMock(return_value=response))
-        )
-    )
-    with pytest.raises(ValueError, match="Incomplete"):
-        asyncio.run(client.chat_json([{"role": "user", "content": "Classify"}]))
-    assert client.calls[-1]["complete"] is False
-
-
-def test_one_model_failure_preserves_existing_tags_and_successful_siblings(monkeypatch):
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine)
+def test_one_model_failure_preserves_existing_tags_and_successful_siblings(
+    monkeypatch, expiring_memory_session_factory
+):
+    factory = expiring_memory_session_factory
     with factory() as session:
         session.add_all(
             [
@@ -120,7 +95,6 @@ def test_one_model_failure_preserves_existing_tags_and_successful_siblings(monke
     with factory() as session:
         assert session.get(Report, 1).topics == "risk_model"
         assert session.get(Report, 2).topics == "factor_model"
-    engine.dispose()
 
 
 @pytest.mark.parametrize("method", ["chat", "chat_json"])

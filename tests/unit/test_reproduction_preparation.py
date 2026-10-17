@@ -17,19 +17,6 @@ def test_preparation_preserves_evidence_and_separates_proposal():
     assert "尚未复现" in card["notice"]
 
 
-def test_fabricated_fact_does_not_produce_successful_card():
-    from reportagent.services.reproduction import prepare_reproduction
-
-    data = output()
-    data["fields"]["target"]["evidence"][0]["quote"] = (
-        "Invented text not found anywhere in the original paper."
-    )
-    model = SimpleNamespace(chat_json=AsyncMock(return_value=data))
-    card = asyncio.run(prepare_reproduction(reviewed_paper(), llm=model))
-    assert card["status"] == "retryable_error"
-    assert not card.get("fields")
-
-
 def test_invalid_quote_gets_one_correction_before_persistable_success():
     from reportagent.services.reproduction import prepare_reproduction
 

@@ -55,6 +55,40 @@ def article(stamp=None, original="2020年1月2日"):
     )
 
 
+@pytest.fixture
+def bigquant_detail():
+    """Read one controlled page with the real detail parser and no downloads."""
+    source = BigQuantSource(download_pdfs=False)
+    requests = []
+
+    def read(body, *, announcement=True):
+        def respond(request):
+            requests.append(request.url.path)
+            return httpx.Response(200, text=body)
+
+        async def run():
+            options = (
+                dict(
+                    date_from=START,
+                    date_to=END,
+                    date_basis="announcement",
+                    date_to_exclusive=True,
+                )
+                if announcement
+                else {}
+            )
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(respond)
+            ) as client:
+                return await source._fetch_detail(
+                    client, "portfolio", "/wiki/doc/one", **options
+                )
+
+        return asyncio.run(run())
+
+    return read, source, requests
+
+
 def test_eastmoney_unlimited_follows_reported_pages_beyond_800(monkeypatch):
     requests = []
 
@@ -216,58 +250,26 @@ def test_bigquant_unlimited_keeps_partial_candidates_on_listing_failure(
 )
 def test_bigquant_announcement_never_uses_citations_modification_or_foreign_objects(
     meta,
+    bigquant_detail,
 ):
-    async def run():
-        source = BigQuantSource(download_pdfs=False)
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(
-                lambda _: httpx.Response(200, text=meta + article())
-            )
-        ) as client:
-            row = await source._fetch_detail(
-                client,
-                "portfolio",
-                "/wiki/doc/one",
-                date_from=START,
-                date_to=END,
-                date_basis="announcement",
-                date_to_exclusive=True,
-            )
-        return row, source
-
-    row, source = asyncio.run(run())
+    read, source, _ = bigquant_detail
+    row = read(meta + article())
     assert row is None
     assert any(
         "announcement date unavailable" in error for error in source.last_search.errors
     )
 
 
-def test_bigquant_announcement_accepts_own_jsonld_datetime():
+def test_bigquant_announcement_accepts_own_jsonld_datetime(bigquant_detail):
     meta = '<script type="application/ld+json">{"@type":"Article","@id":"https://bigquant.com/wiki/doc/one#article","datePublished":"2026-10-15 09:30:00"}</script>'
 
-    async def run():
-        source = BigQuantSource(download_pdfs=False)
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(
-                lambda _: httpx.Response(200, text=meta + article())
-            )
-        ) as client:
-            return await source._fetch_detail(
-                client,
-                "portfolio",
-                "/wiki/doc/one",
-                date_from=START,
-                date_to=END,
-                date_basis="announcement",
-                date_to_exclusive=True,
-            )
-
-    row = asyncio.run(run())
+    read, _, _ = bigquant_detail
+    row = read(meta + article())
     assert row.announced_at == datetime(2026, 10, 15, 1, 30, tzinfo=timezone.utc)
     assert row.published_date == datetime(2020, 1, 2)
 
 
-def test_bigquant_announcement_does_not_borrow_foreign_microdata_date():
+def test_bigquant_announcement_does_not_borrow_foreign_microdata_date(bigquant_detail):
     body = article() + (
         '<article itemscope itemtype="https://schema.org/Article" '
         'itemid="https://another-site.example/original-report">'
@@ -280,23 +282,8 @@ def test_bigquant_announcement_does_not_borrow_foreign_microdata_date():
         + "</article>"
     )
 
-    async def run():
-        source = BigQuantSource(download_pdfs=False)
-        async with httpx.AsyncClient(
-            transport=httpx.MockTransport(lambda _: httpx.Response(200, text=body))
-        ) as client:
-            row = await source._fetch_detail(
-                client,
-                "portfolio",
-                "/wiki/doc/one",
-                date_from=START,
-                date_to=END,
-                date_basis="announcement",
-                date_to_exclusive=True,
-            )
-        return row, source
-
-    row, source = asyncio.run(run())
+    read, source, _ = bigquant_detail
+    row = read(body)
     assert row is None
     assert any(
         "announcement date unavailable" in error for error in source.last_search.errors
@@ -340,30 +327,12 @@ def test_eastmoney_date_only_publication_is_not_an_intraday_announcement(monkeyp
         '<meta name="datePublished" content="2026-10-16">',
     ],
 )
-def test_bigquant_date_only_page_date_is_not_an_intraday_announcement(metadata):
-    requests = []
-
-    def respond(request):
-        requests.append(request.url.path)
-        assert not request.url.path.endswith(".pdf")
-        return httpx.Response(200, text=metadata + article())
-
-    async def run():
-        source = BigQuantSource(download_pdfs=False)
-        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
-            row = await source._fetch_detail(
-                client,
-                "portfolio",
-                "/wiki/doc/one",
-                date_from=START,
-                date_to=END,
-                date_basis="announcement",
-                date_to_exclusive=True,
-            )
-            original = await source._fetch_detail(client, "portfolio", "/wiki/doc/one")
-        return row, original, source
-
-    row, original, source = asyncio.run(run())
+def test_bigquant_date_only_page_date_is_not_an_intraday_announcement(
+    metadata, bigquant_detail
+):
+    read, source, requests = bigquant_detail
+    row = read(metadata + article())
+    original = read(metadata + article(), announcement=False)
     assert row is None
     assert original.published_date == datetime(2020, 1, 2)
     assert original.announced_at is None

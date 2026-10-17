@@ -133,16 +133,20 @@ def test_default_collection_excludes_placeholder_before_storage_and_analyzes_goo
     )
 
 
-def test_default_collection_rejects_incomplete_analysis_and_preserves_success(
-    collected,
-):
+@pytest.mark.parametrize(
+    "failure", ["incomplete_analysis", "truncated_call", "exception"]
+)
+def test_collection_analysis_failure_preserves_complete_sibling(collected, failure):
     async def analyze(**kwargs):
-        collected.llm.calls.append({"complete": True})
-        return (
-            AnalysisResult(summary="Only summary")
-            if kwargs["title"].endswith("0")
-            else complete()
+        failed = kwargs["title"].endswith("0")
+        if failed and failure == "exception":
+            raise RuntimeError("Authorization: Bearer do-not-expose-this")
+        collected.llm.calls.append(
+            {"complete": not (failed and failure == "truncated_call")}
         )
+        if failed and failure == "incomplete_analysis":
+            return AnalysisResult(summary="Only summary")
+        return complete()
 
     collected.agent.analyze_report_directly.side_effect = analyze
     result, rows = collected.run(
@@ -151,36 +155,6 @@ def test_default_collection_rejects_incomplete_analysis_and_preserves_success(
     assert rows[0].analysis_json is None and rows[1].analysis_json
     assert result["storage"]["analyzed"] == 1 and result["status"] == "partial"
     assert result["storage"]["errors"]
-
-
-def test_default_collection_rejects_truncated_call_and_keeps_complete_sibling(
-    collected,
-):
-    async def analyze(**kwargs):
-        collected.llm.calls.append({"complete": not kwargs["title"].endswith("0")})
-        return complete()
-
-    collected.agent.analyze_report_directly.side_effect = analyze
-    result, rows = collected.run(
-        ["Portfolio financial risk estimator.", "Portfolio financial risk estimator."]
-    )
-    assert rows[0].analysis_json is None and rows[1].analysis_json
-    assert result["storage"]["analyzed"] == 1 and result["status"] == "partial"
-
-
-def test_collection_analysis_failure_is_safe_and_does_not_hide_success(collected):
-    async def analyze(**kwargs):
-        if kwargs["title"].endswith("0"):
-            raise RuntimeError("Authorization: Bearer do-not-expose-this")
-        collected.llm.calls.append({"complete": True})
-        return complete()
-
-    collected.agent.analyze_report_directly.side_effect = analyze
-    result, rows = collected.run(
-        ["Portfolio financial risk estimator.", "Portfolio financial risk estimator."]
-    )
-    assert rows[0].analysis_json is None and rows[1].analysis_json
-    assert result["status"] == "partial" and result["storage"]["errors"]
     assert "do-not-expose-this" not in json.dumps(result)
 
 

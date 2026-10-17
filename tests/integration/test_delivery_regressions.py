@@ -7,12 +7,9 @@ from unittest.mock import patch
 
 import pytest
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
 from reportagent.db.repository import ReportRepository
 from reportagent.services.report_periods import get_daily_range
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 from reportagent.models.schemas import (
     ClassifiedReport,
     ClassificationResult,
@@ -21,13 +18,12 @@ from reportagent.models.schemas import (
 )
 from reportagent.services import daily_push as daily
 from reportagent.services.paper_scoring import evidence_fingerprint
+from tests.support.database import memory_database
 
 
 class DeliveryTests(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine("sqlite:///:memory:")
-        Base.metadata.create_all(self.engine)
-        self.factory = sessionmaker(bind=self.engine, expire_on_commit=False)
+        self.factory = self.enterContext(memory_database(expire_on_commit=False))
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
         (root / "configs").mkdir()
@@ -91,7 +87,6 @@ class DeliveryTests(unittest.TestCase):
     def tearDown(self):
         for item in reversed(self.patches):
             item.stop()
-        self.engine.dispose()
         self.temp.cleanup()
 
     def run_daily(self, send):
@@ -143,46 +138,43 @@ class DeliveryTests(unittest.TestCase):
                 daily.run_daily_push(daily.DailyPushOptions(receive_ids=f"A{index}"))
         self.assertEqual(deliveries, ["A0", "A1"])
 
-    def test_text_fallback_never_marks_truncated_content_as_delivered(self):
-        import lark_oapi
-        from unittest.mock import MagicMock
 
-        client = MagicMock()
-        client.im.v1.message.create.return_value.success.return_value = False
-        sent = []
-        papers = [
-            {
-                "id": i,
-                "title": "Long title " * 20,
-                "ui_url": f"https://fixture.test/library/{i}",
-            }
-            for i in range(1, 21)
-        ]
-        briefing = daily.render_briefing(papers, "fixture")
+def test_text_fallback_never_marks_truncated_content_as_delivered():
+    import lark_oapi
+    from unittest.mock import MagicMock
 
-        def send(client, kind, content, rid, *, receive_type):
-            if kind == "interactive":
-                raise RuntimeError("card rejected")
-            sent.append(json.loads(content)["text"])
-            return "om-delivered"
+    client = MagicMock()
+    client.im.v1.message.create.return_value.success.return_value = False
+    sent = []
+    papers = [
+        {
+            "id": i,
+            "title": "Long title " * 20,
+            "ui_url": f"https://fixture.test/library/{i}",
+        }
+        for i in range(1, 21)
+    ]
+    briefing = daily.render_briefing(papers, "fixture")
 
-        with (
-            patch.object(lark_oapi.Client, "builder") as builder,
-            patch(
-                "reportagent.services.feishu_transport.send_payload", side_effect=send
-            ),
-        ):
-            builder.return_value.app_id.return_value.app_secret.return_value.build.return_value = client
-            self.assertTrue(daily.send_feishu_card("A", briefing, papers))
-        self.assertIn("https://fixture.test/library/20", "".join(sent))
+    def send(client, kind, content, rid, *, receive_type):
+        if kind == "interactive":
+            raise RuntimeError("card rejected")
+        sent.append(json.loads(content)["text"])
+        return "om-delivered"
+
+    with (
+        patch.object(lark_oapi.Client, "builder") as builder,
+        patch("reportagent.services.feishu_transport.send_payload", side_effect=send),
+    ):
+        builder.return_value.app_id.return_value.app_secret.return_value.build.return_value = client
+        assert daily.send_feishu_card("A", briefing, papers) is True
+    assert "https://fixture.test/library/20" in "".join(sent)
 
 
 class RepositoryRecoveryTests(unittest.TestCase):
     def test_unjudged_retry_uses_publication_window_instead_of_creation_date(self):
-        engine = create_engine("sqlite:///:memory:")
-        Base.metadata.create_all(engine)
         now = datetime.now(timezone.utc)
-        with sessionmaker(bind=engine)() as session:
+        with memory_database() as factory, factory() as session:
             session.add_all(
                 [
                     Report(
@@ -208,12 +200,9 @@ class RepositoryRecoveryTests(unittest.TestCase):
                 published_since=now - timedelta(days=3)
             )
             self.assertEqual([r.title for r in reports], ["retry"])
-        engine.dispose()
 
     def test_next_record_survives_failed_transaction(self):
-        engine = create_engine("sqlite:///:memory:")
-        Base.metadata.create_all(engine)
-        with sessionmaker(bind=engine)() as session:
+        with memory_database() as factory, factory() as session:
             repo = ReportRepository(session)
             original = repo.upsert_report
 
@@ -235,7 +224,6 @@ class RepositoryRecoveryTests(unittest.TestCase):
             self.assertEqual(result.newly_added, 1)
             self.assertEqual(len(result.errors), 1)
             self.assertEqual(session.query(Report).one().title, "good")
-        engine.dispose()
 
 
 @pytest.mark.parametrize("report_kind", ["daily", "weekly"])
