@@ -16,6 +16,7 @@ from bs4 import BeautifulSoup
 
 from reportagent.agents.analysis_agent import AnalysisAgent
 from reportagent.classifiers.rule_classifier import RuleClassifier
+from reportagent.classifiers.provenance import classification_material
 from reportagent.db.engine import get_session_factory, init_db
 from reportagent.db.repository import ReportRepository
 from reportagent.llm.client import LLMClient
@@ -87,8 +88,17 @@ async def collect_paper(arxiv_id: str) -> SearchResult:
                 and pdf_path.exists()
                 and stored.source_url == f"https://arxiv.org/abs/{arxiv_id}"
             ):
-                text = await asyncio.to_thread(
-                    ArxivSource._parse_pdf_bytes, pdf_path.read_bytes()
+                from reportagent.sources.content_fetch import get_pdf_policy, pdf_stage
+
+                pdf_bytes = pdf_path.read_bytes()
+                text = await pdf_stage(
+                    "parse",
+                    ArxivSource._parse_pdf_bytes,
+                    pdf_bytes,
+                    policy=get_pdf_policy(),
+                    source="arxiv",
+                    paper_id=arxiv_id,
+                    byte_count=len(pdf_bytes),
                 )
                 if text and len(text.strip()) >= 1000:
                     logger.info("Reusing collected PDF revision: %s", arxiv_id)
@@ -254,26 +264,22 @@ def store_paper(
     evaluation: dict | None = None,
 ) -> int:
     """An explicit user-requested revision replaces the library snapshot coherently."""
-    from reportagent.services.report_views import (
-        map_analysis_to_knowledge_card as _map_analysis_to_knowledge_card,
-    )
+    from reportagent.services.knowledge_cards import get_knowledge_card
 
     init_db()
     with get_session_factory()() as session:
         repo = ReportRepository(session)
+        classification = RuleClassifier().classify(
+            paper.title, classification_material(paper)
+        )
         _, report_id = repo.upsert_report(
-            ClassifiedReport(
-                search_result=paper,
-                classification=RuleClassifier().classify(paper.title, paper.full_text),
-            )
+            ClassifiedReport(search_result=paper, classification=classification),
+            preserve_classification_on_same_input=True,
         )
         stored = repo.get_report(report_id)
         # Background collection never downgrades revisions. Explicit single-paper
         # requests may restore an older one, including all metadata and derived state.
-        if any(
-            getattr(stored, field) != getattr(paper, field)
-            for field in ("arxiv_id", "title", "abstract", "full_text")
-        ):
+        if paper.arxiv_id and stored.arxiv_id != paper.arxiv_id:
             stored.selection_provenance_json = stored.selection_direction = (
                 stored.selection_relevance
             ) = stored.selection_reason = None
@@ -281,28 +287,28 @@ def store_paper(
             stored.analysis_json = stored.evaluation_json = (
                 stored.knowledge_card_json
             ) = stored.summary = None
-        for field in (
-            "title",
-            "full_text",
-            "abstract",
-            "arxiv_id",
-            "source_url",
-            "pdf_path",
-            "published_date",
-            "tables_json",
-            "equations_json",
-        ):
-            setattr(stored, field, getattr(paper, field))
-        stored.authors = json.dumps(paper.authors, ensure_ascii=False)
+            for field in (
+                "title",
+                "full_text",
+                "abstract",
+                "arxiv_id",
+                "source_url",
+                "pdf_path",
+                "tables_json",
+                "equations_json",
+            ):
+                setattr(stored, field, getattr(paper, field))
+            if stored.published_date is None:
+                stored.published_date = paper.published_date
+            stored.authors = json.dumps(paper.authors, ensure_ascii=False)
+            stored.has_full_text = bool(paper.full_text) and not paper.abstract_only
+            repo.apply_classification(stored, classification)
         if result is not None:
             stored.analysis_json = result.model_dump_json()
             stored.summary = result.summary
-            stored.knowledge_card_json = json.dumps(
-                _map_analysis_to_knowledge_card(result.model_dump()), ensure_ascii=False
-            )
         if evaluation is not None:
             stored.evaluation_json = json.dumps(evaluation, ensure_ascii=False)
-        stored.has_full_text = bool(paper.full_text) and not paper.abstract_only
+        get_knowledge_card(stored)
         session.commit()
     return report_id
 
@@ -325,6 +331,7 @@ def _stored_review_input(report_id: int) -> dict:
                 "selection_relevance",
                 "selection_reason",
                 "selection_provenance_json",
+                "evaluation_json",
             )
         }
 
@@ -338,6 +345,16 @@ async def prepare_report(arxiv_id: str, *, force: bool = False) -> tuple[Path, d
     fingerprint = analysis_fingerprint()
     report_id = store_paper(paper)
     review_input = _stored_review_input(report_id)
+    from reportagent.services.report_quality import cached_review_is_current
+
+    evaluation = None
+    if not force:
+        try:
+            canonical = json.loads(review_input.get("evaluation_json") or "null")
+        except (ValueError, TypeError):
+            canonical = None
+        if cached_review_is_current(review_input, canonical, get_llm_model()):
+            evaluation = canonical
     previous_deliveries = []
     cached_result, cached_limits, cached_calls = None, {}, []
     if path.exists():
@@ -345,20 +362,21 @@ async def prepare_report(arxiv_id: str, *, force: bool = False) -> tuple[Path, d
         previous_deliveries = cached.get("deliveries", [])
         if (
             not force
+            and evaluation is None
+            and cached_review_is_current(
+                review_input, cached.get("evaluation"), get_llm_model()
+            )
+        ):
+            evaluation = cached["evaluation"]
+        if (
+            not force
             and cached.get("pdf_sha256") == pdf_hash
             and cached.get("analysis_fingerprint") == fingerprint
         ):
             result = validate_analysis(cached["analysis"])
-            evaluation = cached.get("evaluation") or {}
-            from reportagent.services.report_quality import review_fingerprint
-
-            if (
-                evaluation.get("status") == "reviewed"
-                and evaluation.get("tier") != "pending"
-                and evaluation.get("fingerprint")
-                == review_fingerprint(review_input, get_llm_model())
-            ):
+            if evaluation is not None:
                 cached["report_id"] = store_paper(paper, result, evaluation)
+                cached["evaluation"] = evaluation
                 # Analysis is reusable; library identities and public URLs are not.
                 # Older artifacts may omit the presentation-only label/model.
                 cached["brief"] = make_brief(
@@ -409,9 +427,10 @@ async def prepare_report(arxiv_id: str, *, force: bool = False) -> tuple[Path, d
             result = cached_result
         from reportagent.services.report_quality import evaluate_paper
 
-        evaluation = await asyncio.wait_for(
-            evaluate_paper(review_input, llm), timeout=240
-        )
+        if evaluation is None:
+            evaluation = await asyncio.wait_for(
+                evaluate_paper(review_input, llm), timeout=240
+            )
     finally:
         await llm._client.close()
     validate_analysis(result.model_dump())

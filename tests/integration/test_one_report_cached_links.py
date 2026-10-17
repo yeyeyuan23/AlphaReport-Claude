@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from reportagent.models.database import Base
 from reportagent.models.schemas import SearchResult, SourceType
 from reportagent.services import one_report
-from reportagent.services.report_quality import review_fingerprint
+from reportagent.services.report_quality import SCHEMA_VERSION, review_fingerprint
 from tests.support.report_fixtures import TEXT, complete_analysis
 
 
@@ -75,6 +75,9 @@ def test_cached_brief_refreshes_current_links_and_markdown_without_model(
             "evaluation": {
                 "status": "reviewed",
                 "tier": "browse",
+                "schema_version": SCHEMA_VERSION,
+                "model": "fixture-model",
+                "text_complete": True,
                 "fingerprint": review_fingerprint(
                     one_report._stored_review_input(report_id), "fixture-model"
                 ),

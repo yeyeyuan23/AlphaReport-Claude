@@ -9,7 +9,10 @@ from sqlalchemy import or_, desc, asc, func
 from sqlalchemy.orm import Session
 
 from reportagent.models.database import Report, Tag, SearchHistory
-from reportagent.classifiers.provenance import reusable_provenance
+from reportagent.classifiers.provenance import (
+    classification_material,
+    reusable_provenance,
+)
 from reportagent.models.schemas import (
     ClassifiedReport,
     StorageResult,
@@ -66,7 +69,11 @@ class ReportRepository:
         return next((row for row in candidates if compatible_match(sr, row)), None)
 
     def upsert_report(
-        self, report: ClassifiedReport, *, commit: bool = True
+        self,
+        report: ClassifiedReport,
+        *,
+        commit: bool = True,
+        preserve_classification_on_same_input: bool = False,
     ) -> tuple[str, int]:
         sr = report.search_result
         cl = report.classification
@@ -118,16 +125,23 @@ class ReportRepository:
                 and not existing.has_full_text
                 and sr.full_text != existing.full_text
             )
-            screening_changed = (
-                revision_changed
-                or sr.title != existing.title
-                or bool(
-                    (sr.abstract or checked_abstract)
-                    and sr.abstract != existing.abstract
-                )
+            classification_updates = {}
+            if not sr.abstract and not checked_abstract and existing.abstract:
+                # Compare the effective evidence retained by this merge.
+                classification_updates["abstract"] = existing.abstract
+            if not replace_material and not (
+                sr.full_text and not existing.has_full_text
+            ):
+                classification_updates["full_text"] = existing.full_text
+            classification_input = sr.model_copy(update=classification_updates)
+            classification_input_changed = (
+                sr.title != existing.title
+                or classification_material(classification_input)
+                != classification_material(existing)
             )
-            # Relevance is based on title/abstract evidence; obtaining or reparsing
-            # the same revision's PDF only invalidates full-text-derived outputs.
+            screening_changed = revision_changed or classification_input_changed
+            # Screening follows canonical classifier material: an abstract or
+            # labelled introduction. Other PDF changes only invalidate full-text outputs.
             if screening_changed or material_changed:
                 existing.analysis_json = existing.evaluation_json = (
                     existing.knowledge_card_json
@@ -177,12 +191,18 @@ class ReportRepository:
                 existing.has_full_text = not sr.abstract_only
             if sr.abstract or checked_abstract:
                 existing.abstract = sr.abstract
-            if retained_provenance is None:
-                self.apply_classification(existing, cl)
-            else:
-                existing.classification_provenance_json = json.dumps(
-                    retained_provenance, ensure_ascii=False, sort_keys=True
-                )
+            # Material hydration preserves classification for unchanged canonical input.
+            # Explicit classification callers retain the normal replacement policy.
+            if not (
+                preserve_classification_on_same_input
+                and not classification_input_changed
+            ):
+                if retained_provenance is None:
+                    self.apply_classification(existing, cl)
+                else:
+                    existing.classification_provenance_json = json.dumps(
+                        retained_provenance, ensure_ascii=False, sort_keys=True
+                    )
             # Save analysis of the accepted material after invalidating stale outputs.
             # A metadata-only reimport without analysis must preserve the current one.
             if report.analysis is not None:

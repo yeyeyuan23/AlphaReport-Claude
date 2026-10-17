@@ -117,7 +117,7 @@ class CollectionTests(unittest.IsolatedAsyncioTestCase):
                 authors=["Author"],
                 source=SourceType.ARXIV,
                 arxiv_id="2005.13665v1",
-                full_text="version one",
+                full_text=TEXT + "version one",
                 pdf_path=str(pdf),
                 source_url="https://arxiv.org/abs/2005.13665v1",
             )
@@ -152,10 +152,18 @@ class CollectionTests(unittest.IsolatedAsyncioTestCase):
             ):
                 store_paper(paper, result)
                 from reportagent.services.one_report import _stored_review_input
-                from reportagent.services.report_quality import review_fingerprint
+                from reportagent.services.report_quality import (
+                    SCHEMA_VERSION,
+                    review_fingerprint,
+                )
                 from reportagent.utils.config import get_llm_model
 
                 cached = json.loads(artifact_path.read_text())
+                cached["evaluation"].update(
+                    schema_version=SCHEMA_VERSION,
+                    model=get_llm_model(),
+                    text_complete=True,
+                )
                 cached["evaluation"]["fingerprint"] = review_fingerprint(
                     _stored_review_input(1), get_llm_model()
                 )
@@ -183,7 +191,7 @@ class CollectionTests(unittest.IsolatedAsyncioTestCase):
                 with factory() as session:
                     stored = session.get(Report, artifact["report_id"])
                     self.assertEqual(stored.arxiv_id, "2005.13665v1")
-                    self.assertEqual(stored.full_text, "version one")
+                    self.assertEqual(stored.full_text, TEXT + "version one")
                     self.assertEqual(stored.title, "Same title")
                     self.assertIsNone(stored.selection_relevance)
                     self.assertIsNone(stored.selection_provenance_json)

@@ -325,6 +325,19 @@ async def review_report_ids(
         "source_url",
         "published_date",
         "pdf_path",
+        "tables_json",
+        "equations_json",
+        "markets",
+        "asset_classes",
+        "frequencies",
+        "topics",
+        "classification_method",
+        "classification_confidence",
+        "classification_provenance_json",
+        "analysis_json",
+        "evaluation_json",
+        "knowledge_card_json",
+        "summary",
     )
 
     def snapshot(row):
@@ -378,35 +391,35 @@ async def review_report_ids(
                                 paper, "获取期间论文或筛选结果已更新，请重新评估。"
                             )
                             continue
+                        from reportagent.classifiers.rule_classifier import (
+                            RuleClassifier,
+                        )
+                        from reportagent.classifiers.provenance import (
+                            classification_material,
+                        )
+                        from reportagent.db.repository import ReportRepository
+                        from reportagent.models.schemas import ClassifiedReport
+
+                        _, updated_id = ReportRepository(session).upsert_report(
+                            ClassifiedReport(
+                                search_result=fetched,
+                                classification=RuleClassifier().classify(
+                                    fetched.title, classification_material(fetched)
+                                ),
+                            ),
+                            commit=False,
+                            preserve_classification_on_same_input=True,
+                        )
+                        if updated_id != rid:
+                            session.rollback()
+                            results[rid] = pending_review(
+                                paper, "获取的论文身份不匹配，请重新评估。"
+                            )
+                            continue
                         screening_changed = any(
-                            getattr(fetched, key) != paper[key]
+                            getattr(row, key) != paper[key]
                             for key in ("title", "abstract", "arxiv_id")
                         )
-                        for key in (
-                            "title",
-                            "full_text",
-                            "abstract",
-                            "arxiv_id",
-                            "source_url",
-                            "pdf_path",
-                            "published_date",
-                            "tables_json",
-                            "equations_json",
-                        ):
-                            setattr(row, key, getattr(fetched, key))
-                        row.authors = json.dumps(fetched.authors, ensure_ascii=False)
-                        row.has_full_text = (
-                            bool(fetched.full_text) and not fetched.abstract_only
-                        )
-                        row.analysis_json = row.evaluation_json = (
-                            row.knowledge_card_json
-                        ) = row.summary = None
-                        if screening_changed:
-                            row.selection_score = 0.0
-                            row.selection_reason = row.selection_relevance = (
-                                row.selection_direction
-                            ) = row.selection_provenance_json = None
-                            row.is_selected = False
                         session.commit()
                         paper = snapshot(row)
                     if screening_changed:

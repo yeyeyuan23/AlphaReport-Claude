@@ -240,3 +240,174 @@ def test_old_quote_screening_cache_is_refreshed_without_requiring_force(library)
     assert not result["validation_issues"]
     with library() as session:
         assert json.loads(session.get(Report, 1).evaluation_json) == result
+
+
+def test_hydration_preserves_known_publication_date(library):
+    from datetime import datetime
+
+    known = datetime(2020, 5, 27)
+    insert(library, full_text=None, has_full_text=False, published_date=known)
+    with library() as session:
+        row = session.get(Report, 1)
+        fetched = SearchResult(
+            title=row.title,
+            abstract=row.abstract,
+            authors=["A"],
+            source=SourceType.ARXIV,
+            arxiv_id=row.arxiv_id,
+            full_text=TEXT,
+            published_date=None,
+        )
+    with (
+        patch.object(database, "get_session_factory", return_value=library),
+        patch.object(one_report, "collect_paper", return_value=fetched),
+        patch("reportagent.llm.client.LLMClient", return_value=PersistentModel()),
+    ):
+        results = asyncio.run(quality.review_report_ids([1]))
+    assert results[1]["status"] == "reviewed"
+    with library() as session:
+        assert session.get(Report, 1).published_date == known
+
+
+def test_hydration_cannot_downgrade_an_existing_arxiv_revision(library):
+    insert(library, arxiv_id="2005.13661v3", full_text=None, has_full_text=False)
+    fetched = SearchResult(
+        title="Stale version",
+        authors=["Old author"],
+        full_text=TEXT,
+        source=SourceType.ARXIV,
+        arxiv_id="2005.13661v2",
+    )
+    llm = PersistentModel()
+    with (
+        patch.object(database, "get_session_factory", return_value=library),
+        patch.object(one_report, "collect_paper", return_value=fetched),
+        patch("reportagent.llm.client.LLMClient", return_value=llm),
+    ):
+        result = asyncio.run(quality.review_report_ids([1]))[1]
+    assert result["tier"] == "pending"
+    assert not llm.requests
+    with library() as session:
+        row = session.get(Report, 1)
+        assert row.arxiv_id == "2005.13661v3"
+        assert row.full_text is None
+        assert row.title == "Portfolio research"
+
+
+def test_hydration_cannot_overwrite_concurrent_classification_edit(library):
+    insert(library, full_text=None, has_full_text=False)
+
+    async def fetch(_):
+        with library() as session:
+            row = session.get(Report, 1)
+            row.classification_method = "hybrid"
+            row.classification_provenance_json = '{"concurrent":true}'
+            session.commit()
+        return SearchResult(
+            title="Portfolio research",
+            abstract="Portfolio allocation",
+            full_text=TEXT,
+            source=SourceType.ARXIV,
+            arxiv_id="2005.13661v1",
+        )
+
+    with (
+        patch.object(database, "get_session_factory", return_value=library),
+        patch.object(one_report, "collect_paper", side_effect=fetch),
+        patch("reportagent.llm.client.LLMClient", return_value=PersistentModel()),
+    ):
+        result = asyncio.run(quality.review_report_ids([1]))[1]
+    assert result["tier"] == "pending"
+    with library() as session:
+        row = session.get(Report, 1)
+        assert row.classification_method == "hybrid"
+        assert row.classification_provenance_json == '{"concurrent":true}'
+        assert row.full_text is None
+        assert row.evaluation_json is None
+
+
+@pytest.mark.parametrize("revision", ["2005.13661v1", "2005.13661v2"])
+def test_hydration_preserves_hybrid_labels_for_unchanged_classifier_input(
+    library, revision
+):
+    from reportagent.classifiers.provenance import input_fingerprint
+    from reportagent.db.repository import ReportRepository
+    from reportagent.models.schemas import ClassificationResult, Topic
+
+    insert(library, full_text=None, has_full_text=False)
+    with library() as session:
+        row = session.get(Report, 1)
+        provenance = {
+            "schema_version": 1,
+            "input_sha256": input_fingerprint(row.title, row.abstract),
+            "labels": {
+                "topics.portfolio_optimization": {
+                    "source": "title",
+                    "quote": "Portfolio",
+                    "reason": "Portfolio target",
+                    "raw_start": 0,
+                    "raw_end": 9,
+                }
+            },
+            "rejected_labels": [],
+        }
+        ReportRepository(session).apply_classification(
+            row,
+            ClassificationResult(
+                topics=[Topic.PORTFOLIO_OPT],
+                confidence=0.9,
+                method="hybrid",
+                provenance=provenance,
+            ),
+        )
+        session.commit()
+        before = row.classification_provenance_json
+        tag_ids = [tag.id for tag in row.tags]
+        fetched = SearchResult(
+            title=row.title,
+            abstract=row.abstract,
+            authors=["A"],
+            source=SourceType.ARXIV,
+            arxiv_id=revision,
+            full_text=TEXT,
+        )
+    with (
+        patch.object(database, "get_session_factory", return_value=library),
+        patch.object(one_report, "collect_paper", return_value=fetched),
+        patch("reportagent.llm.client.LLMClient", return_value=PersistentModel()),
+    ):
+        asyncio.run(quality.review_report_ids([1]))
+    with library() as session:
+        row = session.get(Report, 1)
+        assert row.full_text == TEXT
+        assert row.classification_method == "hybrid"
+        assert row.classification_confidence == 0.9
+        assert row.topics == "portfolio_optimization"
+        assert row.classification_provenance_json == before
+        assert [tag.id for tag in row.tags] == tag_ids
+
+
+def test_hydration_refreshes_rules_from_canonical_abstract_not_body_mentions(library):
+    insert(library, full_text=None, has_full_text=False, topics="factor_model")
+    body = (
+        "machine learning deep learning neural network transformer GNN LSTM reinforcement learning GPT LLM "
+        * 20
+    )
+    fetched = SearchResult(
+        title="A neutral research paper",
+        abstract="We examine research decisions.",
+        full_text=body,
+        source=SourceType.ARXIV,
+        arxiv_id="2005.13661v2",
+    )
+    with (
+        patch.object(database, "get_session_factory", return_value=library),
+        patch.object(one_report, "collect_paper", return_value=fetched),
+        patch("reportagent.llm.client.LLMClient", return_value=PersistentModel()),
+    ):
+        asyncio.run(quality.review_report_ids([1]))
+    with library() as session:
+        row = session.get(Report, 1)
+        assert row.topics == ""
+        assert row.classification_method == "rule"
+        assert row.classification_provenance_json is None
