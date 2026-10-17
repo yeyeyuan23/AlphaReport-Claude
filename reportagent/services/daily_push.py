@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 
 from reportagent.db.engine import init_db, get_session_factory
-from reportagent.utils.config import get_config, PROJECT_ROOT
+from reportagent.utils.config import PROJECT_ROOT
 from reportagent.services.public_url import sync_public_url, get_web_base_url
 from reportagent.services.report_quality import (
     review_report_ids,
@@ -46,23 +46,8 @@ load_dotenv()
 
 logger = logging.getLogger("daily_push")
 
-# ── Config ──
-cfg = get_config("feishu", default={})
-APP_ID = os.environ.get(cfg.get("app_id_env", "FEISHU_APP_ID"), "")
-APP_SECRET = os.environ.get(cfg.get("app_secret_env", "FEISHU_APP_SECRET"), "")
-
 # UI base URL for generating paper links
 UI_BASE_URL = get_web_base_url()
-
-# Feishu receive targets — comma-separated open_ids or chat_ids
-FEISHU_RECEIVE_IDS = (
-    os.environ.get("FEISHU_DAILY_PUSH_IDS", "").split(",")
-    if os.environ.get("FEISHU_DAILY_PUSH_IDS")
-    else []
-)
-FEISHU_RECEIVE_TYPE = os.environ.get(
-    "FEISHU_DAILY_PUSH_TYPE", "open_id"
-)  # "open_id" | "chat_id"
 
 
 # ── Load push directions from config ────────────────────
@@ -71,7 +56,6 @@ class DailyPushOptions:
     receive_ids: str = ""
     receive_type: str = ""
     dry_run: bool = False
-    no_collect: bool = True  # Compatibility flag; daily reports never collect.
     output: str | None = None
     report_ids: str = ""
     max_reviews: int | None = None
@@ -90,7 +74,7 @@ PUSH_SETTINGS: dict = _load_push_settings()
 
 
 # ═══════════════════════════════════════════════════
-# Step 2: Query recent papers (rolling window)
+# Daily library additions
 # ═══════════════════════════════════════════════════
 
 
@@ -271,85 +255,6 @@ def get_todays_papers(
         session.close()
 
 
-def deep_analyze_selected(
-    paper_ids: list[int], depth: str = "standard", per_paper_timeout: int = 240
-) -> None:
-    """Run full-depth analysis (analyze.py --report-id) for only the papers that made
-    it through selection and got pushed. This runs AFTER the push so it never delays
-    delivery, and only touches the handful of selected papers instead of every
-    collected candidate — most candidates get rejected at selection anyway, so deep
-    analysis on the whole batch is wasted work (this is what caused the daily collect
-    step to blow past its 15-min timeout on 2026-07-29/30).
-    """
-    for rid in paper_ids:
-        cmd = [
-            sys.executable,
-            "-m",
-            "reportagent.cli.analyze",
-            "--report-id",
-            str(rid),
-            "--depth",
-            depth,
-        ]
-        try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=per_paper_timeout,
-                cwd=str(PROJECT_ROOT),
-            )
-            if result.returncode == 0:
-                logger.info(f"  Deep-analyzed report {rid}")
-            else:
-                logger.warning(
-                    f"  Deep analysis failed for report {rid}: {result.stderr[:300]}"
-                )
-        except subprocess.TimeoutExpired:
-            logger.warning(
-                f"  Deep analysis timed out for report {rid} (>{per_paper_timeout}s)"
-            )
-        except Exception as e:
-            logger.warning(f"  Deep analysis error for report {rid}: {e}")
-
-
-# ═══════════════════════════════════════════════════
-# Step 3: Claude Code analysis
-# ═══════════════════════════════════════════════════
-
-
-def analyze_with_claude(papers: list[dict], date_label: str = "") -> str:
-    """Compatibility entrypoint: render saved assessments without a second model call."""
-    return render_briefing(papers, date_label)
-
-
-def fallback_briefing(papers: list[dict], date_label: str = "") -> str:
-    """Fallback briefing when Claude Code is unavailable."""
-    label = date_label or datetime.now().strftime("%Y-%m-%d")
-    lines = [
-        f"### 📊 概览（{label}）",
-        f"本期选入 {len(papers)} 篇库中论文\n",
-    ]
-    # Group by source
-    sources = {}
-    for p in papers:
-        src = p.get("source", "unknown")
-        sources[src] = sources.get(src, 0) + 1
-    for src, count in sources.items():
-        lines.append(f"- {src}: {count} 篇")
-
-    lines.append("\n### 📄 论文速览\n")
-    for p in papers:
-        title = p["title"][:80]
-        url = p.get("ui_url", "")
-        source = p.get("source", "")
-        score = p.get("selection_score", 0)
-        score_str = f" ⭐{score:.1f}" if score > 0 else ""
-        lines.append(f"- **{title}** ({source}){score_str} [📄 查看]({url})")
-
-    return "\n".join(lines)
-
-
 def ensure_paper_links(briefing: str, papers: list[dict]) -> str:
     """The model may omit links; delivery completeness must not depend on it."""
     missing = [
@@ -360,15 +265,6 @@ def ensure_paper_links(briefing: str, papers: list[dict]) -> str:
             f"- {p['title'][:80]} [📄 查看]({p['ui_url']})" for p in missing
         )
     return briefing
-
-
-def send_complete_text(receive_id: str, text: str, receive_type: str) -> bool:
-    """Send every byte-bounded part and preserve the public text-send adapter."""
-    from reportagent.services.feishu_transport import send_complete_text as send_parts
-
-    return send_parts(
-        text, lambda part: send_feishu_text(receive_id, part, receive_type)
-    )
 
 
 # ═══════════════════════════════════════════════════

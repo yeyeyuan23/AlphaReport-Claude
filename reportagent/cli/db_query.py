@@ -22,6 +22,7 @@ from pathlib import Path
 from reportagent.db.engine import init_db, get_session_factory
 from reportagent.db.repository import ReportRepository
 from reportagent.models.schemas import ReportListParams
+from reportagent.services.report_reads import get_report_detail
 
 logger = logging.getLogger("db")
 
@@ -112,24 +113,20 @@ def main():
 
         # ── Get ──
         elif args.get:
-            r = repo.get_report(args.get)
-            if not r:
+            data = get_report_detail(
+                session,
+                args.get,
+                serialize=_report_to_dict,
+                include_knowledge_card=True,
+            )
+            if data is None:
                 print(json.dumps({"error": f"Report {args.get} not found"}))
                 sys.exit(1)
-            data = _report_to_dict(r)
-            if args.full:
-                data["full_text"] = r.full_text
-                data["summary"] = r.summary
-            if r.analysis_json:
-                try:
-                    data["analysis"] = json.loads(r.analysis_json)
-                except Exception:
-                    pass
-            if r.knowledge_card_json:
-                try:
-                    data["knowledge_card"] = json.loads(r.knowledge_card_json)
-                except Exception:
-                    pass
+            for key in ("tables_json", "equations_json"):
+                data.pop(key, None)
+            if not args.full:
+                data.pop("full_text", None)
+                data.pop("summary", None)
             if args.json_output:
                 Path(args.json_output).write_text(
                     json.dumps(data, ensure_ascii=False, indent=2)

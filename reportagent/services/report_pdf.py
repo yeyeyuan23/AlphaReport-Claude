@@ -1,4 +1,4 @@
-"""Validated PDF cache shared by the synchronous and legacy web adapters."""
+"""Validated PDF cache shared by report reading and maintenance."""
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -60,7 +60,7 @@ async def download_pdf(snapshot, policy):
                 paper_id=arxiv_id,
             )
     except content_fetch.PDFTransferError as error:
-        # The legacy adapter exposes upstream HTTPX failures to its callers.
+        # HTTP adapters need the underlying network failure to choose a response.
         if isinstance(error.__cause__, (httpx.HTTPError, TimeoutError)):
             raise error.__cause__ from error
         raise

@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 
 from reportagent.db.engine import init_db, get_session_factory
-from reportagent.utils.config import get_config, get_llm_model
+from reportagent.utils.config import get_llm_model
 from reportagent.services.report_briefing import render_briefing
 from reportagent.services.public_url import get_web_base_url
 from reportagent.services.report_quality import (
@@ -30,11 +30,6 @@ from reportagent.services.report_periods import get_weekly_range
 load_dotenv()
 
 logger = logging.getLogger("weekly_report")
-
-# ── Config ──
-cfg = get_config("feishu", default={})
-APP_ID = os.environ.get(cfg.get("app_id_env", "FEISHU_APP_ID"), "")
-APP_SECRET = os.environ.get(cfg.get("app_secret_env", "FEISHU_APP_SECRET"), "")
 
 UI_BASE_URL = get_web_base_url()
 
@@ -151,11 +146,6 @@ def generate_weekly_report(papers: list[dict], week_start: str, week_end: str) -
     return render_briefing(
         checked, f"{week_start} ~ {week_end}", template_skill="weekly-report"
     )
-
-
-def fallback_weekly_report(papers: list[dict], week_start: str, week_end: str) -> str:
-    """Read cached evidence without model calls; missing/stale evidence stays pending."""
-    return generate_weekly_report(papers, week_start, week_end)
 
 
 async def prepare_weekly_evidence(

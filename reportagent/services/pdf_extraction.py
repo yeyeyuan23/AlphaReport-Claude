@@ -10,11 +10,6 @@ from reportagent.processors.pdf_extractor import PDFExtractor
 logger = logging.getLogger(__name__)
 
 
-def extract_text_pymupdf(pdf_path: str) -> str:
-    """Extract verbatim text using the common PyMuPDF reader."""
-    return PDFExtractor().extract(pdf_path).text
-
-
 def parse_pdf(
     pdf_path: str | Path,
     *,

@@ -65,15 +65,21 @@ CLI 和 `/api/v1/skills` 使用同一 registry；用户技能默认保存在 `da
   日期和身份，分类并按方向筛选；达标才入库并获取全文。摘要不足时可先暂存补取材料，
   筛选未通过则清理暂存内容。返回整体 `status`、逐源 `source_statuses` 和入库统计，
   区分空结果、失败和部分成功。`local_pdf_import` 在启动时增量导入整个配置目录，
-  共用分类与 repository，使用文件指纹和进程锁避免重复导入。
+  共用分类与 repository，使用文件指纹和进程锁避免重复导入；与手动采集共用不区分 PDF 扩展名大小写、只返回文件的目录扫描。
+  单篇保存和报告补全文同样遵守 repository 的日期、版本及派生状态合并规则；
+  仅补材料且分类输入不变时保留当前分类与标签，不能用全文关键词重写摘要分类。
+  导入与批量重分类共用分类材料解析：优先完整摘要，缺摘要时只读标明的 Introduction；
+  从正文提取的 Introduction 参与输入指纹和并发保护。
 - **相关性评分**：`paper_scoring` 读取启用方向与完整摘要，同时生成各方向分数和最佳方向；
   `DirectionFilter` 是明细视图。统一保存 `selection_relevance`、`selection_direction`
   与 `selection_provenance_json`，后者包含方向明细、材料及规则指纹。
   缺材料与不相关分开处理；失败不覆盖已有成功结果，过期评分不进入候选。
+  方向明细和普通评分共用批次/保存失败判定，有效同批结果先保存，失败再向 CLI 传播。
 - **分阶段分析**：`batch_analysis` 与 `one_report` 使用 `AnalysisAgent`，分别读取
   `analysis.yaml`、`one-report.yaml`；摘要汇总共用 `summary.yaml` 和 `services.summary`。
   批量缓存区分 quick/standard/deep、材料、模型与资源；完整性与并发检查通过后才保存。
   单篇阅读固定 arXiv 版本、提取 PDF 全文，保存产物和研报库，再按授权会话投递。
+  分阶段分析与全文评估独立复用缓存；评估优先使用库中当前有效结果，再考虑有效产物缓存。
 - **全文阅读评估**：`report_quality` 使用 `quality-review.md` 和 `grounding.md`，
   将研究问题、方法、发现、优势、局限与评估把握存入 `evaluation_json`。
   材料、模型、提示词和相关性决定缓存是否有效。默认完整输入上限为 240,000 字符；
@@ -96,8 +102,10 @@ CLI 和 `/api/v1/skills` 使用同一 registry；用户技能默认保存在 `da
   普通回复、单篇、日报、周报共用 `feishu_transport` 的客户端、请求和消息 ID 校验；
   卡片失败时回退完整文本，任一分片失败不能视为完整投递成功。
 - **阅读展示**：`report_reads` 组合 repository 查询、有效分析和知识卡片。
-  网页简报映射已有分析，阅读评估展示保存的 `evaluation_json`。
-  知识卡片由 `knowledge_cards` 根据有效评估确定性生成，规则见 `knowledge-card.md`；
+  网页简报由 `report_views.map_analysis_to_briefing_sections` 唯一映射已有分析，
+  详情 API 返回 `briefing_sections`，前端直接渲染；阅读评估展示保存的 `evaluation_json`。
+  CLI 详情与网页详情共用有效性校验，过期分析及旧卡片不能直接作为当前结果展示。
+  单篇保存和各查询入口的知识卡片都由 `knowledge_cards` 根据有效评估确定性生成，规则见 `knowledge-card.md`；
   `cli.narrative_brief` 使用同一服务，不额外调用模型，无有效评估时只显示摘要和待核验状态。
   `POST /api/v1/reports/{report_id}/research-briefing?force=true` 可调用模型生成叙事文本，
   提示词位于 `analyze-report/briefing.md`；返回文本不写入质量评估或改变推荐。
@@ -118,7 +126,7 @@ Web 中两项定时任务独立配置，每天含周末执行：`daily_collectio
 
 ### PDF、公式与表格解析
 
-`services.pdf_extraction` 统一字节与路径提取。arXiv 和通用附件下载使用 PyMuPDF；
+`services.pdf_extraction` 统一字节与路径提取；新下载和已缓存 arXiv PDF 共用解析阶段的超时与日志策略。arXiv 和通用附件下载使用 PyMuPDF；
 本地 PDF 先读取原生元数据，再尝试 MinerU，并按可用情况合并 Docling 结果。
 `cli.parse_pdf` 尝试本地 MinerU，不可用或没有有效内容时回退 PyMuPDF。
 可选解析器需另行安装，基础解析不保证公式与表格结构完整。

@@ -118,7 +118,7 @@ def test_failed_relevance_without_candidates_cannot_be_successful_empty(
         ),
     )
     with pytest.raises(RuntimeError, match="相关性"):
-        daily.run_daily_push(daily.DailyPushOptions(no_collect=True, dry_run=True))
+        daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
     result = read_saved_run(factory)
     assert result["status"] == "failed"
     assert result["stages"]["relevance"]["status"] == "failed"
@@ -138,7 +138,7 @@ def test_failed_relevance_with_valid_candidates_is_explicit_partial(
         return subprocess.CompletedProcess([], 2, "", "fixture failure")
 
     monkeypatch.setattr(daily.subprocess, "run", scoring)
-    result = daily.run_daily_push(daily.DailyPushOptions(no_collect=True, dry_run=True))
+    result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
     assert result["status"] == "partial"
     assert result["outcome"] == "preview"
     assert result["stages"]["relevance"]["status"] == "failed"
@@ -155,9 +155,7 @@ def test_completed_run_json_contains_final_status_and_send_results(
     factory, _ = offline_daily
     insert_paper(factory)
     result = daily.run_daily_push(
-        daily.DailyPushOptions(
-            no_collect=True, report_ids="1", dry_run=dry_run, receive_ids="A"
-        )
+        daily.DailyPushOptions(report_ids="1", dry_run=dry_run, receive_ids="A")
     )
     assert result["status"] == ("preview" if dry_run else "delivered")
     saved = assert_final_artifact(result)
@@ -176,9 +174,7 @@ def test_empty_daily_sends_a_completion_card_to_each_recipient(
         return True
 
     monkeypatch.setattr(daily, "send_feishu_card", send)
-    result = daily.run_daily_push(
-        daily.DailyPushOptions(no_collect=True, receive_ids="A,B,A")
-    )
+    result = daily.run_daily_push(daily.DailyPushOptions(receive_ids="A,B,A"))
     assert [item[0] for item in sent] == ["A", "B"]
     assert all(
         not item[2] and "暂无通过当前相关性筛选的新增入库论文" in item[1]
@@ -197,7 +193,7 @@ def test_empty_daily_delivery_failure_is_not_silently_successful(
         daily, "send_feishu_card", lambda recipient, *args: recipient == "A"
     )
     with pytest.raises(RuntimeError, match="投递"):
-        daily.run_daily_push(daily.DailyPushOptions(no_collect=True, receive_ids="A,B"))
+        daily.run_daily_push(daily.DailyPushOptions(receive_ids="A,B"))
     saved = read_saved_run(factory)
     assert saved["status"] == "failed"
     assert saved["deliveries"] == {"A": True, "B": False}
@@ -209,7 +205,7 @@ def test_empty_preview_has_an_explicit_result_without_sending(
 ):
     sent = []
     monkeypatch.setattr(daily, "send_feishu_card", lambda *args: sent.append(args))
-    result = daily.run_daily_push(daily.DailyPushOptions(no_collect=True, dry_run=True))
+    result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
     assert result["status"] == "preview"
     assert "暂无通过当前相关性筛选的新增入库论文" in result["briefing"]
     assert sent == [] and result["deliveries"] == {}
@@ -224,9 +220,7 @@ def test_failed_delivery_json_preserves_each_recipient_send_result(
         daily, "send_feishu_card", lambda recipient, *args: recipient == "A"
     )
     with pytest.raises(RuntimeError, match="投递"):
-        daily.run_daily_push(
-            daily.DailyPushOptions(no_collect=True, report_ids="1", receive_ids="A,B")
-        )
+        daily.run_daily_push(daily.DailyPushOptions(report_ids="1", receive_ids="A,B"))
     result = read_saved_run(factory)
     saved = assert_final_artifact(result)
     assert saved["status"] == "failed"
@@ -254,7 +248,7 @@ def test_repeated_daily_runs_send_same_period_without_writing_legacy_markers(
         or True,
     )
     options = daily.DailyPushOptions(
-        no_collect=True, receive_ids="A,B,A", report_ids="1" if explicit_ids else ""
+        receive_ids="A,B,A", report_ids="1" if explicit_ids else ""
     )
     for _ in range(2):
         result = daily.run_daily_push(options)
@@ -397,9 +391,7 @@ def test_render_refreshes_candidate_metadata_without_refiltering_explicit_ids(
         return {1: marker}
 
     monkeypatch.setattr(daily, "review_report_ids", review)
-    result = daily.run_daily_push(
-        daily.DailyPushOptions(no_collect=True, report_ids="1", dry_run=True)
-    )
+    result = daily.run_daily_push(daily.DailyPushOptions(report_ids="1", dry_run=True))
     saved = json.loads(
         Path(
             result.get(
@@ -463,13 +455,11 @@ def test_configured_review_budget_limits_candidates_and_explicit_option_override
         "push_settings:\n  max_reviews: 1\n"
     )
     result = daily.run_daily_push(
-        daily.DailyPushOptions(no_collect=True, report_ids="1,2", dry_run=True)
+        daily.DailyPushOptions(report_ids="1,2", dry_run=True)
     )
     assert result["paper_count"] == 1
     override = daily.run_daily_push(
-        daily.DailyPushOptions(
-            no_collect=True, report_ids="1,2", max_reviews=2, dry_run=True
-        )
+        daily.DailyPushOptions(report_ids="1,2", max_reviews=2, dry_run=True)
     )
     assert override["paper_count"] == 2
 
@@ -490,9 +480,7 @@ def test_recipient_brief_uses_same_configured_featured_limit(
         return original_render(papers, date_label, **kwargs)
 
     monkeypatch.setattr(daily, "render_briefing", render)
-    daily.run_daily_push(
-        daily.DailyPushOptions(no_collect=True, report_ids="1", receive_ids="A,B")
-    )
+    daily.run_daily_push(daily.DailyPushOptions(report_ids="1", receive_ids="A,B"))
     assert rendered_limits == [2]  # One complete brief is shared by all recipients.
 
 
@@ -546,7 +534,7 @@ def test_review_of_later_paper_cannot_mix_new_metadata_with_earlier_stale_conclu
 
     monkeypatch.setattr(daily, "review_report_ids", review)
     result = daily.run_daily_push(
-        daily.DailyPushOptions(no_collect=True, report_ids="1,2", dry_run=True)
+        daily.DailyPushOptions(report_ids="1,2", dry_run=True)
     )
     saved = assert_final_artifact(result)
     candidate = next(p for p in saved["papers"] if p["id"] == 1)

@@ -229,7 +229,7 @@ def test_daily_reviews_before_render_and_dry_run_never_records_delivery(tmp_path
         patch.object(daily, "send_feishu_card") as send,
     ):
         result = daily.run_daily_push(
-            daily.DailyPushOptions(no_collect=True, report_ids="1", dry_run=True)
+            daily.DailyPushOptions(report_ids="1", dry_run=True)
         )
     assert events == ["review", "render"]
     assert result["status"] == "preview"

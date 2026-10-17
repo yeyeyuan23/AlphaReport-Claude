@@ -106,9 +106,7 @@ class DeliveryTests(unittest.TestCase):
             ),
             patch.object(daily, "send_feishu_card", side_effect=send),
         ):
-            daily.run_daily_push(
-                daily.DailyPushOptions(no_collect=True, receive_ids="A,B")
-            )
+            daily.run_daily_push(daily.DailyPushOptions(receive_ids="A,B"))
 
     def test_each_daily_run_sends_the_period_to_all_requested_recipients(self):
         deliveries = []
@@ -149,9 +147,7 @@ class DeliveryTests(unittest.TestCase):
                     or True,
                 ),
             ):
-                daily.run_daily_push(
-                    daily.DailyPushOptions(no_collect=True, receive_ids=f"A{index}")
-                )
+                daily.run_daily_push(daily.DailyPushOptions(receive_ids=f"A{index}"))
         self.assertEqual(deliveries, ["A0", "A1"])
 
     def test_text_fallback_never_marks_truncated_content_as_delivered(self):

@@ -20,9 +20,6 @@ def main():
         help="接收者类型（留空则使用 .env 配置）",
     )
     parser.add_argument("--dry-run", action="store_true", help="预览模式，不实际推送")
-    parser.add_argument(
-        "--no-collect", action="store_true", help=argparse.SUPPRESS
-    )  # Accepted for older scripts; always library-only.
     parser.add_argument("--output", type=str, default=None, help="将简报输出到文件")
     parser.add_argument(
         "--report-ids", default="", help="显式指定库中论文 ID（逗号分隔）"
