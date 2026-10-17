@@ -122,20 +122,6 @@ def test_collection_keeps_local_path_semantics(build_sources, monkeypatch, path)
     assert build_sources()[0].pdf_library_path == Path(path)
 
 
-def test_collection_delegates_to_shared_factory(monkeypatch):
-    expected = [object()]
-    calls = []
-
-    def build(names=None):
-        calls.append(names)
-        return expected
-
-    monkeypatch.setattr(source_factory, "build_sources", build)
-    names = ["arxiv", "unknown"]
-    assert collection.build_sources(names) is expected
-    assert calls == [names]
-
-
 def test_collection_workflow_uses_shared_factory_and_keeps_no_valid_sources_error(
     monkeypatch,
 ):

@@ -4,14 +4,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from reportagent.api import frontend
-from reportagent.db.engine import get_db
 from reportagent.main import create_app
-from reportagent.models.database import Base, Report
 from reportagent.skills import registry
 
 
@@ -48,41 +43,24 @@ class WebEntrypointTests(unittest.TestCase):
             )
             client.close()
 
-    def test_library_uses_shared_knowledge_card_conversion(self):
-        import json
-
-        engine = create_engine(
-            "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
-        )
-        Base.metadata.create_all(engine)
-        factory = sessionmaker(bind=engine)
-        analysis = {
-            "core_contribution": "A supported contribution",
-            "summary": "Measured result",
-            "assessment": {"strengths": ["Evidence"]},
-        }
-        with factory() as session:
-            report = Report(
-                title="Fixture",
-                source="arxiv",
-                content_hash="fixture",
-                analysis_json=json.dumps(analysis),
-            )
-            session.add(report)
-            session.commit()
-            report_id = report.id
-
-        def database():
-            with factory() as session:
-                yield session
-
+    def test_reader_api_surface_excludes_chat_collection_tasks_and_mail(self):
         app = create_app()
-        app.dependency_overrides[get_db] = database
+        paths = set(app.openapi()["paths"])
+        self.assertIn("/api/v1/reports", paths)
+        self.assertIn("/api/v1/reports/{report_id}/pdf", paths)
+        self.assertFalse(
+            any(
+                retired in path
+                for path in paths
+                for retired in (
+                    "/chat",
+                    "/collection/tasks",
+                    "/subscriptions",
+                    "/email",
+                )
+            )
+        )
         client = TestClient(app)
-        response = client.post(f"/api/v1/reports/{report_id}/knowledge-card")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["data"]["status"], "pending")
-        self.assertEqual(response.json()["data"]["highlights"], [])
-        self.assertIsNone(response.json()["data"]["quality_score"])
-        client.close()
-        engine.dispose()
+        self.addCleanup(client.close)
+        self.assertEqual(client.get("/api/v1/collection/tasks/list").status_code, 404)
+        self.assertIn(client.post("/api/v1/chat", json={}).status_code, {404, 405})

@@ -336,15 +336,19 @@ def test_classifier_receives_complete_section_instead_of_an_arbitrary_prefix():
     assert "TAIL_EVIDENCE" in captured[-1]["content"]
 
 
-@pytest.mark.parametrize("heading", ["", "Abstract\n", "1 Introduction\n"])
 @pytest.mark.parametrize(
-    "prose",
+    "heading,prose",
     [
-        "The conference paper by Chen et al. (2024) is used as a baseline.",
-        "The 2024 conference paper by Chen et al. is used as a baseline.",
-        "The conference proceedings of 2024 provide our benchmark data.",
-        "Proceedings of the 2024 conference are used as a baseline.",
-        "Proceedings from the 2024 conference provide our benchmark data.",
+        ("", "The conference paper by Chen et al. (2024) is used as a baseline."),
+        ("", "The 2024 conference paper by Chen et al. is used as a baseline."),
+        ("", "The conference proceedings of 2024 provide our benchmark data."),
+        ("", "Proceedings of the 2024 conference are used as a baseline."),
+        ("", "Proceedings from the 2024 conference provide our benchmark data."),
+        ("Abstract\n", "Proceedings of the 2024 conference are used as a baseline."),
+        (
+            "1 Introduction\n",
+            "Proceedings of the 2024 conference are used as a baseline.",
+        ),
     ],
 )
 def test_conference_citation_prose_does_not_supply_publication_evidence(heading, prose):

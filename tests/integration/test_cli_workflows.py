@@ -3,18 +3,12 @@
 import asyncio
 import importlib
 import importlib.util
-import json
 import subprocess
 import sys
 from tests.support.paths import PROJECT_ROOT as ROOT
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import Mock, patch
 
 import pytest
-
-from reportagent.models.database import Report
-from reportagent.models.schemas import SearchResult, SourceType
-from tests.support.collection_scoring import RelevanceModel
 
 
 @pytest.mark.parametrize(
@@ -46,46 +40,24 @@ def test_cli_commands_offer_documented_options(name, flag):
     assert flag in result.stdout
 
 
-def test_collection_is_callable_without_processes_and_stores_real_rows(
-    memory_session_factory,
-):
-    module = "reportagent.services.collection"
-    assert importlib.util.find_spec(module), (
-        "Collection must be callable outside scripts"
-    )
-    collection = importlib.import_module(module)
-    factory = memory_session_factory
-    paper = SearchResult(
-        title="Portfolio optimization with transaction costs",
-        abstract="A quantitative finance portfolio risk model.",
-        source=SourceType.ARXIV,
-    )
-    source = SimpleNamespace(
-        source_type=SourceType.ARXIV,
-        is_available=lambda: True,
-        search=AsyncMock(return_value=[paper]),
-    )
-    with (
-        patch.object(collection, "init_db"),
-        patch.object(collection, "get_session_factory", return_value=factory),
-        patch.object(collection, "build_sources", return_value=[source]),
-        patch.object(collection, "LLMClient", side_effect=RelevanceModel),
-        patch.object(collection, "LLMClassifier", return_value=None),
-    ):
-        result = asyncio.run(
-            collection.collect_reports(
-                collection.CollectionOptions(
-                    topics="组合优化", sources="arxiv", no_analysis=True
-                )
-            )
-        )
-    assert result["topics"] == ["组合优化"]
-    assert result["sources"] == ["arxiv"]
-    assert result["storage"]["added"] == 1
-    assert result["results_count"] == 1
-    with factory() as session:
-        assert session.query(Report).one().title == paper.title
-    assert json.loads(json.dumps(result))["storage"]["errors"] == []
+@pytest.mark.parametrize(
+    "command,service,entry",
+    [
+        ("daily_feishu_push", "daily_push", "run_daily_push"),
+        ("weekly_report", "weekly_report", "run_weekly_report"),
+    ],
+)
+def test_report_cli_forwards_dry_run(monkeypatch, command, service, entry):
+    cli = importlib.import_module(f"reportagent.cli.{command}")
+    workflow = importlib.import_module(f"reportagent.services.{service}")
+    run = Mock(return_value={"status": "preview"})
+    monkeypatch.setattr(workflow, entry, run)
+    monkeypatch.setattr("sys.argv", [command, "--dry-run"])
+
+    cli.main()
+
+    run.assert_called_once()
+    assert run.call_args.args[0].dry_run is True
 
 
 def test_weekly_renders_current_shared_template_without_model_rewrite(tmp_path):

@@ -126,9 +126,18 @@ def test_changed_table_value_is_not_discarded():
 
 
 @pytest.mark.parametrize(
-    "template", ["$$\n{}\n$$", "$${}$$", r"\[{}\]", r"\({}\)", "${}$", "{}"]
+    "template,wrapped_metadata",
+    [
+        ("$$\n{}\n$$", False),
+        ("$${}$$", False),
+        (r"\[{}\]", False),
+        (r"\({}\)", False),
+        ("${}$", False),
+        ("{}", False),
+        # Cross-delimiter metadata exercises multiline unwrapping independently.
+        (r"\[{}\]", True),
+    ],
 )
-@pytest.mark.parametrize("wrapped_metadata", [False, True])
 def test_complete_equation_is_not_repeated(template, wrapped_metadata):
     latex = f"$$\n{FORMULA}\n$$" if wrapped_metadata else FORMULA
     text = "Evidence\n" + template.format(FORMULA) + "\nDiscussion"

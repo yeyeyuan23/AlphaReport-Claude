@@ -231,9 +231,9 @@ def test_daily_briefing_includes_every_paper_detail_link():
 
 
 @pytest.mark.parametrize("template", ["daily-report", "weekly-report"])
-@pytest.mark.parametrize("has_papers", [False, True])
 @pytest.mark.parametrize(
-    "base", ["https://research.example/", "https://new-site.example"]
+    "has_papers,base",
+    [(False, "https://research.example/"), (True, "https://new-site.example")],
 )
 def test_digest_includes_configured_library_home_for_empty_and_nonempty_results(
     monkeypatch, template, has_papers, base

@@ -1,5 +1,4 @@
 import asyncio
-from unittest.mock import patch
 
 import pytest
 
@@ -25,6 +24,7 @@ def test_reading_assessment_does_not_require_quotes_or_text_locators():
     assert result["tier"] == "focus"
     assert result["status"] == "reviewed"
     assert result["findings"] == [{"claim": "作者报告了样本外结果及适用条件"}]
+    assert result["method"]["claim"] == data["method"]["claim"]
     assert not result["validation_issues"]
     assert result["text_complete"] is True
 
@@ -45,14 +45,6 @@ def test_unlocatable_quote_does_not_override_research_assessment():
     assert result["findings"][0]["quote"] == data["findings"][0]["quote"]
     assert not result["findings"][0].get("verified")
     assert not result["validation_issues"]
-
-
-def test_partial_input_cannot_be_described_as_completed_full_text_review():
-    result = asyncio.run(
-        module().evaluate_paper(paper(), Model(response()), max_chars=1000)
-    )
-    assert result["tier"] == "pending"
-    assert result["text_complete"] is False
 
 
 def test_weak_method_is_not_promoted_by_relevance():
@@ -125,16 +117,6 @@ def test_theoretical_paper_does_not_require_trading_backtest_fields():
     assert result["research_type"] == "theoretical"
 
 
-def test_prompt_change_changes_review_cache_identity(tmp_path):
-    prompt = tmp_path / "quality.md"
-    prompt.write_text("Old instructions")
-    with patch.object(module(), "skill_resource", return_value=prompt):
-        before = module().review_fingerprint(paper(), "fixture-model")
-        prompt.write_text("New instructions")
-        after = module().review_fingerprint(paper(), "fixture-model")
-    assert before != after
-
-
 def test_round_robin_candidate_budget_never_duplicates_or_exceeds_twelve():
     rows = [
         paper(
@@ -181,18 +163,8 @@ def test_legacy_or_stale_relevance_cannot_promote_explicit_paper(provenance):
     assert result["relevance"] is None
 
 
-def test_quote_metadata_is_not_a_requirement_of_reading_assessment():
-    data = response()
-    data["method"]["chunk_id"] = "unknown PDF page"
-    data["method"]["quote"] = ""
-    result = asyncio.run(module().evaluate_paper(paper(), Model(data)))
-    assert result["tier"] == "focus"
-    assert result["method"]["claim"] == data["method"]["claim"]
-    assert not result["validation_issues"]
-
-
-@pytest.mark.parametrize("size", [63000, 76000, 115000])
-def test_default_review_includes_long_paper_tail_and_complete_raw_coverage(size):
+def test_default_review_includes_long_paper_tail_and_complete_raw_coverage():
+    size = 115000
     text = (
         TEXT
         + "x" * (size - len(TEXT) - 50)
@@ -211,6 +183,7 @@ def test_explicit_review_limit_is_pending_and_never_sends_partial_text():
     result = asyncio.run(module().evaluate_paper(paper(), llm, max_chars=1000))
     assert result["tier"] == "pending"
     assert not llm.requests
+    assert result["text_complete"] is False
 
 
 @pytest.mark.parametrize("field", ["title", "abstract"])

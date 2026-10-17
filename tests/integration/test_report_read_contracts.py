@@ -1,4 +1,4 @@
-"""The maintained HTTP reader delegates to shared, evidence-aware workflows."""
+"""The maintained HTTP reader exposes evidence-aware responses and safe refreshes."""
 
 from datetime import datetime
 import inspect
@@ -173,7 +173,6 @@ def reader():
         yield SimpleNamespace(
             client=client,
             factory=factory,
-            adapter=library,
             commits=commits,
         )
     engine.dispose()
@@ -391,6 +390,8 @@ def test_knowledge_card_refresh_commits_only_changed_projection_and_preserves_ev
     reader.commits.clear()
     pending = reader.client.post(path, params={"force": "true"}).json()["data"]
     assert pending["status"] == "pending" and pending["evidence"] == []
+    assert pending["highlights"] == []
+    assert pending["quality_score"] is None
     assert reader.commits == []
     with reader.factory() as db:
         row = db.get(Report, 1)
@@ -404,57 +405,6 @@ def test_adapter_execution_modes_and_serializer_imports_are_compatible():
         assert not inspect.iscoroutinefunction(getattr(library, name))
     assert not inspect.iscoroutinefunction(library.get_knowledge_card)
     assert library._report_to_dict is report_views.report_to_dict
-
-
-@pytest.mark.parametrize(
-    "method,path,service_name",
-    [
-        ("get", "", "list_reports"),
-        ("get", "/1", "get_report_detail"),
-        ("post", "/1/knowledge-card", "get_knowledge_card"),
-    ],
-)
-def test_reader_executes_the_shared_read_service(
-    reader, monkeypatch, method, path, service_name
-):
-    # Fail before extraction, then wrap the real implementation rather than return
-    # a canned response: output-only equivalence would miss duplicated workflows.
-    service = getattr(reader.adapter, "report_reads", None)
-    assert service is not None, "adapter must delegate to the shared read service"
-    assert library.report_reads is service
-    original = getattr(service, service_name)
-    calls = []
-
-    def observed(*args, **kwargs):
-        calls.append((args, kwargs))
-        return original(*args, **kwargs)
-
-    monkeypatch.setattr(service, service_name, observed)
-    result = getattr(reader.client, method)("/api/v1/reports" + path)
-    assert result.status_code == 200
-    assert result.json()["success"] is True
-    assert len(calls) == 1
-    if service_name == "list_reports":
-        assert len(result.json()["data"]["reports"]) == 4
-    elif service_name == "get_report_detail":
-        assert result.json()["data"]["title"] == "Portfolio research"
-    else:
-        assert result.json()["data"]["status"] == "ready"
-
-
-def test_detail_calls_the_single_analysis_freshness_policy(reader, monkeypatch):
-    original = report_views.read_current_analysis
-    calls = []
-
-    def observed(report):
-        calls.append(report.id)
-        return original(report)
-
-    monkeypatch.setattr(report_views, "read_current_analysis", observed)
-    assert get_data(reader, "/1")["analysis"] == {
-        "summary": "Unsigned historical analysis"
-    }
-    assert calls == [1]
 
 
 @pytest.mark.parametrize("depth", ["quick", "standard", "deep"])

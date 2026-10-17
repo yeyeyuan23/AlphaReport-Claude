@@ -130,17 +130,6 @@ describe('ResearchBriefing request states', () => {
     },
   );
 
-  it('renders supplied canonical sections without requesting another briefing', () => {
-    const fetch = vi.fn();
-    vi.stubGlobal('fetch', fetch);
-    render(
-      <ResearchBriefing reportId={1} briefingSections={sections('Saved canonical content')} />,
-    );
-    expect(screen.getByRole('heading', { name: '📌Canonical findings' })).toBeVisible();
-    expect(screen.getByText('Saved canonical content')).toBeVisible();
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
   it('explains an authoritative empty briefing without another request', () => {
     const fetch = vi.fn();
     vi.stubGlobal('fetch', fetch);
@@ -156,6 +145,7 @@ describe('ResearchBriefing request states', () => {
     const { rerender } = render(
       <ResearchBriefing reportId={1} briefingSections={sections('First analysis')} />,
     );
+    expect(screen.getByRole('heading', { name: '📌Canonical findings' })).toBeVisible();
     expect(screen.getByText('First analysis')).toBeVisible();
     expect(fetch).not.toHaveBeenCalled();
     rerender(<ResearchBriefing reportId={2} />);

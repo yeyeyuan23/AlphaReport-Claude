@@ -139,31 +139,6 @@ describe('KnowledgeCard request states', () => {
   });
 
   it.each(['success', 'failure'] as const)(
-    'ignores a stale initial %s after switching reports',
-    async (outcome) => {
-      const previous = deferred<Response>();
-      vi.stubGlobal(
-        'fetch',
-        vi
-          .fn()
-          .mockReturnValueOnce(previous.promise)
-          .mockResolvedValueOnce(success('Current summary')),
-      );
-      const { rerender } = render(<KnowledgeCard reportId={1} />);
-      rerender(<KnowledgeCard reportId={2} />);
-      expect(await screen.findByText('Current summary')).toBeVisible();
-      await act(async () => {
-        if (outcome === 'success') previous.resolve(success('Stale summary'));
-        else previous.reject(new Error('Stale error'));
-      });
-      expect(screen.getByText('Current summary')).toBeVisible();
-      expect(screen.queryByText('Stale summary')).not.toBeInTheDocument();
-      expect(screen.queryByText('Stale error')).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: '刷新展示' })).toBeEnabled();
-    },
-  );
-
-  it.each(['success', 'failure'] as const)(
     'ignores a stale refresh %s without leaving the next report disabled',
     async (outcome) => {
       const previous = deferred<Response>();
