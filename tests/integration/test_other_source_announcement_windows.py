@@ -434,3 +434,101 @@ def test_bigquant_announcement_retains_generic_titles_in_listing_order(monkeypat
     assert all("Portfolio covariance and risk evidence" in r.abstract for r in rows)
     assert not any(path.endswith(".pdf") for path in requests)
     assert source.last_search.errors == []
+
+
+@pytest.mark.parametrize("invalid_page", [1, 2])
+@pytest.mark.parametrize("invalid_item", [{"infoCode": "invalid"}, "invalid record"])
+def test_eastmoney_continues_after_an_all_unparseable_page(invalid_page, invalid_item):
+    requests = []
+
+    def respond(request):
+        page = int(request.url.params["pageNo"])
+        requests.append(page)
+        items = [invalid_item] if page == invalid_page else [em_item(f"paper-{page}")]
+        return httpx.Response(200, json={"data": items, "TotalPage": 3})
+
+    async def run():
+        source = EastMoneySource(rate_limit_seconds=0, download_pdfs=False)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            rows = await source._fetch_reports(
+                client, 2, "2026-10-15", "2026-10-16", None
+            )
+        return source, rows
+
+    source, rows = asyncio.run(run())
+    assert requests == [1, 2, 3]
+    assert [row.raw_metadata["info_code"] for row in rows] == [
+        f"paper-{page}" for page in range(1, 4) if page != invalid_page
+    ]
+    assert source.last_search.fetched == 3
+    assert source.last_search.successful_requests == 2
+    assert len(source.last_search.errors) == 1
+    assert f"page {invalid_page} item:" in source.last_search.errors[0]
+
+
+def test_eastmoney_parse_failure_with_duplicate_sibling_does_not_end_pagination():
+    requests = []
+    pages = [[em_item("first")], [em_item("first"), {}], [em_item("last")]]
+
+    def respond(request):
+        page = int(request.url.params["pageNo"])
+        requests.append(page)
+        return httpx.Response(200, json={"data": pages[page - 1], "TotalPage": 3})
+
+    async def run():
+        source = EastMoneySource(rate_limit_seconds=0, download_pdfs=False)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            rows = await source._fetch_reports(
+                client, 2, "2026-10-15", "2026-10-16", None
+            )
+        return source, rows
+
+    source, rows = asyncio.run(run())
+    assert requests == [1, 2, 3]
+    assert [row.raw_metadata["info_code"] for row in rows] == ["first", "last"]
+    assert len(source.last_search.errors) == 1
+    assert "page 2 item:" in source.last_search.errors[0]
+
+
+@pytest.mark.parametrize(
+    "repeated, max_results, expected_requests, reason",
+    [
+        (False, None, [1, 2, 3], None),
+        (True, None, [1, 2], "progress"),
+        (False, 100, [1], "configured page limit"),
+    ],
+)
+def test_eastmoney_unparseable_pages_retain_exhaustion_and_loop_guards(
+    repeated, max_results, expected_requests, reason
+):
+    requests = []
+
+    def respond(request):
+        page = int(request.url.params["pageNo"])
+        requests.append(page)
+        return httpx.Response(
+            200,
+            json={
+                "data": [{"missing_title": "same" if repeated else str(page)}],
+                "TotalPage": 3,
+            },
+        )
+
+    async def run():
+        source = EastMoneySource(rate_limit_seconds=0, download_pdfs=False)
+        async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+            rows = await source._fetch_reports(
+                client, 2, "2026-10-15", "2026-10-16", max_results
+            )
+        return source, rows
+
+    source, rows = asyncio.run(run())
+    assert rows == []
+    assert requests == expected_requests
+    assert source.last_search.successful_requests == 0
+    assert source.last_search.fetched == len(expected_requests)
+    assert sum("item:" in error for error in source.last_search.errors) == len(requests)
+    if reason:
+        assert any(reason in error for error in source.last_search.errors)
+    else:
+        assert len(source.last_search.errors) == len(requests)

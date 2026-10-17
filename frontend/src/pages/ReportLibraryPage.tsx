@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { getReports, getReportStats } from '../services/api';
 import { EvaluationBadge, RelevanceLabel } from '../components/ResearchEvaluation';
 import type { ReportSummary, ReportStats } from '../types';
+import { ReportDates } from '../components/ReportDates';
 import {
   SOURCE_LABELS,
   MARKET_LABELS,
@@ -283,7 +284,7 @@ function ReportCard({ report }: { report: ReportSummary }) {
           )}
 
           <div className="text-[10px] text-gray-300 mt-2">
-            {report.published_date?.slice(0, 10) || report.created_at?.slice(0, 10)}
+            <ReportDates report={report} />
           </div>
         </Link>
       </div>

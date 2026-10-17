@@ -334,3 +334,53 @@ def test_classifier_receives_complete_section_instead_of_an_arbitrary_prefix():
         )
     )
     assert "TAIL_EVIDENCE" in captured[-1]["content"]
+
+
+@pytest.mark.parametrize("heading", ["", "Abstract\n", "1 Introduction\n"])
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "The conference paper by Chen et al. (2024) is used as a baseline.",
+        "The 2024 conference paper by Chen et al. is used as a baseline.",
+        "The conference proceedings of 2024 provide our benchmark data.",
+        "Proceedings of the 2024 conference are used as a baseline.",
+        "Proceedings from the 2024 conference provide our benchmark data.",
+    ],
+)
+def test_conference_citation_prose_does_not_supply_publication_evidence(heading, prose):
+    result = MetadataExtractor().extract(
+        content("Portfolio risk estimation\n" + heading + prose)
+    )
+    assert result["date"] is None
+    assert result["publication_date_info"] == {
+        "precision": "unknown",
+        "source": "unknown",
+    }
+
+
+@pytest.mark.parametrize(
+    "imprint",
+    [
+        "The Thirty-Eighth AAAI Conference on Artificial Intelligence (AAAI-24)",
+        "The 38th AAAI Conference on Artificial Intelligence (AAAI-24)",
+        "The 2024 Conference on Empirical Methods in Natural Language Processing",
+    ],
+)
+def test_full_conference_edition_heading_remains_supported(imprint):
+    result = MetadataExtractor().extract(
+        content("Paper title\nAbstract\nResearch.\n" + imprint)
+    )
+    assert result["publication_date_info"]["year"] == 2024
+    assert result["publication_date_info"]["source"] == "conference_edition"
+
+
+@pytest.mark.parametrize(
+    "value,precision", [("2024", "year"), ("August 2024", "month")]
+)
+def test_partial_native_publication_metadata_retains_its_provenance(value, precision):
+    info = MetadataExtractor().extract(content("Paper title", publication_date=value))[
+        "publication_date_info"
+    ]
+    assert info["precision"] == precision
+    assert info["source"] == "metadata:publication_date"
+    assert info["evidence"] == value

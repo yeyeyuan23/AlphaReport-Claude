@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta
 from email.utils import parsedate_to_datetime
-from html.parser import HTMLParser
+from html import unescape
 import re
 from xml.etree import ElementTree as ET
 
@@ -46,23 +46,35 @@ DC_NS = "{http://purl.org/dc/elements/1.1/}"
 IDENTIFIER = r"(?:\d{4}\.\d{4,5}|[a-z][a-z.\-]*/\d{7})v[1-9]\d*"
 
 
-class _Text(HTMLParser):
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.parts: list[str] = []
-
-    def handle_data(self, data):
-        self.parts.append(data)
-
-    def handle_starttag(self, tag, attrs):
-        if tag in {"p", "br", "div"}:
-            self.parts.append(" ")
+_TEXT_TOKEN = re.compile(
+    r"(?P<math>(?<!\\)\$\$.*?(?<!\\)\$\$|(?<!\\)\$.*?(?<!\\)\$"
+    r"|\\\(.*?\\\)|\\\[.*?\\\])"
+    r"|</?(?P<tag>p|br|div|a|b|strong|em|i|span|sub|sup)(?=[\s/>])"
+    r"(?:[^<>\"']|\"[^\"]*\"|'[^']*')*>",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _text(value: str) -> str:
-    parser = _Text()
-    parser.feed(value)
-    return " ".join("".join(parser.parts).split())
+    # ElementTree has already decoded XML entities. Official plain-text fields
+    # must not enter a tolerant HTML parser: inequalities can look like unfinished
+    # tags and swallow the rest of an abstract. Strip only complete, recognized
+    # formatting wrappers, protecting LaTeX even when it contains tag-like text.
+    has_markup = False
+
+    def strip_wrapper(match: re.Match) -> str:
+        nonlocal has_markup
+        if match.group("math") is not None:
+            return match.group()
+        has_markup = True
+        return " " if match.group("tag").lower() in {"p", "br", "div"} else ""
+
+    text = _TEXT_TOKEN.sub(strip_wrapper, value)
+    # An HTML payload has one extra entity layer. Decode it only after removing
+    # wrappers, so escaped mathematical comparisons never become markup.
+    if has_markup:
+        text = unescape(text)
+    return " ".join(text.split())
 
 
 def _rss_date(value: str | None) -> datetime:

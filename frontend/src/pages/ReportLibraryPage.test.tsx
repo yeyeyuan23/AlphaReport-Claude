@@ -12,6 +12,62 @@ function list(title: string) {
 }
 
 describe('ReportLibraryPage', () => {
+  it.each([
+    [
+      { published_date: null, publication_date_info: { precision: 'month', year: 2024, month: 2 } },
+      '发表：2024-02（精确到月）',
+    ],
+    [
+      { published_date: null, publication_date_info: { precision: 'year', year: 2024 } },
+      '发表：2024（精确到年）',
+    ],
+    [{ published_date: '2024-02-03T00:00:00' }, '发表：2024-02-03'],
+    [{ published_date: null, announced_at: '2026-10-16T04:00:00Z' }, '公告：2026-10-16'],
+    [{ published_date: null }, '发表日期未知 · 入库：2026-10-17'],
+    [
+      { published_date: '2024-02-03T00:00:00', announced_at: '2026-10-16T04:00:00Z' },
+      '公告：2026-10-16 · 发表：2024-02-03',
+    ],
+    [
+      {
+        published_date: '2024-02-01T00:00:00',
+        publication_date_info: { precision: 'month', year: 2024, month: 2 },
+      },
+      '发表：2024-02（精确到月）',
+    ],
+    [
+      { published_date: '2024-01-01T00:00:00', publication_date_info: { precision: 'unknown' } },
+      '发表日期未知 · 入库：2026-10-17',
+    ],
+  ])('shows truthful date metadata %#', async (metadata, expected) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve(
+          json(
+            url.includes('/stats')
+              ? { success: false }
+              : {
+                  success: true,
+                  data: {
+                    reports: [{ ...report(), created_at: '2026-10-17T01:23:45', ...metadata }],
+                    total: 1,
+                    limit: 20,
+                    offset: 0,
+                  },
+                },
+          ),
+        ),
+      ),
+    );
+    render(
+      <MemoryRouter>
+        <ReportLibraryPage />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText(expected)).toBeVisible();
+  });
+
   it('retains the newest search result when the old request finishes last', async () => {
     const old = deferred<Response>();
     vi.stubGlobal(

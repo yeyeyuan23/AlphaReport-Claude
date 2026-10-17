@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Optional
 
 from reportagent.processors.pdf_extractor import PDFContent
+from reportagent.utils.publication_dates import conference_edition_year
 
 
 class MetadataExtractor:
@@ -268,40 +269,29 @@ class MetadataExtractor:
                 meta.get(source.removeprefix("metadata:"), "")
             )
         else:
-            for value, label in [
-                (meta.get(k, ""), f"metadata:{k}")
+            for value, partial_source, evidence in [
+                (meta.get(k, ""), f"metadata:{k}", meta.get(k, ""))
                 for k in ("publication_date", "published_date")
-            ] + [(m["date"], m.group(0).strip()) for m in labels]:
+            ] + [
+                (m["date"], "labelled_publication_date", m.group(0).strip())
+                for m in labels
+            ]:
                 partial = self._partial_date(value)
                 if partial:
                     info = {
                         **partial,
-                        "source": "labelled_publication_date",
-                        "evidence": label,
+                        "source": partial_source,
+                        "evidence": evidence,
                     }
                     break
         imprint = self._REFERENCES_START.split(first_page, maxsplit=1)[0]
         # A conference's edition establishes the year, never its publication day.
         conference = None
         for line in imprint.splitlines():
-            # Generic venue imprints/badges, not ordinary prose citing prior work.
-            if not (
-                re.match(r"\s*[A-Z][A-Z0-9]+\s*[’']\d{2}(?:\s+workshop)?\s*,", line)
-                or re.search(
-                    r"^(?:proceedings\b|the\b.*conference\b|published as a (?:conference|workshop) paper\b)",
-                    line.strip(),
-                    re.I,
-                )
-                or re.fullmatch(r"\s*\([A-Z][A-Z0-9]+[-’']\s*\d{2}\)\s*", line)
-            ):
-                continue
-            year = re.search(r"\b(?:19|20)\d{2}\b", line)
-            short_year = re.search(r"\b[A-Z][A-Z0-9]+[ \t]*[-’']\s*(\d{2})\b", line)
-            if year or short_year:
+            year = conference_edition_year(line)
+            if year is not None:
                 conference = {
-                    "year": int(year.group(0))
-                    if year
-                    else datetime.strptime(short_year[1], "%y").year,
+                    "year": year,
                     "evidence": line.strip(),
                 }
                 break

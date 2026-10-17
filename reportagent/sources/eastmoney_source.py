@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from hashlib import sha256
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -356,6 +358,7 @@ class EastMoneySource(BaseSource):
 
         page_no = 1
         seen_codes: set[str] = set()
+        seen_pages: set[bytes] = set()
         expected_pages = None
         while True:
             params = {
@@ -406,6 +409,11 @@ class EastMoneySource(BaseSource):
                 break  # Keep earlier pages, then continue with other qTypes.
 
             self.last_search.fetched += len(items)
+            page_fingerprint = sha256(
+                json.dumps(items, sort_keys=True).encode()
+            ).digest()
+            repeated_page = page_fingerprint in seen_pages
+            seen_pages.add(page_fingerprint)
             parsed_count = 0
             new_codes = 0
             for item in items:
@@ -429,7 +437,12 @@ class EastMoneySource(BaseSource):
                     )
             if parsed_count or not items:
                 self.last_search.successful_requests += 1
-            if items and not new_codes:
+            # A parse failure does not prove that pagination is repeating. Keep
+            # enumerating the advertised pages, but still stop actual repeats
+            # (including wholly malformed pages) and fully parsed duplicate pages.
+            if items and (
+                repeated_page or (parsed_count == len(items) and not new_codes)
+            ):
                 self.last_search.record_error(
                     SourceParseError("pagination made no progress"),
                     f"qType {q_type} page {page_no}",

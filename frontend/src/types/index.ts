@@ -26,7 +26,16 @@ export interface ReportSummary {
   source_url?: string;
   doi?: string;
   arxiv_id?: string;
-  published_date?: string;
+  published_date?: string | null;
+  announced_at?: string | null;
+  publication_date_info?: {
+    precision?: 'day' | 'month' | 'year' | 'unknown';
+    year?: number;
+    month?: number;
+    day?: number;
+    source?: string;
+    evidence?: string;
+  } | null;
   has_full_text: boolean;
   pdf_path?: string;
   markets: string[];

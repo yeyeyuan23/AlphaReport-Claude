@@ -360,3 +360,58 @@ def test_announcement_cancellation_propagates_after_a_successful_category(monkey
     assert source.last_search.successful_requests == 1
     assert source.last_search.errors == []
     assert len(requested) == 2
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "We study risk when $0<p<1$ and prove that the portfolio is stable.",
+        "Bounds $p<i>q$ and $x<y$ leave the complete conclusion intact.",
+        "Display bounds $$p<i>q$$ leave the complete conclusion intact.",
+        r"We compare \(0<p<1\) and \[x<y\] with the original model.",
+        r"We compare \(p<i>q\) and \[x<b>y\] with the original model.",
+        "Literal &lt; and &notin; stay literal after XML decoding; x<y.",
+    ],
+)
+def test_plain_rss_text_preserves_math_and_xml_decoded_content(monkeypatch, text):
+    rows, diagnostics = search(monkeypatch, rss_item(title=text, abstract=text))
+    assert len(rows) == 1
+    assert rows[0].title == text
+    assert rows[0].abstract == text
+    assert diagnostics.errors == []
+
+
+def test_encoded_html_wrappers_preserve_math_and_paragraph_boundaries(monkeypatch):
+    # rss_item XML-escapes this HTML, like an RSS description with encoded markup.
+    abstract = (
+        '<p class="summary">Risk &amp; return when $0<p<1$.</p>'
+        "<div>With $p<i>q$ and <em>complete</em> evidence.<br>Still intact.</div>"
+    )
+    rows, diagnostics = search(monkeypatch, rss_item(abstract=abstract))
+    assert rows[0].abstract == (
+        "Risk & return when $0<p<1$. With $p<i>q$ and complete evidence. Still intact."
+    )
+    assert diagnostics.errors == []
+
+
+def test_encoded_html_entities_are_decoded_after_markup_removal(monkeypatch):
+    rows, diagnostics = search(
+        monkeypatch,
+        rss_item(abstract="<p>We prove $0&lt;p&lt;1$ &amp; retain the conclusion.</p>"),
+    )
+    assert rows[0].abstract == "We prove $0<p<1$ & retain the conclusion."
+    assert diagnostics.errors == []
+
+
+def test_encoded_html_wrappers_leave_plain_comparisons_and_unknown_tags(monkeypatch):
+    rows, diagnostics = search(
+        monkeypatch,
+        rss_item(
+            abstract='<p>For x<y, <a href="https://arxiv.org/?a=1&amp;b=2">'
+            "the result</a> keeps <unknown> notation.</p>Tail remains."
+        ),
+    )
+    assert rows[0].abstract == (
+        "For x<y, the result keeps <unknown> notation. Tail remains."
+    )
+    assert diagnostics.errors == []

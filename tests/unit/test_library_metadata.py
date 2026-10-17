@@ -200,8 +200,9 @@ def test_legacy_creation_date_is_removed_but_unproven_existing_date_is_preserved
         assert row.published_date == datetime(2024, 2, 3)
 
 
+@pytest.mark.parametrize("previous_version", [None, 1])
 def test_old_unchanged_pdf_gets_metadata_once_without_model_calls(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, previous_version
 ):
     import asyncio
     from reportagent.models.database import LocalPDFImport
@@ -230,6 +231,7 @@ def test_old_unchanged_pdf_gets_metadata_once_without_model_calls(
                 report_id=row.id,
                 report_content_hash="same",
                 status="imported",
+                metadata_version=previous_version,
             )
         )
         session.commit()
@@ -533,3 +535,186 @@ def test_review_budget_prioritizes_stored_academic_type_not_transport():
         },
     ]
     assert [p["id"] for p in select_candidates(papers, max_reviews=1)] == [2]
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "The conference paper by Chen et al. (2024) is used as a baseline.",
+        "Proceedings of the 2024 conference are used as a baseline.",
+        "Proceedings from the 2024 conference provide our benchmark data.",
+    ],
+)
+def test_explicit_date_repairs_stored_citation_year_on_the_same_record(factory, prose):
+    with factory() as session:
+        repo = ReportRepository(session)
+        _, rid = repo.upsert_report(
+            incoming(
+                raw_metadata={
+                    "publication_date_info": {
+                        "precision": "year",
+                        "year": 2024,
+                        "source": "conference_edition",
+                        "evidence": prose,
+                        "conference_evidence": prose,
+                    }
+                }
+            )
+        )
+        parsed = MetadataExtractor().extract(
+            PDFContent(
+                text="Portfolio metadata fixture\nPublished: 2026-10-16\nAbstract\n"
+                + prose,
+                page_count=1,
+            )
+        )
+        action, same_id = repo.upsert_report(
+            incoming(
+                published_date=parsed["date"],
+                raw_metadata={"publication_date_info": parsed["publication_date_info"]},
+            )
+        )
+        session.expire_all()
+        row = session.get(Report, rid)
+        assert (action, same_id) == ("updated", rid)
+        assert session.query(Report).count() == 1
+        assert row.published_date == datetime(2026, 10, 16)
+        assert json.loads(row.publication_date_info_json) == {
+            "precision": "day",
+            "year": 2026,
+            "month": 10,
+            "day": 16,
+            "source": "labelled_publication_date",
+            "evidence": "Published: 2026-10-16",
+        }
+        from reportagent.services.report_periods import is_daily_publication
+
+        assert is_daily_publication(row, report_date="2026-10-17")
+        saved_info = row.publication_date_info_json
+        repo.upsert_report(incoming())
+        session.expire_all()
+        assert row.published_date == datetime(2026, 10, 16)
+        assert row.publication_date_info_json == saved_info
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        "KDD ’24, August 25–29, 2024, Barcelona, Spain",
+        "The Thirty-Eighth AAAI Conference on Artificial Intelligence (AAAI-24)",
+        "The 2024 Conference on Empirical Methods in Natural Language Processing",
+        "Annual Quant Research Meeting, 2024",
+    ],
+)
+def test_conflicting_reparse_preserves_supported_conference_edition(factory, evidence):
+    old = {
+        "precision": "year",
+        "year": 2024,
+        "source": "conference_edition",
+        "evidence": evidence,
+    }
+    parsed = MetadataExtractor().extract(
+        PDFContent(text="Paper title\nPublished: 2026-10-16", page_count=1)
+    )
+    with factory() as session:
+        repo = ReportRepository(session)
+        _, rid = repo.upsert_report(
+            incoming(raw_metadata={"publication_date_info": old})
+        )
+        repo.upsert_report(
+            incoming(
+                published_date=parsed["date"],
+                raw_metadata={"publication_date_info": parsed["publication_date_info"]},
+            )
+        )
+        session.expire_all()
+        row = session.get(Report, rid)
+        assert row.published_date is None
+        assert json.loads(row.publication_date_info_json) == old
+
+
+@pytest.mark.parametrize(
+    "new",
+    [
+        {},
+        {
+            "precision": "day",
+            "source": "labelled_publication_date",
+            "year": 2026,
+            "month": 10,
+            "day": 16,
+        },
+        {
+            "precision": "day",
+            "source": "arxiv_revision",
+            "year": 2026,
+            "month": 10,
+            "day": 16,
+            "evidence": "arXiv:2410.12345v2 16 Oct 2026",
+        },
+    ],
+)
+@pytest.mark.parametrize("published_date", [None, datetime(2026, 10, 16)])
+def test_unproven_reparse_cannot_replace_stored_conference_year(
+    factory, new, published_date
+):
+    old = {
+        "precision": "year",
+        "year": 2024,
+        "source": "conference_edition",
+        "evidence": "The conference paper by Chen et al. (2024) is used as a baseline.",
+    }
+    with factory() as session:
+        repo = ReportRepository(session)
+        _, rid = repo.upsert_report(
+            incoming(raw_metadata={"publication_date_info": old})
+        )
+        repo.upsert_report(
+            incoming(
+                published_date=published_date,
+                raw_metadata={"publication_date_info": new},
+            )
+        )
+        session.expire_all()
+        row = session.get(Report, rid)
+        assert row.published_date is None
+        assert json.loads(row.publication_date_info_json) == old
+
+
+@pytest.mark.parametrize("value", ["2026", "October 2026"])
+def test_explicit_partial_metadata_repairs_citation_without_inventing_a_day(
+    factory, value
+):
+    old = {
+        "precision": "year",
+        "year": 2024,
+        "source": "conference_edition",
+        "evidence": "The conference paper by Chen et al. (2024) is used as a baseline.",
+    }
+    parsed = MetadataExtractor().extract(
+        PDFContent(
+            text="Portfolio metadata fixture",
+            page_count=1,
+            metadata={"publication_date": value},
+        )
+    )
+    with factory() as session:
+        repo = ReportRepository(session)
+        _, rid = repo.upsert_report(
+            incoming(raw_metadata={"publication_date_info": old})
+        )
+        _, same_id = repo.upsert_report(
+            incoming(
+                published_date=parsed["date"],
+                raw_metadata={"publication_date_info": parsed["publication_date_info"]},
+            )
+        )
+        session.expire_all()
+        row = session.get(Report, rid)
+        assert same_id == rid
+        assert row.published_date is None
+        assert (
+            json.loads(row.publication_date_info_json)
+            == parsed["publication_date_info"]
+        )
+        assert json.loads(row.publication_date_info_json)["year"] == 2026

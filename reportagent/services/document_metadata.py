@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-METADATA_VERSION = 1
+from reportagent.utils.publication_dates import is_cited_conference_prose
+
+METADATA_VERSION = 2
 MATERIAL_TYPES = {"academic", "broker", "community", "other", "unknown"}
 # These adapters are typed feeds. local_pdf intentionally has no default.
 TYPED_FEEDS = {
@@ -117,6 +119,31 @@ def merge_document_metadata(row, search_result) -> None:
         old = {}
         row.publication_date_info_json = None
     incoming_date = search_result.published_date
+    # Repair a positively identified citation-year inference only when
+    # the same record receives explicit, evidenced publication metadata.
+    # Missing metadata or a conflicting *supported* date must remain stable.
+    if (
+        row.published_date is None
+        and old.get("source") == "conference_edition"
+        and old.get("precision") == "year"
+        and is_cited_conference_prose(old.get("evidence"))
+        and new.get("source")
+        in {
+            "labelled_publication_date",
+            "metadata:publication_date",
+            "metadata:published_date",
+        }
+        and has_publication_date({"publication_date_info": new})
+        and (
+            incoming_date is None
+            or all(
+                new[key] == getattr(incoming_date, key)
+                for key in ("year", "month", "day")
+                if key in new
+            )
+        )
+    ):
+        old = {}
     compatible_date = incoming_date is not None and all(
         old[key] == getattr(incoming_date, key)
         for key in ("year", "month", "day")
