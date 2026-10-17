@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from reportagent.api.deps import get_db
+from reportagent.services.report_views import read_current_analysis
 from reportagent.db.repository import ReportRepository
 from reportagent.models.schemas import ReportListParams
 
@@ -102,11 +103,9 @@ async def get_report(report_id: int, db: Session = Depends(get_db)):
     data["summary"] = report.summary
     data["tables_json"] = report.tables_json
     data["equations_json"] = report.equations_json
-    if report.analysis_json:
-        try:
-            data["analysis"] = json.loads(report.analysis_json)
-        except json.JSONDecodeError:
-            pass
+    analysis = read_current_analysis(report)
+    if analysis is not None:
+        data["analysis"] = analysis
     return {"success": True, "data": data}
 
 
@@ -125,12 +124,7 @@ async def summarize_report(report_id: int, db: Session = Depends(get_db)):
     import json as _json
 
     # If analysis exists, synthesize from structured results
-    analysis_data = None
-    if report.analysis_json:
-        try:
-            analysis_data = _json.loads(report.analysis_json)
-        except Exception:
-            pass
+    analysis_data = read_current_analysis(report)
 
     if analysis_data and analysis_data.get("methodology"):
         prompt = _build_summary_from_analysis(analysis_data, report.title)

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Query, HTTPException, Depends
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from reportagent.db.engine import get_db
+from reportagent.services.report_views import read_current_analysis
 from reportagent.db.repository import ReportRepository
 from reportagent.models.schemas import ReportListParams
 from reportagent.utils.config import PROJECT_ROOT
@@ -84,11 +85,9 @@ def get_report(report_id: int, db: Session = Depends(get_db)):
     data["summary"] = report.summary
     data["tables_json"] = report.tables_json
     data["equations_json"] = report.equations_json
-    if report.analysis_json:
-        try:
-            data["analysis"] = json.loads(report.analysis_json)
-        except json.JSONDecodeError:
-            pass
+    analysis = read_current_analysis(report)
+    if analysis is not None:
+        data["analysis"] = analysis
     from reportagent.services.knowledge_cards import build_knowledge_card
 
     data["knowledge_card"] = build_knowledge_card(report)
@@ -169,9 +168,9 @@ async def get_research_briefing(
     # 1) Client-side mapping is preferred — return analysis_json so the
     #    frontend ResearchBriefing component can build sections directly.
     #    This endpoint provides the LLM-generated narrative version.
-    if report.analysis_json:
+    analysis = read_current_analysis(report)
+    if analysis:
         try:
-            analysis = json.loads(report.analysis_json)
             # Build context for LLM
             ctx_parts = []
             if analysis.get("research_question"):

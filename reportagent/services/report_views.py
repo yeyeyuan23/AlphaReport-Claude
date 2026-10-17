@@ -4,6 +4,25 @@ import json
 from reportagent.services.paper_scoring import relevance_reason_text
 
 
+def read_current_analysis(report) -> dict | None:
+    """Hide outdated batch results, while retaining historical unsigned formats."""
+    try:
+        analysis = json.loads(report.analysis_json or "null")
+        if not isinstance(analysis, dict):
+            return None
+        if "analysis_fingerprint" in analysis:
+            from reportagent.services.batch_analysis import analysis_cache_fingerprint
+
+            depth = analysis.get("depth")
+            if depth not in {"quick", "standard", "deep"} or analysis.get(
+                "analysis_fingerprint"
+            ) != analysis_cache_fingerprint(report, depth):
+                return None
+        return analysis
+    except (TypeError, ValueError):
+        return None
+
+
 def report_to_dict(r) -> dict:
     from reportagent.services.knowledge_cards import report_snapshot
     from reportagent.services.report_quality import current_relevance

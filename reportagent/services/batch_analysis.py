@@ -9,6 +9,8 @@ import json
 import hashlib
 import logging
 
+from sqlalchemy import update
+
 
 from reportagent.db.engine import init_db, get_session_factory
 from reportagent.db.repository import ReportRepository
@@ -21,6 +23,15 @@ from reportagent.skills.registry import skill_resource
 from reportagent.utils.config import get_llm_model, get_llm_base_url, get_llm_provider
 
 logger = logging.getLogger("analyze")
+
+_ANALYSIS_INPUT_FIELDS = (
+    "title",
+    "abstract",
+    "full_text",
+    "has_full_text",
+    "arxiv_id",
+    "equations_json",
+)
 
 
 def analysis_cache_fingerprint(report, depth: str) -> str:
@@ -36,17 +47,7 @@ def analysis_cache_fingerprint(report, depth: str) -> str:
         "provider": get_llm_provider(),
         "endpoint": get_llm_base_url(),
         "resources": resources,
-        "paper": {
-            key: getattr(report, key, None)
-            for key in (
-                "title",
-                "abstract",
-                "full_text",
-                "has_full_text",
-                "arxiv_id",
-                "equations_json",
-            )
-        },
+        "paper": {key: getattr(report, key, None) for key in _ANALYSIS_INPUT_FIELDS},
     }
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()
@@ -150,8 +151,22 @@ async def run_analysis(options: AnalysisOptions) -> dict:
 
         logger.info(f"Analyzing {len(reports)} reports (depth: {options.depth})...")
 
+        # Select identities once, then read each input in a short-lived session.
+        # No database transaction remains open while awaiting a model.
+        session.close()
         agent = None
-        for i, r in enumerate(reports):
+        agent_policy = None
+        for i, report_id in enumerate(audit["report_ids"]):
+            with factory() as read_session:
+                r = read_session.get(Report, report_id)
+            if r is None:
+                audit["failed_ids"].append(report_id)
+                audit["errors"][report_id] = "Report no longer exists"
+                continue
+            original = {
+                key: getattr(r, key)
+                for key in (*_ANALYSIS_INPUT_FIELDS, "analysis_json")
+            }
             evidence_scope = (
                 "full_text"
                 if r.has_full_text and (r.full_text or "").strip()
@@ -176,9 +191,13 @@ async def run_analysis(options: AnalysisOptions) -> dict:
                 continue
 
             try:
+                current_policy = analysis_cache_fingerprint(None, options.depth)
                 if llm_client is None:
+                    agent_policy = current_policy
                     llm_client = LLMClient()
                     agent = AnalysisAgent(llm_client=llm_client)
+                elif current_policy != agent_policy:
+                    raise ValueError("分析期间模型或规则已更新，请重试")
                 call_start = len(llm_client.calls)
                 result = await agent.analyze_report_directly(
                     title=r.title,
@@ -209,18 +228,35 @@ async def run_analysis(options: AnalysisOptions) -> dict:
                     depth=options.depth,
                     analysis_fingerprint=fingerprint,
                 )
-                # Save analysis, but only evidence-backed cards may populate the cache.
-                r.analysis_json = json.dumps(
-                    analysis_dict, ensure_ascii=False, indent=2
-                )
-                from reportagent.services.knowledge_cards import get_knowledge_card
+                if analysis_cache_fingerprint(r, options.depth) != fingerprint:
+                    raise ValueError("分析期间模型或规则已更新，请重试")
+                # Compare and write in one statement: a later source revision or
+                # completed analysis must never be overwritten by this request.
+                with factory() as write_session:
+                    saved = write_session.execute(
+                        update(Report)
+                        .where(
+                            Report.id == report_id,
+                            *(
+                                getattr(Report, key) == value
+                                for key, value in original.items()
+                            ),
+                        )
+                        .values(
+                            analysis_json=json.dumps(
+                                analysis_dict, ensure_ascii=False, indent=2
+                            )
+                        )
+                    )
+                    if saved.rowcount != 1:
+                        raise ValueError("分析期间原文或已有分析已更新，请重试")
+                    from reportagent.services.knowledge_cards import get_knowledge_card
 
-                get_knowledge_card(r)
-                session.commit()
+                    get_knowledge_card(write_session.get(Report, report_id))
+                    write_session.commit()
                 audit["analyzed_ids"].append(r.id)
                 logger.info(f"  [{i + 1}/{len(reports)}] ✓ {r.title[:50]}")
             except Exception as e:
-                session.rollback()
                 audit["failed_ids"].append(r.id)
                 audit["errors"][r.id] = str(e)
                 logger.warning(f"  [{i + 1}/{len(reports)}] ✗ {r.title[:50]}: {e}")
