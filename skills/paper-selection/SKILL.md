@@ -3,7 +3,7 @@ name: paper-selection
 description: 根据完整摘要评估论文与已启用研究方向的相关性，为全文评审筛选候选；支持预览和失败重试。
 ---
 
-先采集入库，再用完整摘要筛选相关论文，随后进行有全文证据的质量评审。
+在线来源先用完整摘要筛选相关论文，达标后下载与入库；已有库中资料可重新筛选，随后进行有全文证据的质量评审。
 `reportagent.services.paper_scoring` 使用 [scoring-system.md](scoring-system.md)
 和 [scoring-user.md](scoring-user.md) 仅评估研究相关度。
 研究方向和推送设置属于运行配置，见 `configs/push_directions.yaml`。
@@ -14,8 +14,7 @@ description: 根据完整摘要评估论文与已启用研究方向的相关性�
 .venv/bin/python -m reportagent.cli.llm_filter --published-days 4 --dry-run
 ```
 
-方向匹配的另一种评分方式使用 `reportagent.cli.llm_direction_filter`，
-提示词见 [direction-scoring.md](direction-scoring.md)。
+`reportagent.cli.llm_direction_filter` 是同一评分服务的方向明细入口，共用上述提示词、验证、材料指纹与 selection 字段；明细保存在 selection_provenance.direction_scores，不再另写一套分析内评分。
 摘要筛选的 `score` 与 `relevance` 相同，兼容旧调用者；不把摘要相关度当作全文质量评分。
 阈值取自 YAML 的 `push_settings.llm_filter_threshold`（缺省 6.0），可由 CLI 显式覆盖；模型的筛选建议不能形成另一个隐藏阈值。
 方向每次从配置读取，仅接受启用方向。`selection_direction`、`selection_relevance` 和摘要范围说明独立保存。

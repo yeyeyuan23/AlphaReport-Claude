@@ -200,17 +200,64 @@ def _format_papers_for_llm(papers: list, indices=None) -> str:
     )
 
 
+def normalize_direction_scores(scores, directions: dict[str, dict]) -> list[dict]:
+    """Validate one complete direction matrix for every scoring entrypoint."""
+    if not isinstance(scores, list) or not scores:
+        raise ValueError("Missing direction scores")
+    checked = {}
+    for value in scores:
+        if not isinstance(value, dict):
+            raise ValueError("Invalid direction score")
+        direction = value.get("direction_id")
+        if (
+            not isinstance(direction, str)
+            or direction not in directions
+            or direction in checked
+        ):
+            raise ValueError("Unknown, disabled or duplicate direction")
+        reason = value.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError("Missing direction evidence")
+        checked[direction] = {
+            "direction_id": direction,
+            "direction_name": directions[direction].get("name", direction),
+            "score": _valid_score(value.get("score"), "score"),
+            "reason": reason.strip(),
+        }
+    if set(checked) != set(directions):
+        raise ValueError("Direction scores must cover every enabled direction")
+    return [checked[direction] for direction in directions]
+
+
 def _normalize_assessment(item: dict, directions: dict[str, dict]) -> dict:
     if not isinstance(item, dict):
         raise ValueError("Each assessment must be an object")
     status = item.get("status", "scored")
+    if status == "scored" and ("direction_scores" in item or "scores" in item):
+        scores = normalize_direction_scores(
+            item.get("direction_scores", item.get("scores")), directions
+        )
+        best = max(scores, key=lambda value: value["score"])
+        item = {
+            **item,
+            "direction_scores": scores,
+            "score": best["score"],
+            "relevance": best["score"],
+            "best_direction": best["direction_id"] if best["score"] > 0 else None,
+            "reason": best["reason"],
+        }
     if status not in ("scored", "pending_needs_material"):
         raise ValueError("Unknown relevance status")
     reason = item.get("reason")
     if not isinstance(reason, str) or not reason.strip():
         raise ValueError("reason must explain abstract-only relevance")
     if status == "pending_needs_material":
-        if item.get("score") is not None or item.get("relevance") is not None:
+        if (
+            item.get("score") is not None
+            or item.get("relevance") is not None
+            or item.get("direction_scores") not in (None, [])
+            or item.get("scores") not in (None, [])
+        ):
             raise ValueError("Insufficient material requires null score and relevance")
         return {
             **item,
@@ -349,6 +396,11 @@ async def score_papers_batch(
                         **provenance,
                         "status": item["status"],
                         "evidence_fingerprint": evidence_fingerprint(batch[index]),
+                        **(
+                            {"direction_scores": item["direction_scores"]}
+                            if "direction_scores" in item
+                            else {}
+                        ),
                     },
                 )
                 valid.append(item)
@@ -442,6 +494,24 @@ def apply_scores(
                         "status": item["status"],
                         "evidence_fingerprint": evidence_fingerprint(paper),
                     }
+                    from reportagent.models.database import Report
+
+                    if session.bind.dialect.name == "sqlite":
+                        session.connection().exec_driver_sql("BEGIN IMMEDIATE")
+                    session.expire_all()
+                    current = session.get(Report, paper_id)
+                    if current is None:
+                        raise ValueError(f"Paper {paper_id} no longer exists")
+                    if item.get("_provenance") and (
+                        provenance.get("fingerprint") != scoring_fingerprint()
+                        or provenance["evidence_fingerprint"]
+                        != evidence_fingerprint(current)
+                    ):
+                        raise ValueError(
+                            "Research material or relevance policy changed during scoring"
+                        )
+                    if "direction_scores" in item:
+                        provenance["direction_scores"] = item["direction_scores"]
                     if not repo.update_selection(
                         paper_id,
                         0 if pending else relevance,
@@ -450,8 +520,10 @@ def apply_scores(
                         direction=direction,
                         relevance=relevance,
                         provenance_json=json.dumps(provenance, ensure_ascii=False),
+                        commit=False,
                     ):
                         raise ValueError(f"Paper {paper_id} no longer exists")
+                    session.commit()
                 if pending:
                     stats["pending_needs_material"] += 1
                     continue
@@ -465,6 +537,8 @@ def apply_scores(
                 else:
                     stats["rejected"] += 1
             except (ValueError, TypeError, KeyError) as error:
+                if session is not None:
+                    session.rollback()
                 logger.warning("Assessment left unjudged: %s", error)
                 stats["errors"] += 1
             except Exception as error:

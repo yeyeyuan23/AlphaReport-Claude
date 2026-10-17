@@ -70,53 +70,17 @@ def get_papers(days: int = 1, report_ids: list[int] | None = None) -> list[dict]
 
 
 def store_scores(results: list[PaperDirectionResult]):
-    """将方向评分存入 DB 的 analysis_json 字段。"""
-    init_db()
-    factory = get_session_factory()
-    session = factory()
-    try:
-        from reportagent.models.database import Report
+    """Persist canonical selections; direction details live in their provenance."""
+    from reportagent.services.paper_scoring import apply_scores
 
-        for r in results:
-            if r.status == "retryable_error":
-                continue  # Preserve previous successful data; retry on the next run.
-            # Build scores JSON
-            scores_data = {
-                "direction_scores": [
-                    {
-                        "direction_id": s.direction_id,
-                        "direction_name": s.direction_name,
-                        "score": s.score,
-                        "reason": s.reason,
-                    }
-                    for s in r.direction_scores
-                ],
-                "max_score": r.max_score,
-                "best_direction": r.best_direction,
-                "selected": r.is_selected,
-                "status": r.status,
-                "reason": r.reason,
-                "threshold": r.threshold,
-                "scored_at": datetime.now(timezone.utc).isoformat(),
-            }
-            # Merge with existing analysis_json
-            report = session.query(Report).filter(Report.id == r.report_id).first()
-            if report:
-                existing = {}
-                if report.analysis_json:
-                    try:
-                        existing = json.loads(report.analysis_json)
-                    except json.JSONDecodeError:
-                        pass
-                if not isinstance(existing, dict):
-                    existing = {}
-                existing.update(scores_data)
-                report.analysis_json = json.dumps(existing, ensure_ascii=False)
-
-        session.commit()
-        logger.info("Stored direction scores for %d papers", len(results))
-    finally:
-        session.close()
+    stats = {"total_scored": 0, "errors": 0}
+    for result in results:
+        if result.status == "retryable_error" or result.assessment is None:
+            continue
+        saved = apply_scores([result.assessment], threshold=result.threshold)
+        stats["total_scored"] += saved["total_scored"]
+        stats["errors"] += saved["errors"]
+    return stats
 
 
 async def run_direction_filter(options: DirectionOptions) -> None:

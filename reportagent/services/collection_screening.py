@@ -290,7 +290,7 @@ def store_selected(item, decision, factory, staging_directory):
         return action, rid, item
 
 
-async def hydrate_selected(source, item, rid, factory, errors):
+async def hydrate_selected(source, item, rid, factory, errors, *, cancel_check=None):
     """Reuse usable stored material; never replace concurrent newer metadata."""
     with factory() as session:
         row = session.get(Report, rid)
@@ -331,6 +331,8 @@ async def hydrate_selected(source, item, rid, factory, errors):
                 "selected paper metadata changed during download; retry screening"
             )
         enriched = item.model_copy(update={"search_result": hydrated})
+        if cancel_check and cancel_check():
+            return item
         with factory() as session:
             if session.bind.dialect.name == "sqlite":
                 session.connection().exec_driver_sql("BEGIN IMMEDIATE")

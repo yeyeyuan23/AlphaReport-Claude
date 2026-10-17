@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 import logging
 from datetime import datetime, timezone
@@ -89,11 +90,10 @@ def build_sources(source_names: list[str]) -> list:
     return source_factory.build_sources(source_names)
 
 
-async def collect_reports(options: CollectionOptions) -> dict:
+def _criteria_from_options(options: CollectionOptions) -> UserCriteria:
     topics = [t.strip() for t in options.topics.split(",") if t.strip()]
     source_names = [s.strip() for s in options.sources.split(",") if s.strip()]
     keywords = [k.strip() for k in options.keywords.split(",") if k.strip()]
-
     # Date filtering
     date_from = None
     date_to = None
@@ -118,17 +118,7 @@ async def collect_reports(options: CollectionOptions) -> dict:
             f" to {date_to.strftime('%Y-%m-%d') if date_to else 'today'}"
         )
 
-    # Init DB
-    init_db()
-    classifier = RuleClassifier()
-
-    # Build sources
-    sources = build_sources(source_names)
-    if not sources:
-        logger.error("No valid sources specified")
-        raise ValueError("No valid sources specified")
-
-    criteria = UserCriteria(
+    return UserCriteria(
         topics=topics,
         sources=[SourceType(s) for s in source_names],
         keywords=keywords,
@@ -136,6 +126,50 @@ async def collect_reports(options: CollectionOptions) -> dict:
         date_to=date_to,
         max_results_per_source=options.max_results,
     )
+
+
+async def collect_reports(
+    options: CollectionOptions | UserCriteria,
+    *,
+    no_analysis: bool | None = None,
+    analysis_depth: str = "standard",
+    broad: bool = False,
+    progress_cb: Callable[[str, str], None] | None = None,
+    cancel_check: Callable[[], bool] | None = None,
+) -> dict:
+    """Execute every collection entry through the same selection and save gates.
+
+    Criteria enter intact: comma-bearing list items, timezone-aware instants,
+    journals, brokers and local paths are never serialized through CLI strings.
+    Cancellation preserves the receipt for metadata already committed.
+    """
+    if isinstance(options, CollectionOptions):
+        sources = build_sources(
+            [name.strip() for name in options.sources.split(",") if name.strip()]
+        )
+        if not sources:
+            raise ValueError("No valid sources specified")
+        criteria = _criteria_from_options(options)
+        no_analysis = options.no_analysis if no_analysis is None else no_analysis
+        analysis_depth = options.analysis_depth
+        broad = options.broad
+    else:
+        criteria = options
+        sources = build_sources([name.value for name in criteria.sources])
+    topics = criteria.topics
+    source_names = [name.value for name in criteria.sources]
+
+    def cancelled():
+        return bool(cancel_check and cancel_check())
+
+    def progress(phase, message):
+        if progress_cb:
+            progress_cb(phase, message)
+
+    init_db()
+    classifier = RuleClassifier()
+    if not sources and not cancelled():
+        raise ValueError("No valid sources specified")
 
     all_results = []
     storage_result = {
@@ -161,6 +195,9 @@ async def collect_reports(options: CollectionOptions) -> dict:
     collection_errors = []
     report_ids = []
     for source in sources:
+        if cancelled():
+            break
+        progress("collecting", f"Searching {source.source_type.value}")
         started = monotonic()
         source_name = source.source_type.value
         errors = []
@@ -185,7 +222,13 @@ async def collect_reports(options: CollectionOptions) -> dict:
         )
         classified_results = []
         try:
-            if not source.is_available():
+            available = (
+                Path(criteria.local_pdf_path).is_dir()
+                if source.source_type == SourceType.LOCAL_PDF
+                and criteria.local_pdf_path
+                else source.is_available()
+            )
+            if not available:
                 unavailable = True
                 errors.append("configuration: source unavailable")
             else:
@@ -193,13 +236,13 @@ async def collect_reports(options: CollectionOptions) -> dict:
                     "Searching %s for: %s%s",
                     source_name,
                     topics,
-                    " (BROAD mode)" if options.broad else "",
+                    " (BROAD mode)" if broad else "",
                 )
                 download_pdfs = getattr(source, "download_pdfs", None)
                 if online and download_pdfs is not None:
                     source.download_pdfs = False
                 try:
-                    if options.broad and hasattr(source, "search_broad"):
+                    if broad and hasattr(source, "search_broad"):
                         results = await source.search_broad(criteria)
                     else:
                         results = await source.search(criteria)
@@ -210,6 +253,8 @@ async def collect_reports(options: CollectionOptions) -> dict:
                 logger.info("  → %d results from %s", len(results), source_name)
 
                 for sr in deduplicate_results(results):
+                    if cancelled():
+                        break
                     try:
                         if online and llm_client is not None:
                             from reportagent.services.collection_screening import (
@@ -223,6 +268,8 @@ async def collect_reports(options: CollectionOptions) -> dict:
                                 get_session_factory(),
                                 Path(staging.name),
                             )
+                        if cancelled():
+                            break
                         if online:
                             from reportagent.services.paper_scoring import (
                                 has_screening_material,
@@ -235,6 +282,7 @@ async def collect_reports(options: CollectionOptions) -> dict:
                                     "screening material unavailable; not rejected as irrelevant and not stored"
                                 )
                                 continue
+                        progress("classifying", f"Classifying {source_name} metadata")
                         classified = await classify_for_storage(
                             sr, classifier, llm_classifier, errors
                         )
@@ -251,18 +299,28 @@ async def collect_reports(options: CollectionOptions) -> dict:
                     hydrate_selected,
                 )
 
+                progress("screening", f"Screening {source_name} metadata")
                 selected = (
-                    await select_metadata(
-                        classified_results,
-                        llm_client,
-                        get_session_factory(),
-                        errors,
-                        screening,
+                    []
+                    if cancelled()
+                    else (
+                        await select_metadata(
+                            classified_results,
+                            llm_client,
+                            get_session_factory(),
+                            errors,
+                            screening,
+                        )
+                        if online
+                        else [(item, None) for item in classified_results]
                     )
-                    if online
-                    else [(item, None) for item in classified_results]
                 )
                 for item, decision in selected:
+                    if cancelled():
+                        break
+                    progress("storing", f"Saving accepted {source_name} metadata")
+                    if cancelled():
+                        break
                     try:
                         if online:
                             action, rid, item = store_selected(
@@ -270,9 +328,6 @@ async def collect_reports(options: CollectionOptions) -> dict:
                                 decision,
                                 get_session_factory(),
                                 Path(staging.name),
-                            )
-                            item = await hydrate_selected(
-                                source, item, rid, get_session_factory(), errors
                             )
                         else:
                             with get_session_factory()() as session:
@@ -282,6 +337,16 @@ async def collect_reports(options: CollectionOptions) -> dict:
                         storage_result["added" if action == "added" else "updated"] += 1
                         report_ids.append(rid)
                         all_results.append(item)
+                        if online and not cancelled():
+                            item = await hydrate_selected(
+                                source,
+                                item,
+                                rid,
+                                get_session_factory(),
+                                errors,
+                                cancel_check=cancel_check,
+                            )
+                            all_results[-1] = item
                         valid += 1
                         sr = item.search_result
                         full_text_count += int(
@@ -304,7 +369,9 @@ async def collect_reports(options: CollectionOptions) -> dict:
         succeeded = (
             diagnostics.successful_requests > 0 if diagnostics else completed
         ) or valid > 0
-        if unavailable:
+        if cancelled():
+            status = "cancelled"
+        elif unavailable:
             status = "unavailable"
         elif errors:
             status = "partial" if succeeded else "error"
@@ -330,22 +397,26 @@ async def collect_reports(options: CollectionOptions) -> dict:
 
     # All entrypoints use the batch service's evidence, completeness and cache
     # gates. A source row being stored is not evidence of successful analysis.
-    if not options.no_analysis and report_ids:
+    if not no_analysis and report_ids and not cancelled():
         from reportagent.services import batch_analysis
         from reportagent.models.database import Report
 
         logger.info(
             "Starting shared analysis for %d reports (depth: %s)",
             len(report_ids),
-            options.analysis_depth,
+            analysis_depth,
         )
         analysis_results = []
         for rid in report_ids:
+            if cancelled():
+                break
+            progress("analyzing", f"Analyzing report {rid}")
+            if cancelled():
+                break
             try:
                 audit = await batch_analysis.run_analysis(
-                    batch_analysis.AnalysisOptions(
-                        report_id=rid, depth=options.analysis_depth
-                    )
+                    batch_analysis.AnalysisOptions(report_id=rid, depth=analysis_depth),
+                    cancel_check=cancel_check,
                 )
                 storage_result["analyzed"] += audit["analyzed"]
                 # Batch error strings may contain upstream request details. Keep
@@ -366,9 +437,9 @@ async def collect_reports(options: CollectionOptions) -> dict:
                         cached = report is not None and batch_analysis._usable_cache(
                             report.analysis_json,
                             batch_analysis.analysis_cache_fingerprint(
-                                report, options.analysis_depth
+                                report, analysis_depth
                             ),
-                            options.analysis_depth,
+                            analysis_depth,
                         )
                     if not cached:
                         message = (
@@ -401,8 +472,15 @@ async def collect_reports(options: CollectionOptions) -> dict:
     if len(storage_result["errors"]) > len(collection_errors):
         status = "partial" if report_ids else "failed"
 
+    if cancelled():
+        status = "cancelled"
+    progress(
+        "complete" if status == "ok" else status,
+        f"Collection {status}: {len(report_ids)} saved reports",
+    )
     return {
         "status": status,
+        "report_ids": report_ids,
         "source_statuses": source_statuses,
         "topics": topics,
         "sources": source_names,

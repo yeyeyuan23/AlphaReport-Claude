@@ -192,8 +192,9 @@ def test_direction_filter_uses_shared_template_with_configured_directions(tmp_pa
     (bundle / "SKILL.md").write_text(
         "---\nname: paper-selection\ndescription: Match directions\n---\nScore."
     )
-    (bundle / "direction-scoring.md").write_text(
-        "Shared directions: {directions_desc}\nPapers: {papers_desc}"
+    (bundle / "scoring-system.md").write_text("Shared directions: {directions_desc}")
+    (bundle / "scoring-user.md").write_text(
+        "Papers: {papers_text}\nDirections: {direction_ids}"
     )
     with patch.object(registry, "PROJECT_ROOT", tmp_path):
         filt = DirectionFilter()
@@ -202,5 +203,5 @@ def test_direction_filter_uses_shared_template_with_configured_directions(tmp_pa
         )
     assert prompt.startswith("Shared directions:")
     assert "A股多因子选股" in prompt
-    assert "ID: 42" in prompt
+    assert "论文 #0" in prompt
     assert "Fixture portfolio paper" in prompt
