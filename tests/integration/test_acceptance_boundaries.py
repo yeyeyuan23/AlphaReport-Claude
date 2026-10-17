@@ -103,9 +103,7 @@ def test_weekly_preview_uses_publication_boundaries_and_cannot_deliver(
     )
     send = MagicMock(side_effect=AssertionError("Acceptance must not send"))
     monkeypatch.setattr(weekly, "send_feishu_card", send)
-    result = workflows.weekly(
-        SimpleNamespace(run_dir=tmp_path, label="weekly")
-    )
+    result = workflows.weekly(SimpleNamespace(run_dir=tmp_path, label="weekly"))
     assert result["paper_ids"] == [3, 2]
     assert result["sent"] is False
     assert result["llm_requested"] is False

@@ -180,9 +180,7 @@ def test_no_llm_preview_does_not_call_models_or_send(library, tmp_path, monkeypa
     send.assert_not_called()
 
 
-def test_weekly_only_renders_saved_evidence(
-    library, tmp_path, monkeypatch
-):
+def test_weekly_only_renders_saved_evidence(library, tmp_path, monkeypatch):
     with library() as session:
         session.add(
             Report(
@@ -215,7 +213,9 @@ def test_weekly_only_renders_saved_evidence(
     assert result["sent"] == 0
 
 
-def test_collection_review_budget_advances_past_current_cached_papers(library, monkeypatch):
+def test_collection_review_budget_advances_past_current_cached_papers(
+    library, monkeypatch
+):
     from reportagent.services import report_quality, collection_reviews
 
     with library() as session:
