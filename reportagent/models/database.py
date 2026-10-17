@@ -1,8 +1,17 @@
 from __future__ import annotations
 
 from sqlalchemy import (
-    Column, Integer, String, Text, DateTime, Boolean, Float,
-    ForeignKey, Table, UniqueConstraint, Index, func,
+    Column,
+    Integer,
+    String,
+    Text,
+    DateTime,
+    Boolean,
+    Float,
+    ForeignKey,
+    Table,
+    UniqueConstraint,
+    func,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -14,8 +23,15 @@ class Base(DeclarativeBase):
 report_tags = Table(
     "report_tags",
     Base.metadata,
-    Column("report_id", Integer, ForeignKey("reports.id", ondelete="CASCADE"), primary_key=True),
-    Column("tag_id", Integer, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True),
+    Column(
+        "report_id",
+        Integer,
+        ForeignKey("reports.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "tag_id", Integer, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True
+    ),
 )
 
 
@@ -70,6 +86,7 @@ class Report(Base):
 
 class LocalPDFImport(Base):
     """Successful local file imports; failed work remains eligible for retry."""
+
     __tablename__ = "local_pdf_imports"
 
     file_path = Column(String(1000), primary_key=True)

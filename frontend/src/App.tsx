@@ -1,10 +1,10 @@
-import { lazy, Suspense } from "react";
-import { BrowserRouter, Routes, Route, NavLink, Navigate } from "react-router-dom";
-import { AuthProvider } from "./contexts/AuthContext";
+import { lazy, Suspense } from 'react';
+import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
+import { AuthProvider } from './contexts/AuthContext';
 
 // ── Lazy load pages for code splitting ──
-const ReportLibraryPage = lazy(() => import("./pages/ReportLibraryPage"));
-const ReportDetailPage = lazy(() => import("./pages/ReportDetailPage"));
+const ReportLibraryPage = lazy(() => import('./pages/ReportLibraryPage'));
+const ReportDetailPage = lazy(() => import('./pages/ReportDetailPage'));
 
 function PageFallback() {
   return (
@@ -17,9 +17,7 @@ function PageFallback() {
 function Nav() {
   const link = ({ isActive }: { isActive: boolean }) =>
     `px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-      isActive
-        ? "bg-indigo-100 text-indigo-700"
-        : "text-gray-600 hover:bg-gray-100"
+      isActive ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-100'
     }`;
 
   return (

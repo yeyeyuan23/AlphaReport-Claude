@@ -56,6 +56,7 @@ class StorageAgent:
             session = factory()
             try:
                 from reportagent.classifiers.quant_filter import compute_quant_score
+
                 indexed = 0
                 for cr in reports:
                     sr = cr.search_result
@@ -69,7 +70,9 @@ class StorageAgent:
                         continue
                     topics = db_report.topics or ""
                     markets = db_report.markets or ""
-                    quant_score, _ = compute_quant_score(db_report.title, db_report.abstract or "")
+                    quant_score, _ = compute_quant_score(
+                        db_report.title, db_report.abstract or ""
+                    )
                     chunks = store.index_report(
                         report_id=db_report.id,
                         title=db_report.title,
@@ -81,7 +84,11 @@ class StorageAgent:
                     )
                     indexed += chunks
                 if indexed:
-                    logger.info("Vector store: indexed %d chunks from %d reports", indexed, len(reports))
+                    logger.info(
+                        "Vector store: indexed %d chunks from %d reports",
+                        indexed,
+                        len(reports),
+                    )
             finally:
                 session.close()
         except Exception as e:

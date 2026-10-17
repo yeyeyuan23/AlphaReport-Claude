@@ -2,7 +2,6 @@ from __future__ import annotations
 from typing import Optional
 
 from functools import lru_cache
-from pathlib import Path
 
 import yaml
 
@@ -10,9 +9,13 @@ from reportagent.utils.config import PROJECT_ROOT, get_config
 
 
 @lru_cache(maxsize=1)
-def load_taxonomy(path  : Optional[str] = None) -> dict:
+def load_taxonomy(path: Optional[str] = None) -> dict:
     if path is None:
-        rel = get_config("classification", "taxonomy_path", default="configs/classification_taxonomy.yaml")
+        rel = get_config(
+            "classification",
+            "taxonomy_path",
+            default="configs/classification_taxonomy.yaml",
+        )
         path = str(PROJECT_ROOT / rel)
     with open(path) as f:
         data = yaml.safe_load(f)

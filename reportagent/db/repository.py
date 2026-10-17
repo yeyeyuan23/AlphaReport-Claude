@@ -8,10 +8,9 @@ from typing import Optional
 from sqlalchemy import or_, desc, asc, func
 from sqlalchemy.orm import Session
 
-from reportagent.models.database import Report, Tag, SearchHistory, UserCriteriaPreset, report_tags
+from reportagent.models.database import Report, Tag, SearchHistory
 from reportagent.models.schemas import (
     ClassifiedReport,
-    ReportSummary,
     StorageResult,
     ReportListParams,
     SourceType,
@@ -32,22 +31,42 @@ class ReportRepository:
             filters.insert(0, Report.source_item_id == keys["source_id"])
         if keys["doi"]:
             # Prefix/case-normalization is checked exactly in Python below.
-            filters.append(func.lower(Report.doi).contains(keys["doi"], autoescape=True))
+            filters.append(
+                func.lower(Report.doi).contains(keys["doi"], autoescape=True)
+            )
         if keys["arxiv"]:
-            filters.append(or_(Report.arxiv_id == keys["arxiv"],
-                               Report.arxiv_id.like(keys["arxiv"] + "v%")))
+            filters.append(
+                or_(
+                    Report.arxiv_id == keys["arxiv"],
+                    Report.arxiv_id.like(keys["arxiv"] + "v%"),
+                )
+            )
         if keys["url"]:
-            filters.append(func.lower(Report.source_url).like(keys["url"].lower().split("#", 1)[0] + "%"))
+            filters.append(
+                func.lower(Report.source_url).like(
+                    keys["url"].lower().split("#", 1)[0] + "%"
+                )
+            )
         filters.append(Report.content_hash == content_hash(sr.title, sr.authors))
-        candidates = self.session.query(Report).filter(or_(*filters)).order_by(Report.id).all()
+        candidates = (
+            self.session.query(Report).filter(or_(*filters)).order_by(Report.id).all()
+        )
         # Strong identifiers outrank URL matches when legacy duplicates coexist.
-        candidates.sort(key=lambda row: (
-            not bool(keys["doi"] and identities(row)["doi"] == keys["doi"]),
-            not bool(keys["arxiv"] and identities(row)["arxiv"] == keys["arxiv"]),
-            not bool(keys["source_id"] and identities(row)["source_id"] == keys["source_id"])))
+        candidates.sort(
+            key=lambda row: (
+                not bool(keys["doi"] and identities(row)["doi"] == keys["doi"]),
+                not bool(keys["arxiv"] and identities(row)["arxiv"] == keys["arxiv"]),
+                not bool(
+                    keys["source_id"]
+                    and identities(row)["source_id"] == keys["source_id"]
+                ),
+            )
+        )
         return next((row for row in candidates if compatible_match(sr, row)), None)
 
-    def upsert_report(self, report: ClassifiedReport, *, commit: bool = True) -> tuple[str, int]:
+    def upsert_report(
+        self, report: ClassifiedReport, *, commit: bool = True
+    ) -> tuple[str, int]:
         sr = report.search_result
         cl = report.classification
 
@@ -62,34 +81,70 @@ class ReportRepository:
         if existing:
             old_version = re.search(r"v(\d+)$", existing.arxiv_id or "")
             new_version = re.search(r"v(\d+)$", sr.arxiv_id or "")
-            if old_version and (not new_version or int(new_version[1]) < int(old_version[1])):
+            if old_version and (
+                not new_version or int(new_version[1]) < int(old_version[1])
+            ):
                 # A delayed source response must not roll the library back.
                 return "updated", existing.id
             revision_changed = bool(sr.arxiv_id and sr.arxiv_id != existing.arxiv_id)
-            checked_local_pdf = sr.source == SourceType.LOCAL_PDF and existing.source == "local_pdf"
-            checked_abstract = checked_local_pdf and "abstract_source" in sr.raw_metadata
-            replace_material = revision_changed or bool(sr.full_text and not sr.abstract_only)
-            material_changed = (replace_material and (
-                any(getattr(existing, key) != getattr(sr, key)
-                    for key in ("full_text", "pdf_path", "tables_json", "equations_json"))
-                or existing.has_full_text != (bool(sr.full_text) and not sr.abstract_only)
-            )) or bool(sr.full_text and not existing.has_full_text and sr.full_text != existing.full_text)
-            screening_changed = (revision_changed or sr.title != existing.title
-                or bool((sr.abstract or checked_abstract) and sr.abstract != existing.abstract))
+            checked_local_pdf = (
+                sr.source == SourceType.LOCAL_PDF and existing.source == "local_pdf"
+            )
+            checked_abstract = (
+                checked_local_pdf and "abstract_source" in sr.raw_metadata
+            )
+            replace_material = revision_changed or bool(
+                sr.full_text and not sr.abstract_only
+            )
+            material_changed = (
+                replace_material
+                and (
+                    any(
+                        getattr(existing, key) != getattr(sr, key)
+                        for key in (
+                            "full_text",
+                            "pdf_path",
+                            "tables_json",
+                            "equations_json",
+                        )
+                    )
+                    or existing.has_full_text
+                    != (bool(sr.full_text) and not sr.abstract_only)
+                )
+            ) or bool(
+                sr.full_text
+                and not existing.has_full_text
+                and sr.full_text != existing.full_text
+            )
+            screening_changed = (
+                revision_changed
+                or sr.title != existing.title
+                or bool(
+                    (sr.abstract or checked_abstract)
+                    and sr.abstract != existing.abstract
+                )
+            )
             # Relevance is based on title/abstract evidence; obtaining or reparsing
             # the same revision's PDF only invalidates full-text-derived outputs.
             if screening_changed or material_changed:
-                existing.analysis_json = existing.evaluation_json = existing.knowledge_card_json = existing.summary = None
+                existing.analysis_json = existing.evaluation_json = (
+                    existing.knowledge_card_json
+                ) = existing.summary = None
             if screening_changed:
-                existing.selection_provenance_json = existing.selection_direction = existing.selection_relevance = None
+                existing.selection_provenance_json = existing.selection_direction = (
+                    existing.selection_relevance
+                ) = None
                 existing.selection_score = 0.0
                 existing.selection_reason = None
                 existing.is_selected = False
             existing.title = sr.title
             existing.authors = json.dumps(sr.authors, ensure_ascii=False)
             source_item_id = identities(sr)["source_id"]
-            if source_item_id and (not existing.source_item_id or
-                    source_item_id.split(":", 1)[0] == existing.source_item_id.split(":", 1)[0]):
+            if source_item_id and (
+                not existing.source_item_id
+                or source_item_id.split(":", 1)[0]
+                == existing.source_item_id.split(":", 1)[0]
+            ):
                 existing.source_item_id = source_item_id
             if sr.doi:
                 existing.doi = sr.doi
@@ -104,7 +159,9 @@ class ReportRepository:
                 # Legacy local imports incorrectly used file creation timestamps.
                 # A fresh explicit-date check can repair those values to unknown.
                 existing.published_date = sr.published_date
-                existing.publication_date_info_json = json.dumps(sr.raw_metadata.get("publication_date_info", {}), ensure_ascii=False)
+                existing.publication_date_info_json = json.dumps(
+                    sr.raw_metadata.get("publication_date_info", {}), ensure_ascii=False
+                )
             elif sr.published_date is not None and existing.published_date is None:
                 existing.published_date = sr.published_date
             if replace_material:
@@ -137,8 +194,11 @@ class ReportRepository:
             doi=sr.doi,
             arxiv_id=sr.arxiv_id,
             published_date=sr.published_date,
-            publication_date_info_json=json.dumps(sr.raw_metadata.get("publication_date_info"), ensure_ascii=False)
-                if sr.raw_metadata.get("publication_date_info") else None,
+            publication_date_info_json=json.dumps(
+                sr.raw_metadata.get("publication_date_info"), ensure_ascii=False
+            )
+            if sr.raw_metadata.get("publication_date_info")
+            else None,
             pdf_path=sr.pdf_path,
             content_hash=c_hash,
             tables_json=sr.tables_json,
@@ -159,18 +219,28 @@ class ReportRepository:
 
         return "added", db_report.id
 
-    def apply_classification(self, db_report: Report, cl, *, dry_run: bool = False) -> bool:
+    def apply_classification(
+        self, db_report: Report, cl, *, dry_run: bool = False
+    ) -> bool:
         """Replace classification columns, evidence and owned tag links atomically.
 
         Empty dimensions are meaningful: they remove previous guesses. Shared
         Tag rows and non-classification associations remain available to others.
         The caller owns the transaction.
         """
-        fields = {name: ",".join(value.value for value in getattr(cl, name))
-                  for name in ("markets", "asset_classes", "frequencies", "topics")}
-        fields.update(classification_confidence=cl.confidence, classification_method=cl.method,
-                      classification_provenance_json=json.dumps(cl.provenance, ensure_ascii=False, sort_keys=True)
-                      if cl.provenance else None)
+        fields = {
+            name: ",".join(value.value for value in getattr(cl, name))
+            for name in ("markets", "asset_classes", "frequencies", "topics")
+        }
+        fields.update(
+            classification_confidence=cl.confidence,
+            classification_method=cl.method,
+            classification_provenance_json=json.dumps(
+                cl.provenance, ensure_ascii=False, sort_keys=True
+            )
+            if cl.provenance
+            else None,
+        )
         tag_pairs = []
         for m in cl.markets:
             tag_pairs.append(("market", m.value))
@@ -183,17 +253,25 @@ class ReportRepository:
         for c in cl.custom_tags:
             tag_pairs.append(("custom", c))
         owned = {"market", "asset_class", "frequency", "topic", "custom"}
-        current = {(tag.dimension, tag.value) for tag in db_report.tags if tag.dimension in owned}
-        changed = current != set(tag_pairs) or any(getattr(db_report, key) != value for key, value in fields.items())
+        current = {
+            (tag.dimension, tag.value)
+            for tag in db_report.tags
+            if tag.dimension in owned
+        }
+        changed = current != set(tag_pairs) or any(
+            getattr(db_report, key) != value for key, value in fields.items()
+        )
         if dry_run or not changed:
             return changed
         for key, value in fields.items():
             setattr(db_report, key, value)
         replacement = [tag for tag in db_report.tags if tag.dimension not in owned]
         for dimension, value in dict.fromkeys(tag_pairs):
-            tag = self.session.query(Tag).filter(
-                Tag.dimension == dimension, Tag.value == value
-            ).first()
+            tag = (
+                self.session.query(Tag)
+                .filter(Tag.dimension == dimension, Tag.value == value)
+                .first()
+            )
             if not tag:
                 tag = Tag(dimension=dimension, value=value)
                 self.session.add(tag)
@@ -215,7 +293,12 @@ class ReportRepository:
             except Exception as e:
                 self.session.rollback()
                 result.errors.append(f"{r.search_result.title}: {e}")
-        result.duplicate_skipped = result.total_processed - result.newly_added - result.updated - len(result.errors)
+        result.duplicate_skipped = (
+            result.total_processed
+            - result.newly_added
+            - result.updated
+            - len(result.errors)
+        )
         return result
 
     def list_reports(self, params: ReportListParams) -> tuple[list[Report], int]:
@@ -287,8 +370,18 @@ class ReportRepository:
         self.session.commit()
         return True
 
-    def update_selection(self, report_id: int, score: float, reason: str, is_selected: bool,
-                         *, direction=None, relevance=None, provenance_json=None, commit: bool = True) -> bool:
+    def update_selection(
+        self,
+        report_id: int,
+        score: float,
+        reason: str,
+        is_selected: bool,
+        *,
+        direction=None,
+        relevance=None,
+        provenance_json=None,
+        commit: bool = True,
+    ) -> bool:
         """Update LLM selection score and status for a report."""
         report = self.get_report(report_id)
         if not report:
@@ -303,18 +396,28 @@ class ReportRepository:
             self.session.commit()
         return True
 
-    def get_unjudged_reports(self, since=None, limit: int = 200, published_since=None,
-                            scoring_fingerprint: str | None = None) -> list[Report]:
+    def get_unjudged_reports(
+        self,
+        since=None,
+        limit: int = 200,
+        published_since=None,
+        scoring_fingerprint: str | None = None,
+    ) -> list[Report]:
         """Get reports that haven't been LLM-scored yet (selection_score == 0 and no reason)."""
         from datetime import datetime, timezone
+
         q = self.session.query(Report)
         if scoring_fingerprint is None:
-            q = q.filter(Report.selection_score == 0.0, Report.selection_reason.is_(None))
+            q = q.filter(
+                Report.selection_score == 0.0, Report.selection_reason.is_(None)
+            )
         if since:
             q = q.filter(Report.created_at >= since)
         if published_since:
-            q = q.filter(Report.published_date >= published_since,
-                         Report.published_date <= datetime.now(timezone.utc))
+            q = q.filter(
+                Report.published_date >= published_since,
+                Report.published_date <= datetime.now(timezone.utc),
+            )
         q = q.order_by(desc(Report.created_at))
         if scoring_fingerprint is None:
             return q.limit(limit).all()
@@ -325,11 +428,18 @@ class ReportRepository:
             except (TypeError, ValueError):
                 provenance = {}
             from reportagent.services.paper_scoring import evidence_fingerprint
-            stale_material = (isinstance(provenance, dict)
-                              and provenance.get("status") in ("scored", "pending_needs_material")
-                              and provenance.get("evidence_fingerprint") != evidence_fingerprint(row))
-            if (not isinstance(provenance, dict) or provenance.get("fingerprint") != scoring_fingerprint
-                    or provenance.get("status") == "retryable_model_failure" or stale_material):
+
+            stale_material = (
+                isinstance(provenance, dict)
+                and provenance.get("status") in ("scored", "pending_needs_material")
+                and provenance.get("evidence_fingerprint") != evidence_fingerprint(row)
+            )
+            if (
+                not isinstance(provenance, dict)
+                or provenance.get("fingerprint") != scoring_fingerprint
+                or provenance.get("status") == "retryable_model_failure"
+                or stale_material
+            ):
                 results.append(row)
                 if len(results) >= limit:
                     break
@@ -337,15 +447,16 @@ class ReportRepository:
 
     def get_selected_reports(self, since=None, limit: int = 100) -> list[Report]:
         """Get LLM-selected reports for daily push."""
-        from datetime import datetime, timezone
-        q = self.session.query(Report).filter(Report.is_selected == True)
+        q = self.session.query(Report).filter(Report.is_selected.is_(True))
         if since:
             q = q.filter(Report.created_at >= since)
         return q.order_by(desc(Report.selection_score)).limit(limit).all()
 
     def get_stats(self) -> dict:
         total = self.session.query(Report).count()
-        with_text = self.session.query(Report).filter(Report.has_full_text == True).count()
+        with_text = (
+            self.session.query(Report).filter(Report.has_full_text.is_(True)).count()
+        )
         return {
             "total_reports": total,
             "with_full_text": with_text,
@@ -363,8 +474,19 @@ class SearchHistoryRepository:
         self.session.commit()
         return record
 
-    def update_status(self, task_id: str, status: str, results_count: int = 0, newly_added: int = 0, errors  : Optional[list[str]] = None):
-        record = self.session.query(SearchHistory).filter(SearchHistory.task_id == task_id).first()
+    def update_status(
+        self,
+        task_id: str,
+        status: str,
+        results_count: int = 0,
+        newly_added: int = 0,
+        errors: Optional[list[str]] = None,
+    ):
+        record = (
+            self.session.query(SearchHistory)
+            .filter(SearchHistory.task_id == task_id)
+            .first()
+        )
         if record:
             record.status = status
             record.results_count = results_count
@@ -376,7 +498,11 @@ class SearchHistoryRepository:
             self.session.commit()
 
     def get(self, task_id: str) -> Optional[SearchHistory]:
-        return self.session.query(SearchHistory).filter(SearchHistory.task_id == task_id).first()
+        return (
+            self.session.query(SearchHistory)
+            .filter(SearchHistory.task_id == task_id)
+            .first()
+        )
 
     def list_recent(self, limit: int = 20) -> list[SearchHistory]:
         return (

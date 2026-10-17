@@ -1,7 +1,8 @@
 # Minimal runtime for the bot and single-paper analysis.
 python-dotenv==1.2.4
 lark-oapi==1.7.5
-SQLAlchemy==2.1.4
+SQLAlchemy==2.0.55; python_version < "3.11"
+SQLAlchemy==2.1.4; python_version >= "3.11"
 PyYAML==6.0.3
 pydantic==2.14.1
 arxiv==4.0.1

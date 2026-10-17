@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import Optional
 
-import json
 import logging
 from functools import lru_cache
 from pathlib import Path
@@ -17,7 +16,9 @@ logger = logging.getLogger(__name__)
 COLLECTION_NAME = "report_chunks"
 
 
-def _chunk_report(title: str, text: str, chunk_size: int = 1000, overlap: int = 150) -> list[dict]:
+def _chunk_report(
+    title: str, text: str, chunk_size: int = 1000, overlap: int = 150
+) -> list[dict]:
     """Split report text into overlapping chunks, trying to break at section boundaries."""
     if not text or not text.strip():
         return []
@@ -54,10 +55,11 @@ def _chunk_report(title: str, text: str, chunk_size: int = 1000, overlap: int = 
 class VectorStore:
     """ChromaDB-backed semantic search for report library."""
 
-    def __init__(self, persist_dir  : Optional[str] = None):
+    def __init__(self, persist_dir: Optional[str] = None):
         if persist_dir is None:
             persist_dir = str(
-                PROJECT_ROOT / get_config("vector_store", "persist_dir", default="data/chroma_db")
+                PROJECT_ROOT
+                / get_config("vector_store", "persist_dir", default="data/chroma_db")
             )
 
         Path(persist_dir).mkdir(parents=True, exist_ok=True)
@@ -71,7 +73,9 @@ class VectorStore:
             name=COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"},
         )
-        logger.info("VectorStore ready: %d chunks in collection", self._collection.count())
+        logger.info(
+            "VectorStore ready: %d chunks in collection", self._collection.count()
+        )
 
     # -- index ----------------------------------------------------------
 
@@ -132,9 +136,9 @@ class VectorStore:
         self,
         query: str,
         limit: int = 10,
-        source  : Optional[str] = None,
-        topic  : Optional[str] = None,
-        market  : Optional[str] = None,
+        source: Optional[str] = None,
+        topic: Optional[str] = None,
+        market: Optional[str] = None,
         min_quant_score: float = 0.01,
     ) -> list[dict]:
         """Semantic search across report chunks. Returns deduped results grouped by report.
@@ -175,7 +179,9 @@ class VectorStore:
             if has_quant_filter and float(meta.get("quant_score", 0)) < min_quant_score:
                 continue
 
-            score = 1.0 - results["distances"][0][i] if results.get("distances") else 0.0
+            score = (
+                1.0 - results["distances"][0][i] if results.get("distances") else 0.0
+            )
 
             if rid not in seen or score > seen[rid].get("score", -1):
                 seen[rid] = {

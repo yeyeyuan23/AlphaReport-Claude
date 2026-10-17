@@ -55,12 +55,17 @@ class LLMClassifier:
             '例如 "topics.ai_ml_model" 或 "custom_tags.Transformer"。值为 '
             '{"source":"title"或"material", "quote":"该来源中连续的原文引文", '
             '"reason":"说明引文如何满足该标签定义；不能只重复标签名"}。'
-            '缺少直接证据的标签不要返回。引文不得改写、翻译或拼接。\n'
+            "缺少直接证据的标签不要返回。引文不得改写、翻译或拼接。\n"
         )
 
         try:
             messages = [
-                {"role": "system", "content": skill_resource("daily-quant-scan", "classification.md").read_text(encoding="utf-8")},
+                {
+                    "role": "system",
+                    "content": skill_resource(
+                        "daily-quant-scan", "classification.md"
+                    ).read_text(encoding="utf-8"),
+                },
                 {"role": "user", "content": prompt},
             ]
             result = await self.llm_client.chat_json(messages)
@@ -69,25 +74,47 @@ class LLMClassifier:
             if rejected:
                 # One bounded repair, with the original source still in context.
                 # Never loosen matching or accept a hallucinated quote on retry.
-                parsed.provenance.update(repair_attempted=True, initial_rejected_labels=rejected)
+                parsed.provenance.update(
+                    repair_attempted=True, initial_rejected_labels=rejected
+                )
                 try:
-                    repaired = await self.llm_client.chat_json(messages + [
-                        {"role": "assistant", "content": json.dumps(result, ensure_ascii=False)},
-                        {"role": "user", "content": "以下标签的引文无法在指定来源中准确定位，或不含实质内容："
-                         + json.dumps(rejected, ensure_ascii=False)
-                         + "。请返回完整分类 JSON。仅修正证据为真实的连续原文（保留断行、连字符和大小写），"
-                         "或删除确无支持的标签；不得新增标签。优先选择足够支持判断的简短引文。"},
-                    ])
+                    repaired = await self.llm_client.chat_json(
+                        messages
+                        + [
+                            {
+                                "role": "assistant",
+                                "content": json.dumps(result, ensure_ascii=False),
+                            },
+                            {
+                                "role": "user",
+                                "content": "以下标签的引文无法在指定来源中准确定位，或不含实质内容："
+                                + json.dumps(rejected, ensure_ascii=False)
+                                + "。请返回完整分类 JSON。仅修正证据为真实的连续原文（保留断行、连字符和大小写），"
+                                "或删除确无支持的标签；不得新增标签。优先选择足够支持判断的简短引文。",
+                            },
+                        ]
+                    )
                     corrected = self._parse_result(repaired, title, text)
                     # A quote repair cannot introduce unrelated new labels.
-                    original = {f"{field}.{value}" for field in (*_ENUM_MAP, "custom_tags") for value in result[field]}
+                    original = {
+                        f"{field}.{value}"
+                        for field in (*_ENUM_MAP, "custom_tags")
+                        for value in result[field]
+                    }
                     if not set(corrected.provenance["labels"]).issubset(original):
                         raise ValueError("Quote repair introduced new labels")
-                    corrected.provenance.update(repair_attempted=True, initial_rejected_labels=rejected,
-                        repair_status="partial" if corrected.provenance["rejected_labels"] else "completed")
+                    corrected.provenance.update(
+                        repair_attempted=True,
+                        initial_rejected_labels=rejected,
+                        repair_status="partial"
+                        if corrected.provenance["rejected_labels"]
+                        else "completed",
+                    )
                     parsed = corrected
                 except Exception as error:
-                    logger.warning("Classification quote repair failed: %s", type(error).__name__)
+                    logger.warning(
+                        "Classification quote repair failed: %s", type(error).__name__
+                    )
                     parsed.provenance["repair_status"] = "failed"
             return parsed
         except Exception as e:
@@ -112,23 +139,35 @@ class LLMClassifier:
         for field, enum_cls in _ENUM_MAP.items():
             values = data.get(field)
             valid = {entry.value for entry in enum_cls}
-            if not isinstance(values, list) or any(not isinstance(v, str) or v not in valid for v in values):
+            if not isinstance(values, list) or any(
+                not isinstance(v, str) or v not in valid for v in values
+            ):
                 raise ValueError(f"{field} must contain only valid taxonomy values")
         custom_tags = data.get("custom_tags")
-        if not isinstance(custom_tags, list) or any(not isinstance(v, str) or not v.strip() for v in custom_tags):
+        if not isinstance(custom_tags, list) or any(
+            not isinstance(v, str) or not v.strip() for v in custom_tags
+        ):
             raise ValueError("custom_tags must be a list of nonempty strings")
         if not custom_tags and not any(data[field] for field in _ENUM_MAP):
-            raise ClassificationEvidenceError("Model returned no usable classification evidence; existing tags must be retained")
+            raise ClassificationEvidenceError(
+                "Model returned no usable classification evidence; existing tags must be retained"
+            )
         confidence = data.get("confidence")
-        if (isinstance(confidence, bool) or not isinstance(confidence, (int, float))
-                or not math.isfinite(confidence) or not 0 <= confidence <= 1):
+        if (
+            isinstance(confidence, bool)
+            or not isinstance(confidence, (int, float))
+            or not math.isfinite(confidence)
+            or not 0 <= confidence <= 1
+        ):
             raise ValueError("confidence must be a finite number between 0 and 1")
         # Verify that every label has an actual quote in the material supplied to
         # this call. This checks attribution, not semantic entailment: category
         # boundaries and the reason are still assessed by the model and review.
         evidence = data.get("evidence")
         if not isinstance(evidence, dict):
-            raise ClassificationEvidenceError("Classification evidence must be an object")
+            raise ClassificationEvidenceError(
+                "Classification evidence must be an object"
+            )
         supported, rejected = {}, []
         selected = {}
         for field in (*_ENUM_MAP, "custom_tags"):
@@ -139,19 +178,37 @@ class LLMClassifier:
                 source = item.get("source") if isinstance(item, dict) else None
                 quote = item.get("quote") if isinstance(item, dict) else None
                 reason = item.get("reason") if isinstance(item, dict) else None
-                material = {"title": title, "material": text}.get(source) if isinstance(source, str) else None
-                match = locate_quote(material, quote) if (material and isinstance(quote, str)
-                    and sum(char.isalnum() for char in quote) >= 2
-                    and isinstance(reason, str) and reason.strip()) else None
+                material = (
+                    {"title": title, "material": text}.get(source)
+                    if isinstance(source, str)
+                    else None
+                )
+                match = (
+                    locate_quote(material, quote)
+                    if (
+                        material
+                        and isinstance(quote, str)
+                        and sum(char.isalnum() for char in quote) >= 2
+                        and isinstance(reason, str)
+                        and reason.strip()
+                    )
+                    else None
+                )
                 if match is None:
                     rejected.append(key)
                     continue
                 selected[field].append(value)
-                supported[key] = {"source": source, "quote": match["raw_quote"],
-                                  "reason": reason.strip(), "raw_start": match["raw_start"],
-                                  "raw_end": match["raw_end"]}
+                supported[key] = {
+                    "source": source,
+                    "quote": match["raw_quote"],
+                    "reason": reason.strip(),
+                    "raw_start": match["raw_start"],
+                    "raw_end": match["raw_end"],
+                }
         if not supported:
-            raise ClassificationEvidenceError("No labels supported by verifiable classification evidence")
+            raise ClassificationEvidenceError(
+                "No labels supported by verifiable classification evidence"
+            )
         data = {**data, **selected}
         custom_tags = data["custom_tags"]
         markets = self._safe_enum_list(data["markets"], Market)
@@ -167,9 +224,14 @@ class LLMClassifier:
             custom_tags=custom_tags if isinstance(custom_tags, list) else [],
             confidence=min(max(confidence, 0.0), 1.0),
             method="llm",
-            provenance={"schema_version": 1,
-                        "input_sha256": hashlib.sha256((title + "\n" + text).encode()).hexdigest(),
-                        "labels": supported, "rejected_labels": rejected},
+            provenance={
+                "schema_version": 1,
+                "input_sha256": hashlib.sha256(
+                    (title + "\n" + text).encode()
+                ).hexdigest(),
+                "labels": supported,
+                "rejected_labels": rejected,
+            },
         )
 
     def _safe_enum_list(self, values: list, enum_cls) -> list:

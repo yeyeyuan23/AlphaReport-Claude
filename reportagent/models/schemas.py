@@ -55,7 +55,12 @@ class SourceType(str, Enum):
 class UserCriteria(BaseModel):
     topics: list[str] = Field(..., description="Search topics")
     sources: list[SourceType] = Field(
-        default_factory=lambda: [SourceType.LOCAL_PDF, SourceType.ARXIV, SourceType.EASTMONEY, SourceType.BIGQUANT],
+        default_factory=lambda: [
+            SourceType.LOCAL_PDF,
+            SourceType.ARXIV,
+            SourceType.EASTMONEY,
+            SourceType.BIGQUANT,
+        ],
     )
     keywords: list[str] = Field(default_factory=list)
     date_from: Optional[datetime] = None

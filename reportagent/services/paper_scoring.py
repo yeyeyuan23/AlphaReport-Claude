@@ -13,13 +13,14 @@ import re
 import yaml
 from dotenv import load_dotenv
 
-load_dotenv()
 
 from reportagent.db.engine import init_db, get_session_factory
 from reportagent.db.repository import ReportRepository
 from reportagent.llm.client import LLMClient
 from reportagent.skills.registry import skill_resource
 from reportagent.utils.config import PROJECT_ROOT
+
+load_dotenv()
 
 logger = logging.getLogger("llm_filter")
 
@@ -28,7 +29,8 @@ def relevance_reason_text(reason: str | None) -> str:
     """Read old decorated reasons without treating screening metadata as live status."""
     return re.sub(
         r"^(?:\[[^\]\n]+\]\s*)?\[(?:仅摘要相关性；全文质量待评审|材料不足待补全)\]\s*",
-        "", (reason or "").strip(),
+        "",
+        (reason or "").strip(),
     ).strip()
 
 
@@ -81,19 +83,33 @@ def _valid_score(value, name: str) -> float:
 
 
 def _configured_threshold(config: dict) -> float:
-    return _valid_score(config.get("push_settings", {}).get("llm_filter_threshold", 6.0),
-                        "llm_filter_threshold")
+    return _valid_score(
+        config.get("push_settings", {}).get("llm_filter_threshold", 6.0),
+        "llm_filter_threshold",
+    )
 
 
 def _scoring_context() -> tuple[dict[str, dict], str, str, str]:
     config = _load_scoring_config()
     directions = _enabled_directions(config)
-    system = skill_resource("paper-selection", "scoring-system.md").read_text(encoding="utf-8")
-    user = skill_resource("paper-selection", "scoring-user.md").read_text(encoding="utf-8")
-    payload = {"schema_version": 2, "directions": directions, "system_prompt": system,
-               "user_prompt": user, "threshold": _configured_threshold(config)}
-    fingerprint = hashlib.sha256(json.dumps(payload, ensure_ascii=False, sort_keys=True,
-                                            separators=(",", ":")).encode()).hexdigest()
+    system = skill_resource("paper-selection", "scoring-system.md").read_text(
+        encoding="utf-8"
+    )
+    user = skill_resource("paper-selection", "scoring-user.md").read_text(
+        encoding="utf-8"
+    )
+    payload = {
+        "schema_version": 2,
+        "directions": directions,
+        "system_prompt": system,
+        "user_prompt": user,
+        "threshold": _configured_threshold(config),
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+    ).hexdigest()
     return directions, system, user, fingerprint
 
 
@@ -108,15 +124,21 @@ def _build_directions_desc(directions: dict[str, dict] | None = None) -> str:
     lines = []
     for direction_id, info in directions.items():
         keywords = ", ".join(info.get("keywords") or [])
-        lines.append(f"**{info.get('name', direction_id)}** ({direction_id})\n"
-                     f"  关注：{info.get('description', '')}\n  关键词：{keywords}\n"
-                     f"  市场：{info.get('market', '')}；资产：{info.get('assets', [])}；"
-                     f"主题：{info.get('topics', [])}")
+        lines.append(
+            f"**{info.get('name', direction_id)}** ({direction_id})\n"
+            f"  关注：{info.get('description', '')}\n  关键词：{keywords}\n"
+            f"  市场：{info.get('market', '')}；资产：{info.get('assets', [])}；"
+            f"主题：{info.get('topics', [])}"
+        )
     return "\n".join(lines)
 
 
 def _paper_value(paper, field: str, default=""):
-    return paper.get(field, default) if isinstance(paper, dict) else getattr(paper, field, default)
+    return (
+        paper.get(field, default)
+        if isinstance(paper, dict)
+        else getattr(paper, field, default)
+    )
 
 
 def evidence_fingerprint(paper) -> str:
@@ -132,13 +154,17 @@ def evidence_fingerprint(paper) -> str:
 def screening_is_current(paper) -> bool:
     """Only reuse an assessment produced from the current rubric and material."""
     try:
-        provenance = json.loads(_paper_value(paper, "selection_provenance_json") or "{}")
+        provenance = json.loads(
+            _paper_value(paper, "selection_provenance_json") or "{}"
+        )
     except (TypeError, ValueError):
         return False
-    return (isinstance(provenance, dict)
-            and provenance.get("fingerprint") == scoring_fingerprint()
-            and provenance.get("status") in ("scored", "pending_needs_material")
-            and provenance.get("evidence_fingerprint") == evidence_fingerprint(paper))
+    return (
+        isinstance(provenance, dict)
+        and provenance.get("fingerprint") == scoring_fingerprint()
+        and provenance.get("status") in ("scored", "pending_needs_material")
+        and provenance.get("evidence_fingerprint") == evidence_fingerprint(paper)
+    )
 
 
 def has_screening_material(paper) -> bool:
@@ -151,7 +177,12 @@ def has_screening_material(paper) -> bool:
     if abstract == str(_paper_value(paper, "title") or "").strip():
         return False
     abstract = re.sub(r"https?://\S+", "", abstract)
-    abstract = re.sub(r"(?:机构|类型|页数|报告类型|研报类型|研究机构|来源|作者|发布时间|发布日期|institution|type|pages?)\s*[:：]\s*[^;；\n|]+", "", abstract, flags=re.I)
+    abstract = re.sub(
+        r"(?:机构|类型|页数|报告类型|研报类型|研究机构|来源|作者|发布时间|发布日期|institution|type|pages?)\s*[:：]\s*[^;；\n|]+",
+        "",
+        abstract,
+        flags=re.I,
+    )
     meaningful = re.sub(r"[\W_\d]+", "", abstract)
     return len(meaningful) >= 20
 
@@ -181,8 +212,14 @@ def _normalize_assessment(item: dict, directions: dict[str, dict]) -> dict:
     if status == "pending_needs_material":
         if item.get("score") is not None or item.get("relevance") is not None:
             raise ValueError("Insufficient material requires null score and relevance")
-        return {**item, "status": status, "score": None, "relevance": None,
-                "best_direction": None, "reason": reason.strip()}
+        return {
+            **item,
+            "status": status,
+            "score": None,
+            "relevance": None,
+            "best_direction": None,
+            "reason": reason.strip(),
+        }
     # Legacy callers supply only score. A present but invalid relevance never falls back.
     relevance = _valid_score(item.get("relevance", item.get("score")), "relevance")
     if "score" in item:
@@ -190,10 +227,18 @@ def _normalize_assessment(item: dict, directions: dict[str, dict]) -> dict:
     direction = item.get("best_direction")
     if direction == "":
         direction = None
-    if direction is not None and (not isinstance(direction, str) or direction not in directions):
+    if direction is not None and (
+        not isinstance(direction, str) or direction not in directions
+    ):
         raise ValueError("best_direction must be an enabled direction ID or null")
-    return {**item, "status": "scored", "score": relevance, "relevance": relevance,
-            "best_direction": direction, "reason": reason.strip()}
+    return {
+        **item,
+        "status": "scored",
+        "score": relevance,
+        "relevance": relevance,
+        "best_direction": direction,
+        "reason": reason.strip(),
+    }
 
 
 async def score_papers_batch(
@@ -206,41 +251,70 @@ async def score_papers_batch(
     A duplicate index invalidates all its assessments. Missing or invalid papers are
     never returned as scored; valid siblings remain usable. No database writes occur.
     """
-    if isinstance(batch_size, bool) or not isinstance(batch_size, int) or batch_size <= 0:
+    if (
+        isinstance(batch_size, bool)
+        or not isinstance(batch_size, int)
+        or batch_size <= 0
+    ):
         raise ValueError("batch_size must be a positive integer")
     if not papers:
         return [], []
     directions, system_template, user_template, fingerprint = _scoring_context()
     if not directions:
         raise ValueError("No enabled research directions; nothing can be screened")
-    system_prompt = system_template.format(directions_desc=_build_directions_desc(directions))
-    provenance = {"schema_version": 2, "fingerprint": fingerprint, "evidence_scope": "title_abstract"}
+    system_prompt = system_template.format(
+        directions_desc=_build_directions_desc(directions)
+    )
+    provenance = {
+        "schema_version": 2,
+        "fingerprint": fingerprint,
+        "evidence_scope": "title_abstract",
+    }
     all_results = []
     failed_batches = []
 
     for batch_start in range(0, len(papers), batch_size):
-        batch = papers[batch_start:batch_start + batch_size]
-        eligible = {index: paper for index, paper in enumerate(batch) if has_screening_material(paper)}
+        batch = papers[batch_start : batch_start + batch_size]
+        eligible = {
+            index: paper
+            for index, paper in enumerate(batch)
+            if has_screening_material(paper)
+        }
         valid = []
         for index, paper in enumerate(batch):
             if index not in eligible:
-                valid.append({"index": index, "status": "pending_needs_material",
-                              "score": None, "relevance": None, "best_direction": None,
-                              "reason": "材料不足：缺少可用研究摘要，需补全正文或摘要后再评估", "_paper": paper,
-                              "_batch_offset": batch_start,
-                              "_provenance": {**provenance, "status": "pending_needs_material",
-                                              "evidence_fingerprint": evidence_fingerprint(paper)}})
+                valid.append(
+                    {
+                        "index": index,
+                        "status": "pending_needs_material",
+                        "score": None,
+                        "relevance": None,
+                        "best_direction": None,
+                        "reason": "材料不足：缺少可用研究摘要，需补全正文或摘要后再评估",
+                        "_paper": paper,
+                        "_batch_offset": batch_start,
+                        "_provenance": {
+                            **provenance,
+                            "status": "pending_needs_material",
+                            "evidence_fingerprint": evidence_fingerprint(paper),
+                        },
+                    }
+                )
         if not eligible:
             all_results.extend(valid)
             continue
         user_prompt = user_template.format(
             papers_text=_format_papers_for_llm(list(eligible.values()), eligible),
-            direction_ids=", ".join(directions))
+            direction_ids=", ".join(directions),
+        )
         try:
             response = await llm_client.chat_json(
-                [{"role": "system", "content": system_prompt},
-                 {"role": "user", "content": user_prompt}],
-                temperature=0.2, max_tokens=4000,
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.2,
+                max_tokens=4000,
             )
             if isinstance(response, dict):
                 response = response.get("papers", response.get("results"))
@@ -259,24 +333,39 @@ async def score_papers_batch(
             for index in eligible:
                 items = indexed.get(index, [])
                 if len(items) != 1:
-                    errors.append(f"Paper {index}: {'duplicate' if items else 'missing'} index")
+                    errors.append(
+                        f"Paper {index}: {'duplicate' if items else 'missing'} index"
+                    )
                     continue
                 try:
                     item = _normalize_assessment(items[0], directions)
                 except ValueError as error:
                     errors.append(f"Paper {index}: {error}")
                     continue
-                item.update(_paper=batch[index], _batch_offset=batch_start,
-                            _provenance={**provenance, "status": item["status"],
-                                         "evidence_fingerprint": evidence_fingerprint(batch[index])})
+                item.update(
+                    _paper=batch[index],
+                    _batch_offset=batch_start,
+                    _provenance={
+                        **provenance,
+                        "status": item["status"],
+                        "evidence_fingerprint": evidence_fingerprint(batch[index]),
+                    },
+                )
                 valid.append(item)
             all_results.extend(sorted(valid, key=lambda item: item["index"]))
             pending = len(batch) - len(valid)
             if pending:
                 failed_batches.append((batch_start, pending, "; ".join(errors)[:200]))
             elif errors:
-                logger.warning("Ignored invalid extra assessments: %s", "; ".join(errors))
-            logger.info("Scored %s/%s papers in batch at %s", len(valid), len(batch), batch_start)
+                logger.warning(
+                    "Ignored invalid extra assessments: %s", "; ".join(errors)
+                )
+            logger.info(
+                "Scored %s/%s papers in batch at %s",
+                len(valid),
+                len(batch),
+                batch_start,
+            )
         except Exception as error:
             logger.error("Batch scoring failed; papers remain retryable: %s", error)
             all_results.extend(valid)
@@ -292,9 +381,20 @@ def apply_scores(
     """Persist relevance, using only the configured/explicit threshold for eligibility."""
     config = _load_scoring_config()
     directions = _enabled_directions(config)
-    threshold = _configured_threshold(config) if threshold is None else _valid_score(threshold, "threshold")
-    stats = {"total_processed": len(results), "total_scored": 0, "selected": 0, "rejected": 0,
-             "pending_needs_material": 0, "by_direction": {}, "errors": 0}
+    threshold = (
+        _configured_threshold(config)
+        if threshold is None
+        else _valid_score(threshold, "threshold")
+    )
+    stats = {
+        "total_processed": len(results),
+        "total_scored": 0,
+        "selected": 0,
+        "rejected": 0,
+        "pending_needs_material": 0,
+        "by_direction": {},
+        "errors": 0,
+    }
     session = None
     try:
         if not dry_run:
@@ -309,8 +409,13 @@ def apply_scores(
                     raise ValueError("Assessment has no persisted paper ID")
                 paper_id = _paper_value(paper, "id")
                 if not has_screening_material(paper):
-                    item.update(status="pending_needs_material", score=None, relevance=None,
-                                best_direction=None, reason="材料不足：缺少可用研究摘要，需补全正文或摘要后再评估")
+                    item.update(
+                        status="pending_needs_material",
+                        score=None,
+                        relevance=None,
+                        best_direction=None,
+                        reason="材料不足：缺少可用研究摘要，需补全正文或摘要后再评估",
+                    )
                 relevance = item["relevance"]
                 pending = item["status"] == "pending_needs_material"
                 is_selected = not pending and relevance >= threshold
@@ -318,15 +423,33 @@ def apply_scores(
                 # Direction and screening scope/status already have structured fields.
                 reason = relevance_reason_text(item["reason"])
                 if dry_run:
-                    logger.info("[%s] %s | %s", relevance, item["status"], _paper_value(paper, "title"))
+                    logger.info(
+                        "[%s] %s | %s",
+                        relevance,
+                        item["status"],
+                        _paper_value(paper, "title"),
+                    )
                 else:
-                    provenance = {**(item.get("_provenance") or {
-                        "schema_version": 2, "fingerprint": scoring_fingerprint(),
-                        "evidence_scope": "title_abstract",
-                    }), "status": item["status"], "evidence_fingerprint": evidence_fingerprint(paper)}
+                    provenance = {
+                        **(
+                            item.get("_provenance")
+                            or {
+                                "schema_version": 2,
+                                "fingerprint": scoring_fingerprint(),
+                                "evidence_scope": "title_abstract",
+                            }
+                        ),
+                        "status": item["status"],
+                        "evidence_fingerprint": evidence_fingerprint(paper),
+                    }
                     if not repo.update_selection(
-                        paper_id, 0 if pending else relevance, reason, is_selected, direction=direction,
-                        relevance=relevance, provenance_json=json.dumps(provenance, ensure_ascii=False),
+                        paper_id,
+                        0 if pending else relevance,
+                        reason,
+                        is_selected,
+                        direction=direction,
+                        relevance=relevance,
+                        provenance_json=json.dumps(provenance, ensure_ascii=False),
                     ):
                         raise ValueError(f"Paper {paper_id} no longer exists")
                 if pending:
@@ -336,7 +459,9 @@ def apply_scores(
                 if is_selected:
                     stats["selected"] += 1
                     if direction is not None:
-                        stats["by_direction"][direction] = stats["by_direction"].get(direction, 0) + 1
+                        stats["by_direction"][direction] = (
+                            stats["by_direction"].get(direction, 0) + 1
+                        )
                 else:
                     stats["rejected"] += 1
             except (ValueError, TypeError, KeyError) as error:
@@ -359,7 +484,9 @@ async def score_reports(options: ScoringOptions) -> None:
     session = factory()
 
     # ── Load papers ──
-    since = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    since = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
     if options.days > 1:
         since = since - timedelta(days=options.days - 1)
 
@@ -367,19 +494,34 @@ async def score_reports(options: ScoringOptions) -> None:
         repo = ReportRepository(session)
         fingerprint = scoring_fingerprint()
         directions = load_enabled_directions()
-        threshold = (_configured_threshold(_load_scoring_config()) if options.threshold is None
-                     else _valid_score(options.threshold, "threshold"))
+        threshold = (
+            _configured_threshold(_load_scoring_config())
+            if options.threshold is None
+            else _valid_score(options.threshold, "threshold")
+        )
 
         if getattr(options, "published_days", None):
-            published_since = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=options.published_days - 1)
-            papers = repo.get_unjudged_reports(published_since=published_since, limit=options.max_papers, scoring_fingerprint=fingerprint)
+            published_since = datetime.now(timezone.utc).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            ) - timedelta(days=options.published_days - 1)
+            papers = repo.get_unjudged_reports(
+                published_since=published_since,
+                limit=options.max_papers,
+                scoring_fingerprint=fingerprint,
+            )
         elif options.all_unjudged:
-            papers = repo.get_unjudged_reports(limit=options.max_papers, scoring_fingerprint=fingerprint)
+            papers = repo.get_unjudged_reports(
+                limit=options.max_papers, scoring_fingerprint=fingerprint
+            )
         else:
-            papers = repo.get_unjudged_reports(since=since, limit=options.max_papers, scoring_fingerprint=fingerprint)
+            papers = repo.get_unjudged_reports(
+                since=since, limit=options.max_papers, scoring_fingerprint=fingerprint
+            )
 
-        logger.info(f"Found {len(papers)} unjudged or stale papers"
-                    f"{' since ' + since.strftime('%Y-%m-%d') if not options.all_unjudged else ' (all)'}")
+        logger.info(
+            f"Found {len(papers)} unjudged or stale papers"
+            f"{' since ' + since.strftime('%Y-%m-%d') if not options.all_unjudged else ' (all)'}"
+        )
 
         if not papers:
             logger.info("No papers to score. Done.")
@@ -387,42 +529,52 @@ async def score_reports(options: ScoringOptions) -> None:
 
         # ── Init LLM ──
         try:
-            llm_client = LLMClient() if any(has_screening_material(paper) for paper in papers) else None
+            llm_client = (
+                LLMClient()
+                if any(has_screening_material(paper) for paper in papers)
+                else None
+            )
             if llm_client is not None:
-                logger.info(f"LLM client ready: provider={llm_client.provider}, model={llm_client.model}")
+                logger.info(
+                    f"LLM client ready: provider={llm_client.provider}, model={llm_client.model}"
+                )
         except Exception as e:
             logger.error(f"LLM client init failed: {e}")
             raise
 
         # ── Score ──
-        logger.info(f"Scoring {len(papers)} papers in batches of {options.batch_size}...")
+        logger.info(
+            f"Scoring {len(papers)} papers in batches of {options.batch_size}..."
+        )
         results, failed_batches = await score_papers_batch(
             llm_client, papers, batch_size=options.batch_size
         )
 
         # ── Apply ──
         if options.dry_run:
-            logger.info(f"\n{'='*50}")
-            logger.info(f"DRY RUN — Preview of LLM scoring results:")
-            logger.info(f"{'='*50}")
+            logger.info(f"\n{'=' * 50}")
+            logger.info("DRY RUN — Preview of LLM scoring results:")
+            logger.info(f"{'=' * 50}")
 
         stats = apply_scores(results, threshold=threshold, dry_run=options.dry_run)
 
         # ── Summary ──
-        logger.info(f"\n{'='*50}")
-        logger.info(f"LLM Filter Summary:")
+        logger.info(f"\n{'=' * 50}")
+        logger.info("LLM Filter Summary:")
         logger.info(f"  Total scored : {stats['total_scored']}")
         logger.info(f"  ⭐ Selected  : {stats['selected']} (score >= {threshold})")
         logger.info(f"  ✗ Rejected   : {stats['rejected']}")
         logger.info(f"  Pending material: {stats['pending_needs_material']}")
-        if stats['errors']:
+        if stats["errors"]:
             logger.info(f"  ⚠ Errors    : {stats['errors']}")
-        if stats['by_direction']:
-            logger.info(f"  By direction:")
-            for d_id, count in sorted(stats['by_direction'].items(), key=lambda x: -x[1]):
+        if stats["by_direction"]:
+            logger.info("  By direction:")
+            for d_id, count in sorted(
+                stats["by_direction"].items(), key=lambda x: -x[1]
+            ):
                 d_name = directions.get(d_id, {}).get("name", d_id)
                 logger.info(f"    {d_name}: {count} 篇")
-        logger.info(f"{'='*50}")
+        logger.info(f"{'=' * 50}")
 
         if options.dry_run:
             logger.info("[DRY RUN] No changes written to database.")

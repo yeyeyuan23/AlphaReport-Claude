@@ -25,7 +25,9 @@ def get_engine():
 def get_session_factory() -> sessionmaker:
     global _SessionLocal
     if _SessionLocal is None:
-        _SessionLocal = sessionmaker(bind=get_engine(), autoflush=False, expire_on_commit=False)
+        _SessionLocal = sessionmaker(
+            bind=get_engine(), autoflush=False, expire_on_commit=False
+        )
     return _SessionLocal
 
 
@@ -40,6 +42,7 @@ def get_db() -> Session:
 
 def init_db():
     from reportagent.models.database import Base
+
     engine = get_engine()
 
     # Add columns if missing (SQLite doesn't support ADD COLUMN IF NOT EXISTS).
@@ -66,9 +69,15 @@ def init_db():
             ("reports", _new_columns),
             ("local_pdf_imports", [("report_content_hash", "VARCHAR(64)")]),
         ):
-            existing = {row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")}
+            existing = {
+                row[1] for row in conn.exec_driver_sql(f"PRAGMA table_info({table})")
+            }
             for col_name, col_type in columns:
                 if col_name not in existing:
-                    conn.exec_driver_sql(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
+                    conn.exec_driver_sql(
+                        f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}"
+                    )
 
-        conn.exec_driver_sql("CREATE INDEX IF NOT EXISTS ix_reports_source_item_id ON reports (source_item_id)")
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_reports_source_item_id ON reports (source_item_id)"
+        )

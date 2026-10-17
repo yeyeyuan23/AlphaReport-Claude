@@ -15,7 +15,6 @@ from reportagent.models.schemas import (
     SourceType,
     ReportListParams,
 )
-from reportagent.utils.config import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +26,7 @@ def _get_repo() -> tuple:
 
 
 # ── 1. collect_reports ──────────────────────────────────────────
+
 
 @tool
 async def collect_reports(
@@ -99,6 +99,7 @@ async def collect_reports(
 
 # ── 2. search_reports ───────────────────────────────────────────
 
+
 @tool
 def search_reports(
     query: Optional[str] = None,
@@ -146,6 +147,7 @@ def search_reports(
 
 # ── 3. get_report ───────────────────────────────────────────────
 
+
 @tool
 def get_report(report_id: int) -> str:
     """获取单篇研报的完整详情，包括摘要和全文。
@@ -185,6 +187,7 @@ def get_report(report_id: int) -> str:
 
 
 # ── 4. analyze_report ───────────────────────────────────────────
+
 
 @tool
 async def analyze_report(
@@ -242,6 +245,7 @@ async def analyze_report(
 
 # ── 5. delete_reports ───────────────────────────────────────────
 
+
 @tool
 def delete_reports(report_ids: list[int]) -> str:
     """从研报库中删除指定的研报。
@@ -270,6 +274,7 @@ def delete_reports(report_ids: list[int]) -> str:
 
 
 # ── 6. semantic_search_reports ───────────────────────────────────
+
 
 @tool
 def semantic_search_reports(
@@ -321,6 +326,7 @@ def semantic_search_reports(
 
 # ── 7. web_search ───────────────────────────────────────────────
 
+
 @tool
 def web_search(query: str, max_results: int = 5) -> str:
     """使用 Tavily 搜索引擎搜索网页，获取量化金融相关的最新资讯、论文或新闻。
@@ -335,6 +341,7 @@ def web_search(query: str, max_results: int = 5) -> str:
 
     try:
         from tavily import TavilyClient
+
         client = TavilyClient(api_key=api_key)
         results = client.search(query, max_results=min(max_results, 10))
 
@@ -357,6 +364,7 @@ def web_search(query: str, max_results: int = 5) -> str:
 
 # ── 7. manage_skill ─────────────────────────────────────────────
 
+
 @tool
 def manage_skill(
     action: str,
@@ -372,7 +380,11 @@ def manage_skill(
         description: skill 描述（create/update 时需要）
         prompt_template: skill 的 prompt 模板（create/update 时需要）
     """
-    from reportagent.skills.registry import save_user_skill, delete_user_skill, get_skill
+    from reportagent.skills.registry import (
+        save_user_skill,
+        delete_user_skill,
+        get_skill,
+    )
 
     if action in ("create", "update"):
         if not description or not prompt_template:
@@ -392,6 +404,7 @@ def manage_skill(
 
 # ── 8. list_skills ──────────────────────────────────────────────
 
+
 @tool
 def list_skills() -> str:
     """列出所有可用的 skills（内置 + 用户自定义）。"""
@@ -410,6 +423,7 @@ def list_skills() -> str:
 
 # ── 9. parse_document ──────────────────────────────────────────
 
+
 @tool
 def parse_document(pdf_path: str) -> str:
     """使用 MinerU 深度解析 PDF 文档，提取结构化内容（文本、表格、公式、图片）。
@@ -427,6 +441,7 @@ def parse_document(pdf_path: str) -> str:
 
     try:
         from reportagent.processors.mineru_parser import MinerUParser
+
         parser = MinerUParser()
         result = parser.parse(path)
     except Exception as e:
@@ -447,31 +462,38 @@ def parse_document(pdf_path: str) -> str:
     for i, table in enumerate(result.tables[:5]):
         caption = ", ".join(table.get("table_caption", []))
         body = table.get("table_body", "")
-        label = f"表 {i+1}" + (f": {caption}" if caption else "")
-        parts.append(f"\n## {label} (第{table.get('page_idx', 0)+1}页)\n{body[:1000]}")
+        label = f"表 {i + 1}" + (f": {caption}" if caption else "")
+        parts.append(
+            f"\n## {label} (第{table.get('page_idx', 0) + 1}页)\n{body[:1000]}"
+        )
 
     for i, eq in enumerate(result.equations[:10]):
         latex = eq.get("latex", "")
         if latex:
-            parts.append(f"\n公式 {i+1} (第{eq.get('page_idx', 0)+1}页): ${latex}$")
+            parts.append(f"\n公式 {i + 1} (第{eq.get('page_idx', 0) + 1}页): ${latex}$")
 
     return "\n".join(parts)
 
 
 # ── 10. brainstorm_research ───────────────────────────────────────
 
+
 @tool
-async def brainstorm_research(topic: str, angle: str = "general", verify_external: bool = False) -> str:
+async def brainstorm_research(
+    topic: str, angle: str = "general", verify_external: bool = False
+) -> str:
     """从有限文献提出候选研究假设与最小验证，不确认新颖性。
 
     angle: general, methodology, factor, cross_pollination, critique, data。
     verify_external: 显式请求查新时搜索外部线索；网页结果不等于核对全文。
     """
     from reportagent.services.research_ideation import generate_ideas
+
     return await generate_ideas(topic, angle, verify_external=verify_external)
 
 
 # ── 11. recall_discussed_reports ───────────────────────────────────
+
 
 @tool
 def recall_discussed_reports(

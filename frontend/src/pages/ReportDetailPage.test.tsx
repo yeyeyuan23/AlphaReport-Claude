@@ -7,9 +7,13 @@ import { deferred, json, report } from '@/test/fixtures';
 describe('ReportDetailPage', () => {
   it('exits loading and reports a failed detail request', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
-    render(<MemoryRouter initialEntries={['/library/1']}><Routes>
-      <Route path="/library/:id" element={<ReportDetailPage />} />
-    </Routes></MemoryRouter>);
+    render(
+      <MemoryRouter initialEntries={['/library/1']}>
+        <Routes>
+          <Route path="/library/:id" element={<ReportDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
     expect(await screen.findByRole('alert')).toHaveTextContent('研报加载失败');
     expect(screen.queryByText('加载中...')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: '返回研报库' })).toBeVisible();
@@ -17,12 +21,20 @@ describe('ReportDetailPage', () => {
 
   it('ignores a previous report response after navigating to a missing report', async () => {
     const old = deferred<Response>();
-    vi.stubGlobal('fetch', vi.fn((url: string) => url.endsWith('/1')
-      ? old.promise : Promise.resolve(json({ detail: 'Not found' }, 404))));
-    render(<MemoryRouter initialEntries={['/library/1']}>
-      <Link to="/library/2">下一篇</Link>
-      <Routes><Route path="/library/:id" element={<ReportDetailPage />} /></Routes>
-    </MemoryRouter>);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        url.endsWith('/1') ? old.promise : Promise.resolve(json({ detail: 'Not found' }, 404)),
+      ),
+    );
+    render(
+      <MemoryRouter initialEntries={['/library/1']}>
+        <Link to="/library/2">下一篇</Link>
+        <Routes>
+          <Route path="/library/:id" element={<ReportDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
     fireEvent.click(screen.getByRole('link', { name: '下一篇' }));
     expect(await screen.findByText('研报不存在')).toBeVisible();
     await act(async () => old.resolve(json({ success: true, data: report() })));
@@ -32,9 +44,13 @@ describe('ReportDetailPage', () => {
 
   it('distinguishes a missing report from network failure', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ detail: 'Not found' }, 404)));
-    render(<MemoryRouter initialEntries={['/library/404']}><Routes>
-      <Route path="/library/:id" element={<ReportDetailPage />} />
-    </Routes></MemoryRouter>);
+    render(
+      <MemoryRouter initialEntries={['/library/404']}>
+        <Routes>
+          <Route path="/library/:id" element={<ReportDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
     expect(await screen.findByText('研报不存在')).toBeVisible();
     expect(screen.queryByText('加载中...')).not.toBeInTheDocument();
   });

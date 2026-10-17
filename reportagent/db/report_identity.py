@@ -1,4 +1,5 @@
 """Stable document identity; title/author similarity alone is not provenance."""
+
 import hashlib
 import json
 import re
@@ -16,7 +17,9 @@ def normalized_url(value):
     if not value:
         return ""
     parts = urlsplit(value.strip())
-    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, ""))
+    return urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, "")
+    )
 
 
 def identities(value):
@@ -31,13 +34,21 @@ def identities(value):
             # Search yields a relative path; hydration passes the same page's
             # absolute URL. Both identify one BigQuant document.
             parts = urlsplit(source_id)
-            if not parts.netloc or parts.hostname in {"bigquant.com", "www.bigquant.com"}:
-                source_id = urlunsplit(("", "", "/" + parts.path.lstrip("/"), parts.query, ""))
+            if not parts.netloc or parts.hostname in {
+                "bigquant.com",
+                "www.bigquant.com",
+            }:
+                source_id = urlunsplit(
+                    ("", "", "/" + parts.path.lstrip("/"), parts.query, "")
+                )
         break
-    return {"doi": normalized_doi(value.doi),
-            "arxiv": re.sub(r"v\d+$", "", (value.arxiv_id or "").strip()),
-            "source_id": getattr(value, "source_item_id", None) or (f"{source}:{source_id}" if source_id else ""),
-            "url": normalized_url(value.source_url)}
+    return {
+        "doi": normalized_doi(value.doi),
+        "arxiv": re.sub(r"v\d+$", "", (value.arxiv_id or "").strip()),
+        "source_id": getattr(value, "source_item_id", None)
+        or (f"{source}:{source_id}" if source_id else ""),
+        "url": normalized_url(value.source_url),
+    }
 
 
 def identity_hash(value):
@@ -47,8 +58,11 @@ def identity_hash(value):
             token = [kind, keys[kind]]
             break
     else:
-        token = ["unidentified", getattr(value.source, "value", value.source),
-                 content_hash(value.title, value.authors)]
+        token = [
+            "unidentified",
+            getattr(value.source, "value", value.source),
+            content_hash(value.title, value.authors),
+        ]
     return hashlib.sha256(json.dumps(token, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -77,4 +91,6 @@ def compatible_match(incoming, existing):
         authors = json.loads(existing.authors or "[]")
     except (TypeError, ValueError):
         return False
-    return source == existing.source and content_hash(incoming.title, incoming.authors) == content_hash(existing.title, authors)
+    return source == existing.source and content_hash(
+        incoming.title, incoming.authors
+    ) == content_hash(existing.title, authors)

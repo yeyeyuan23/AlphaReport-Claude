@@ -18,7 +18,12 @@ from reportagent.utils.topic_expansion import expand_topics
 from reportagent.sources.date_window import in_date_window
 from reportagent.sources.base import usable_full_text
 from reportagent.sources.content_fetch import (
-    MAX_HTML_BYTES, article_text, bounded_download, hydrate_pdf, meaningful_excerpt, pdf_links,
+    MAX_HTML_BYTES,
+    article_text,
+    bounded_download,
+    hydrate_pdf,
+    meaningful_excerpt,
+    pdf_links,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,15 +47,23 @@ def _parse_publication_date(value) -> Optional[datetime]:
         else:
             stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
         # SQLite stores naive datetimes; normalize explicit offsets before saving.
-        return stamp.astimezone(timezone.utc).replace(tzinfo=None) if stamp.tzinfo else stamp
+        return (
+            stamp.astimezone(timezone.utc).replace(tzinfo=None)
+            if stamp.tzinfo
+            else stamp
+        )
     except ValueError:
         return None
 
 
-def _publication_date(soup: BeautifulSoup, article, page_url: str = "") -> tuple[Optional[datetime], Optional[str]]:
+def _publication_date(
+    soup: BeautifulSoup, article, page_url: str = ""
+) -> tuple[Optional[datetime], Optional[str]]:
     """Prefer the cited original report; never use page modification or sample dates."""
     text = article.get_text(" ", strip=True) if article else ""
-    text = re.split(r"参考文献|引用文献|\bReferences\b", text, maxsplit=1, flags=re.I)[0]
+    text = re.split(r"参考文献|引用文献|\bReferences\b", text, maxsplit=1, flags=re.I)[
+        0
+    ]
     patterns = (
         rf"(?:本文(?:来自|转载自)|原(?:始)?(?:报告|研报|论文)|本(?:报告|研报|论文))"
         rf"[^。；\n]{{0,180}}?(?:于|[:：])\s*(?P<date>{DATE_TEXT})\s*(?:发布|发表|出具|刊发)",
@@ -69,7 +82,12 @@ def _publication_date(soup: BeautifulSoup, article, page_url: str = "") -> tuple
         # the repost page's publication date instead.
         return None, None
 
-    for name in ("citation_publication_date", "citation_date", "article:published_time", "datePublished"):
+    for name in (
+        "citation_publication_date",
+        "citation_date",
+        "article:published_time",
+        "datePublished",
+    ):
         for tag in soup.find_all("meta"):
             if (tag.get("name") or tag.get("property") or "").lower() == name.lower():
                 stamp = _parse_publication_date(tag.get("content"))
@@ -84,9 +102,20 @@ def _publication_date(soup: BeautifulSoup, article, page_url: str = "") -> tuple
                 yield from objects(item)
         elif isinstance(value, dict):
             kind = value.get("@type", [])
-            kinds = ({kind} if isinstance(kind, str) else
-                     {k for k in kind if isinstance(k, str)} if isinstance(kind, list) else set())
-            if kinds & {"Article", "BlogPosting", "NewsArticle", "ScholarlyArticle", "WebPage"}:
+            kinds = (
+                {kind}
+                if isinstance(kind, str)
+                else {k for k in kind if isinstance(k, str)}
+                if isinstance(kind, list)
+                else set()
+            )
+            if kinds & {
+                "Article",
+                "BlogPosting",
+                "NewsArticle",
+                "ScholarlyArticle",
+                "WebPage",
+            }:
                 yield value
             yield from objects(value.get("@graph", []))
 
@@ -97,9 +126,16 @@ def _publication_date(soup: BeautifulSoup, article, page_url: str = "") -> tuple
         except (ValueError, TypeError):
             continue
         for item in objects(data):
-            identifiers = [item[key] for key in ("url", "@id") if isinstance(item.get(key), str)]
-            if page_url and identifiers and not any(
-                canonical_url(urljoin(page_url, value)) == canonical_url(page_url) for value in identifiers
+            identifiers = [
+                item[key] for key in ("url", "@id") if isinstance(item.get(key), str)
+            ]
+            if (
+                page_url
+                and identifiers
+                and not any(
+                    canonical_url(urljoin(page_url, value)) == canonical_url(page_url)
+                    for value in identifiers
+                )
             ):
                 continue
             stamp = _parse_publication_date(item.get("datePublished"))
@@ -113,12 +149,19 @@ def _publication_date(soup: BeautifulSoup, article, page_url: str = "") -> tuple
 
     for tag in article.find_all("time") if article else []:
         scope = tag.find_parent(attrs={"itemscope": True})
-        if scope and scope.get("itemtype") and not re.search(
-            r"(?:^|[/#])(?:Article|BlogPosting|NewsArticle|ScholarlyArticle|WebPage)$", scope["itemtype"]
+        if (
+            scope
+            and scope.get("itemtype")
+            and not re.search(
+                r"(?:^|[/#])(?:Article|BlogPosting|NewsArticle|ScholarlyArticle|WebPage)$",
+                scope["itemtype"],
+            )
         ):
             continue
         if "datePublished" in (tag.get("itemprop") or "").split():
-            stamp = _parse_publication_date(tag.get("datetime") or tag.get_text(strip=True))
+            stamp = _parse_publication_date(
+                tag.get("datetime") or tag.get_text(strip=True)
+            )
             if stamp is not None:
                 return stamp, "time:datePublished"
     return None, None
@@ -143,7 +186,10 @@ class BigQuantSource(BaseSource):
         return True
 
     async def hydrate_result(
-        self, result: SearchResult, *, pdf_directory: Path | None = None,
+        self,
+        result: SearchResult,
+        *,
+        pdf_directory: Path | None = None,
     ) -> SearchResult:
         """Re-fetch one public article's evidence without models or database access."""
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
@@ -151,10 +197,16 @@ class BigQuantSource(BaseSource):
             if not links and result.raw_metadata.get("pdf_link"):
                 links = [result.raw_metadata["pdf_link"]]
             if links:
-                return await hydrate_pdf(client, result, links, self.last_search, pdf_directory=pdf_directory)
-            return await self._fetch_detail(client, result.title,
-                result.source_url or result.raw_metadata["doc_path"], download_pdfs=True,
-                pdf_directory=pdf_directory)
+                return await hydrate_pdf(
+                    client, result, links, self.last_search, pdf_directory=pdf_directory
+                )
+            return await self._fetch_detail(
+                client,
+                result.title,
+                result.source_url or result.raw_metadata["doc_path"],
+                download_pdfs=True,
+                pdf_directory=pdf_directory,
+            )
 
     async def search(self, criteria: UserCriteria) -> list[SearchResult]:
         self._start_search()
@@ -168,7 +220,10 @@ class BigQuantSource(BaseSource):
                 try:
                     entries = await self._fetch_listing_page(client, page_no)
                 except Exception as e:
-                    logger.warning("BigQuant %s", self.last_search.record_error(e, f"listing page {page_no}"))
+                    logger.warning(
+                        "BigQuant %s",
+                        self.last_search.record_error(e, f"listing page {page_no}"),
+                    )
                     break
 
                 self.last_search.successful_requests += 1
@@ -177,7 +232,11 @@ class BigQuantSource(BaseSource):
                     break
 
                 for title, doc_path in entries:
-                    key = canonical_url(f"{BASE_URL}{doc_path}" if doc_path.startswith("/") else doc_path)
+                    key = canonical_url(
+                        f"{BASE_URL}{doc_path}"
+                        if doc_path.startswith("/")
+                        else doc_path
+                    )
                     if key in seen_paths:
                         continue
                     seen_paths.add(key)
@@ -191,15 +250,23 @@ class BigQuantSource(BaseSource):
             results: list[SearchResult] = []
             for title, doc_path, _ in candidates:
                 try:
-                    sr = await self._fetch_detail(client, title, doc_path,
-                        date_from=criteria.date_from, date_to=criteria.date_to)
+                    sr = await self._fetch_detail(
+                        client,
+                        title,
+                        doc_path,
+                        date_from=criteria.date_from,
+                        date_to=criteria.date_to,
+                    )
                     if sr:
                         results.append(sr)
                     if len(results) >= criteria.max_results_per_source:
                         break
                     await asyncio.sleep(self.rate_limit_seconds)
                 except Exception as e:
-                    logger.warning("BigQuant %s", self.last_search.record_error(e, "article detail"))
+                    logger.warning(
+                        "BigQuant %s",
+                        self.last_search.record_error(e, "article detail"),
+                    )
 
         logger.info(
             "BigQuant: scanned %d titles, matched %d, fetched %d details",
@@ -227,15 +294,28 @@ class BigQuantSource(BaseSource):
             # collection. Accept only an explicit empty-state element or message.
             empty = soup.select_one(".ant-empty, .empty-state, [data-testid='empty']")
             text = soup.get_text(" ", strip=True).lower()
-            empty_message = any(marker in text for marker in (
-                "暂无内容", "暂无文档", "暂无文章", "no documents", "no results"))
+            empty_message = any(
+                marker in text
+                for marker in (
+                    "暂无内容",
+                    "暂无文档",
+                    "暂无文章",
+                    "no documents",
+                    "no results",
+                )
+            )
             if not empty and not (soup.find("h1") and empty_message):
                 raise SourceParseError("unrecognized HTML collection page")
         return entries
 
     async def _fetch_detail(
-        self, client: httpx.AsyncClient, title: str, doc_path: str, *,
-        date_from: Optional[datetime] = None, date_to: Optional[datetime] = None,
+        self,
+        client: httpx.AsyncClient,
+        title: str,
+        doc_path: str,
+        *,
+        date_from: Optional[datetime] = None,
+        date_to: Optional[datetime] = None,
         download_pdfs: bool | None = None,
         pdf_directory: Path | None = None,
     ) -> Optional[SearchResult]:
@@ -296,9 +376,14 @@ class BigQuantSource(BaseSource):
         )
         should_download = self.download_pdfs if download_pdfs is None else download_pdfs
         if links and should_download:
-            result = await hydrate_pdf(client, result, links, self.last_search, pdf_directory=pdf_directory)
+            result = await hydrate_pdf(
+                client, result, links, self.last_search, pdf_directory=pdf_directory
+            )
         if not result.abstract and not result.full_text and not links:
-            self.last_search.record_error(SourceParseError("article has no research text or public PDF"), "article content")
+            self.last_search.record_error(
+                SourceParseError("article has no research text or public PDF"),
+                "article content",
+            )
         return result
 
     def _score(self, title_lower: str, terms: list[str]) -> int:

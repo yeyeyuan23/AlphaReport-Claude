@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import threading
-from typing import Any, Callable
+from typing import Callable
 
 from reportagent.utils.config import get_config
 
@@ -38,32 +38,36 @@ def is_configured() -> bool:
 
 # ── Message Sending (REST API) ──
 
+
 def _build_client():
     import lark_oapi as lark
+
     app_id, app_secret = _get_credentials()
-    return lark.Client.builder() \
-        .app_id(app_id) \
-        .app_secret(app_secret) \
-        .build()
+    return lark.Client.builder().app_id(app_id).app_secret(app_secret).build()
 
 
 def send_text_message(open_id: str, text: str) -> bool:
     """Send a text message to a Feishu user by open_id."""
     from lark_oapi.api.im.v1.model.create_message_request import CreateMessageRequest
-    from lark_oapi.api.im.v1.model.create_message_request_body import CreateMessageRequestBody
+    from lark_oapi.api.im.v1.model.create_message_request_body import (
+        CreateMessageRequestBody,
+    )
 
     client = _build_client()
     content = json.dumps({"text": text}, ensure_ascii=False)
 
-    request = CreateMessageRequest.builder() \
-        .receive_id_type("open_id") \
+    request = (
+        CreateMessageRequest.builder()
+        .receive_id_type("open_id")
         .request_body(
             CreateMessageRequestBody.builder()
             .receive_id(open_id)
             .msg_type("text")
             .content(content)
             .build()
-        ).build()
+        )
+        .build()
+    )
 
     try:
         response = client.im.v1.message.create(request)
@@ -85,15 +89,18 @@ def send_card_message(open_id: str, card: dict) -> bool:
     client = _build_client()
     content = json.dumps(card, ensure_ascii=False)
 
-    request = lark.im.v1.message.CreateMessageRequest.builder() \
-        .receive_id_type("open_id") \
+    request = (
+        lark.im.v1.message.CreateMessageRequest.builder()
+        .receive_id_type("open_id")
         .request_body(
             lark.im.v1.message.CreateMessageRequestBody.builder()
             .receive_id(open_id)
             .msg_type("interactive")
             .content(content)
             .build()
-        ).build()
+        )
+        .build()
+    )
 
     try:
         response = client.im.v1.message.create(request)
@@ -111,18 +118,20 @@ def send_card_message(open_id: str, card: dict) -> bool:
 def reply_message(message_id: str, text: str) -> bool:
     """Reply to a specific message (used for group chats)."""
     from lark_oapi.api.im.v1.model.reply_message_request import ReplyMessageRequest
-    from lark_oapi.api.im.v1.model.reply_message_request_body import ReplyMessageRequestBody
+    from lark_oapi.api.im.v1.model.reply_message_request_body import (
+        ReplyMessageRequestBody,
+    )
 
     client = _build_client()
     content = json.dumps({"text": text}, ensure_ascii=False)
-    request = ReplyMessageRequest.builder() \
-        .message_id(message_id) \
+    request = (
+        ReplyMessageRequest.builder()
+        .message_id(message_id)
         .request_body(
-            ReplyMessageRequestBody.builder()
-            .msg_type("text")
-            .content(content)
-            .build()
-        ).build()
+            ReplyMessageRequestBody.builder().msg_type("text").content(content).build()
+        )
+        .build()
+    )
 
     try:
         response = client.im.v1.message.reply(request)
@@ -140,19 +149,24 @@ def reply_message(message_id: str, text: str) -> bool:
 def send_to_chat(chat_id: str, text: str) -> bool:
     """Send a text message to a chat_id (alternative to open_id)."""
     from lark_oapi.api.im.v1.model.create_message_request import CreateMessageRequest
-    from lark_oapi.api.im.v1.model.create_message_request_body import CreateMessageRequestBody
+    from lark_oapi.api.im.v1.model.create_message_request_body import (
+        CreateMessageRequestBody,
+    )
 
     client = _build_client()
     content = json.dumps({"text": text}, ensure_ascii=False)
-    request = CreateMessageRequest.builder() \
-        .receive_id_type("chat_id") \
+    request = (
+        CreateMessageRequest.builder()
+        .receive_id_type("chat_id")
         .request_body(
             CreateMessageRequestBody.builder()
             .receive_id(chat_id)
             .msg_type("text")
             .content(content)
             .build()
-        ).build()
+        )
+        .build()
+    )
 
     try:
         response = client.im.v1.message.create(request)
@@ -160,7 +174,9 @@ def send_to_chat(chat_id: str, text: str) -> bool:
             logger.info(f"Sent to chat {chat_id}")
             return True
         else:
-            logger.error(f"Send to chat failed: code={response.code}, msg={response.msg}")
+            logger.error(
+                f"Send to chat failed: code={response.code}, msg={response.msg}"
+            )
             return False
     except Exception as e:
         logger.error(f"Send to chat error: {e}")
@@ -168,6 +184,7 @@ def send_to_chat(chat_id: str, text: str) -> bool:
 
 
 # ── Message Reactions (Emoji) ──
+
 
 def add_reaction(message_id: str, emoji_type: str = "THUMBSUP") -> bool:
     """Add an emoji reaction to a Feishu message.
@@ -213,6 +230,7 @@ def add_reaction(message_id: str, emoji_type: str = "THUMBSUP") -> bool:
 
 # ── Long Connection (WebSocket) ──
 
+
 def start_long_connection(handler: Callable | None = None) -> bool:
     """Start the Feishu long connection WebSocket client.
 
@@ -242,7 +260,6 @@ def start_long_connection(handler: Callable | None = None) -> bool:
     # module-level asyncio loop is created in the thread context.
     def run_ws():
         global _running, _ws_client
-        import asyncio
         from lark_oapi.ws import Client as WSClient
         from lark_oapi.event import dispatcher_handler as dh
 
@@ -261,7 +278,9 @@ def start_long_connection(handler: Callable | None = None) -> bool:
                 except json.JSONDecodeError:
                     text = content_str
 
-                sender_id = sender.sender_id.open_id if sender and sender.sender_id else ""
+                sender_id = (
+                    sender.sender_id.open_id if sender and sender.sender_id else ""
+                )
                 msg_id = message.message_id or ""
                 chat_type = message.chat_type or ""
                 chat_id = getattr(message, "chat_id", "") or ""
@@ -269,24 +288,32 @@ def start_long_connection(handler: Callable | None = None) -> bool:
                 if not text.strip():
                     return
 
-                logger.info(f"Feishu WS received: [{chat_type}] {text[:80]} from {sender_id} (chat={chat_id})")
+                logger.info(
+                    f"Feishu WS received: [{chat_type}] {text[:80]} from {sender_id} (chat={chat_id})"
+                )
 
                 if handler:
-                    handler({
-                        "sender_id": sender_id,
-                        "message_id": msg_id,
-                        "text": text,
-                        "chat_type": chat_type,
-                        "chat_id": chat_id,
-                    })
+                    handler(
+                        {
+                            "sender_id": sender_id,
+                            "message_id": msg_id,
+                            "text": text,
+                            "chat_type": chat_type,
+                            "chat_id": chat_id,
+                        }
+                    )
 
             except Exception as e:
                 logger.error(f"Message event handler error: {e}", exc_info=True)
 
         # Build event dispatcher
-        event_handler = dh.EventDispatcherHandlerBuilder(encrypt_key="", verification_token=verification_token) \
-            .register_p2_im_message_receive_v1(on_message) \
+        event_handler = (
+            dh.EventDispatcherHandlerBuilder(
+                encrypt_key="", verification_token=verification_token
+            )
+            .register_p2_im_message_receive_v1(on_message)
             .build()
+        )
 
         # Build WS client (in thread context — asyncio.Lock is created here)
         _ws_client = WSClient(
@@ -324,11 +351,13 @@ def is_running() -> bool:
 
 # ── Simple Command Handler ──
 
+
 def _handle_simple_command(text: str) -> str | None:
     text = text.strip()
     # Strip @mention prefixes (e.g., "@_user_1 /stats" → "/stats")
     import re
-    text = re.sub(r'@\S+\s*', '', text).strip()
+
+    text = re.sub(r"@\S+\s*", "", text).strip()
 
     if text in ("/help", "/start"):
         return (
@@ -344,6 +373,7 @@ def _handle_simple_command(text: str) -> str | None:
         try:
             from reportagent.db.engine import get_session_factory
             from reportagent.db.repository import ReportRepository
+
             factory = get_session_factory()
             session = factory()
             try:
@@ -368,6 +398,7 @@ def _handle_simple_command(text: str) -> str | None:
             from reportagent.db.engine import get_session_factory
             from reportagent.db.repository import ReportRepository
             from reportagent.models.schemas import ReportListParams
+
             factory = get_session_factory()
             session = factory()
             try:
@@ -390,6 +421,7 @@ def _handle_simple_command(text: str) -> str | None:
             from reportagent.db.engine import get_session_factory
             from reportagent.db.repository import ReportRepository
             from reportagent.models.schemas import ReportListParams
+
             factory = get_session_factory()
             session = factory()
             try:
@@ -413,6 +445,7 @@ def _handle_simple_command(text: str) -> str | None:
 
 # ── Card Builders ──
 
+
 def build_report_card(reports: list[dict]) -> dict:
     elements = []
     for i, r in enumerate(reports[:10]):
@@ -420,19 +453,24 @@ def build_report_card(reports: list[dict]) -> dict:
         source = r.get("source", "")
         topics = ", ".join(r.get("topics", []))
         report_id = r.get("id", i)
-        elements.append({
-            "tag": "div",
-            "text": {
-                "tag": "lark_md",
-                "content": f"**{i+1}. [{report_id}] {title}**\n来源：{source} | 主题：{topics}",
-            },
-        })
+        elements.append(
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**{i + 1}. [{report_id}] {title}**\n来源：{source} | 主题：{topics}",
+                },
+            }
+        )
         if i < min(len(reports[:10]), 10) - 1:
             elements.append({"tag": "hr"})
 
     return {
         "header": {
-            "title": {"tag": "plain_text", "content": f"📊 研报列表（共 {len(reports)} 篇）"},
+            "title": {
+                "tag": "plain_text",
+                "content": f"📊 研报列表（共 {len(reports)} 篇）",
+            },
             "template": "blue",
         },
         "elements": elements,
@@ -450,18 +488,28 @@ def build_analysis_card(report: dict) -> dict:
     ]
 
     if analysis.get("summary"):
-        elements.append({
-            "tag": "div",
-            "text": {"tag": "lark_md", "content": f"**总结**\n{analysis['summary'][:500]}"},
-        })
+        elements.append(
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**总结**\n{analysis['summary'][:500]}",
+                },
+            }
+        )
 
     score = assessment.get("overall_quality_score", "")
     if score:
         stars = "⭐" * min(5, int(float(score) + 0.5))
-        elements.append({
-            "tag": "div",
-            "text": {"tag": "lark_md", "content": f"**综合评分**：{stars} ({score}/5)"},
-        })
+        elements.append(
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**综合评分**：{stars} ({score}/5)",
+                },
+            }
+        )
 
     return {
         "header": {

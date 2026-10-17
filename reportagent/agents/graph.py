@@ -22,22 +22,32 @@ def _build_sources():
     sources = []
 
     if get_config("sources", "local_pdf", "enabled", default=True):
-        lib_path = get_config("sources", "local_pdf", "library_path", default="data/pdf_library")
+        lib_path = get_config(
+            "sources", "local_pdf", "library_path", default="data/pdf_library"
+        )
         sources.append(LocalPDFSource(lib_path))
 
     if get_config("sources", "arxiv", "enabled", default=True):
         rate_limit = get_config("sources", "arxiv", "rate_limit_seconds", default=3.0)
         download_pdfs = get_config("sources", "arxiv", "download_pdfs", default=True)
-        sources.append(ArxivSource(rate_limit_seconds=rate_limit, download_pdfs=download_pdfs))
+        sources.append(
+            ArxivSource(rate_limit_seconds=rate_limit, download_pdfs=download_pdfs)
+        )
 
     if get_config("sources", "eastmoney", "enabled", default=True):
-        rate_limit = get_config("sources", "eastmoney", "rate_limit_seconds", default=1.0)
+        rate_limit = get_config(
+            "sources", "eastmoney", "rate_limit_seconds", default=1.0
+        )
         sources.append(EastMoneySource(rate_limit_seconds=rate_limit))
 
     if get_config("sources", "bigquant", "enabled", default=True):
-        rate_limit = get_config("sources", "bigquant", "rate_limit_seconds", default=2.0)
+        rate_limit = get_config(
+            "sources", "bigquant", "rate_limit_seconds", default=2.0
+        )
         max_pages = get_config("sources", "bigquant", "max_pages", default=10)
-        sources.append(BigQuantSource(rate_limit_seconds=rate_limit, max_listing_pages=max_pages))
+        sources.append(
+            BigQuantSource(rate_limit_seconds=rate_limit, max_listing_pages=max_pages)
+        )
 
     return sources
 
@@ -137,7 +147,7 @@ def build_collection_graph(progress_cb=None, cancel_check=None):
             state["messages"].append(
                 f"Quant filter: rejected {len(rejected)} non-quant papers: "
                 + "; ".join(rejected[:5])
-                + (f" ... and {len(rejected)-5} more" if len(rejected) > 5 else "")
+                + (f" ... and {len(rejected) - 5} more" if len(rejected) > 5 else "")
             )
 
         state["classified_reports"] = passed

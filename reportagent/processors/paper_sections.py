@@ -1,4 +1,5 @@
 """Extract explicitly labelled sections; never rename a text prefix 'abstract'."""
+
 from __future__ import annotations
 
 import re
@@ -8,7 +9,10 @@ _NUMBER = r"(?:(?:\d+(?:\.\d+)*\.?|[IVX]+[.)])[ \t\n]+)?"
 _SUFFIX = r"(?:[ \t]*[:：—–-][ \t]*|[ \t]*\.(?!\.)[ \t]*|[ \t]*(?=\n|$))"
 _HEADINGS = {
     "abstract": re.compile(_PREFIX + r"(?:abstract|摘[ \t]*要)" + _SUFFIX, re.I | re.M),
-    "introduction": re.compile(_PREFIX + _NUMBER + r"(?:introduction|引[ \t]*言|绪[ \t]*论)" + _SUFFIX, re.I | re.M),
+    "introduction": re.compile(
+        _PREFIX + _NUMBER + r"(?:introduction|引[ \t]*言|绪[ \t]*论)" + _SUFFIX,
+        re.I | re.M,
+    ),
 }
 _SECTION_NAMES = (
     r"abstract|introduction|keywords?|index terms|ccs concepts|acm reference format|"
@@ -24,10 +28,15 @@ _BOUNDARY = re.compile(
     r"|(?:(?:\d+(?:\.\d+)*\.?|[IVX]+[.)])[ \t\n]+)?(?:" +
     # Only a complete heading or an explicit colon label ends a section.
     # 'methods usually adopt ...' is an ordinary sentence, not a heading.
-    r"(?i:" + _SECTION_NAMES + r"))[ \t]*(?:[:：]|$))", re.M)
+    r"(?i:"
+    + _SECTION_NAMES
+    + r"))[ \t]*(?:[:：]|$))",
+    re.M,
+)
 _ABSTRACT_FOOTER = re.compile(
     r"(?im)^[ \t]*(?:[∗*†‡][ \t]*(?:the|this|these|corresponding|equal|work)\b|"
-    r"permission to make (?:digital|hard)|©|copyright\b)")
+    r"permission to make (?:digital|hard)|©|copyright\b)"
+)
 
 
 def extract_paper_sections(text: str) -> dict[str, str | None]:
@@ -36,7 +45,7 @@ def extract_paper_sections(text: str) -> dict[str, str | None]:
         sections[name] = None
         for heading in pattern.finditer(text):
             line_end = text.find("\n", heading.start())
-            line = text[heading.start():line_end if line_end >= 0 else len(text)]
+            line = text[heading.start() : line_end if line_end >= 0 else len(text)]
             if re.search(r"\.{3,}", line):
                 continue  # Table of contents, not section content.
             boundary = _BOUNDARY.search(text, heading.end())
@@ -45,7 +54,7 @@ def extract_paper_sections(text: str) -> dict[str, str | None]:
                 footer = _ABSTRACT_FOOTER.search(text, heading.end(), end)
                 if footer:
                     end = footer.start()
-            value = text[heading.end():end].strip()
+            value = text[heading.end() : end].strip()
             if value:
                 sections[name] = value
                 break

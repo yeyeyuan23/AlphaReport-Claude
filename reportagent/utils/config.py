@@ -24,7 +24,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 @lru_cache(maxsize=1)
-def load_config(config_path  : Optional[str] = None) -> dict[str, Any]:
+def load_config(config_path: Optional[str] = None) -> dict[str, Any]:
     path = Path(config_path) if config_path else PROJECT_ROOT / "configs" / "app.yaml"
     with open(path) as f:
         cfg = yaml.safe_load(f)

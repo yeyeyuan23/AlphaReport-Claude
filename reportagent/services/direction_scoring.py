@@ -18,7 +18,7 @@ logger = logging.getLogger("llm_direction_filter")
 @dataclass(frozen=True)
 class DirectionOptions:
     days: int = 1
-    report_ids: str = ''
+    report_ids: str = ""
     threshold: float | None = None
     dry_run: bool = False
     json_output: bool = False
@@ -46,18 +46,24 @@ def get_papers(days: int = 1, report_ids: list[int] | None = None) -> list[dict]
 
         papers = []
         for r in reports:
-            papers.append({
-                "id": r.id,
-                "title": r.title or "",
-                "authors": r.authors or "",
-                "abstract": r.abstract or "",
-                "source": r.source or "",
-                "source_url": r.source_url or "",
-                "arxiv_id": r.arxiv_id or "",
-                "topics": r.topics or "",
-                "published_date": r.published_date.isoformat() if r.published_date else "",
-            })
-        logger.info("Fetched %d papers from DB (days=%d, ids=%s)", len(papers), days, report_ids)
+            papers.append(
+                {
+                    "id": r.id,
+                    "title": r.title or "",
+                    "authors": r.authors or "",
+                    "abstract": r.abstract or "",
+                    "source": r.source or "",
+                    "source_url": r.source_url or "",
+                    "arxiv_id": r.arxiv_id or "",
+                    "topics": r.topics or "",
+                    "published_date": r.published_date.isoformat()
+                    if r.published_date
+                    else "",
+                }
+            )
+        logger.info(
+            "Fetched %d papers from DB (days=%d, ids=%s)", len(papers), days, report_ids
+        )
         return papers
     finally:
         session.close()
@@ -70,8 +76,6 @@ def store_scores(results: list[PaperDirectionResult]):
     session = factory()
     try:
         from reportagent.models.database import Report
-        from reportagent.db.repository import ReportRepository
-        repo = ReportRepository(session)
 
         for r in results:
             if r.status == "retryable_error":
@@ -90,7 +94,9 @@ def store_scores(results: list[PaperDirectionResult]):
                 "max_score": r.max_score,
                 "best_direction": r.best_direction,
                 "selected": r.is_selected,
-                "status": r.status, "reason": r.reason, "threshold": r.threshold,
+                "status": r.status,
+                "reason": r.reason,
+                "threshold": r.threshold,
                 "scored_at": datetime.now(timezone.utc).isoformat(),
             }
             # Merge with existing analysis_json
@@ -117,7 +123,9 @@ async def run_direction_filter(options: DirectionOptions) -> None:
     # Resolve papers
     report_ids = None
     if options.report_ids:
-        report_ids = [int(i.strip()) for i in options.report_ids.split(",") if i.strip()]
+        report_ids = [
+            int(i.strip()) for i in options.report_ids.split(",") if i.strip()
+        ]
 
     papers = get_papers(days=options.days, report_ids=report_ids)
     if not papers:
@@ -128,6 +136,7 @@ async def run_direction_filter(options: DirectionOptions) -> None:
     filt = DirectionFilter()
     if options.threshold is not None:
         from reportagent.services.paper_scoring import _valid_score
+
         filt.SELECTION_THRESHOLD = _valid_score(options.threshold, "threshold")
     results = await filt.score_papers(papers)
 
@@ -144,26 +153,40 @@ async def run_direction_filter(options: DirectionOptions) -> None:
                 "max_score": r.max_score,
                 "best_direction": r.best_direction,
                 "selected": r.is_selected,
-                "status": r.status, "reason": r.reason, "threshold": r.threshold,
+                "status": r.status,
+                "reason": r.reason,
+                "threshold": r.threshold,
                 "scores": [
-                    {"direction": s.direction_name, "score": s.score, "reason": s.reason}
-                    for s in sorted(r.direction_scores, key=lambda x: x.score, reverse=True)
+                    {
+                        "direction": s.direction_name,
+                        "score": s.score,
+                        "reason": s.reason,
+                    }
+                    for s in sorted(
+                        r.direction_scores, key=lambda x: x.score, reverse=True
+                    )
                     if s.score > 0
                 ],
             }
-            for r in sorted(results, key=lambda x: x.max_score if x.max_score is not None else -1, reverse=True)
+            for r in sorted(
+                results,
+                key=lambda x: x.max_score if x.max_score is not None else -1,
+                reverse=True,
+            )
         ],
     }
 
     if options.json_output:
         print(json.dumps(output, ensure_ascii=False, indent=2))
     else:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"📊 LLM 方向过滤结果: {len(selected)}/{len(results)} 篇入选")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         for r in output["results"]:
             icon = "⭐" if r["selected"] else "  "
-            print(f"\n{icon} [{r['max_score'] if r['max_score'] is not None else r['status']}] {r['title']}")
+            print(
+                f"\n{icon} [{r['max_score'] if r['max_score'] is not None else r['status']}] {r['title']}"
+            )
             if r["scores"]:
                 for s in r["scores"][:3]:
                     print(f"     {s['direction']}: {s['score']:.1f} — {s['reason']}")

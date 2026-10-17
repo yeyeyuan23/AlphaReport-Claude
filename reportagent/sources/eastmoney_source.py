@@ -10,10 +10,19 @@ import httpx
 from bs4 import BeautifulSoup
 
 from reportagent.models.schemas import UserCriteria, SearchResult, SourceType
-from reportagent.sources.base import BaseSource, SourceParseError, deduplicate_results, usable_full_text
+from reportagent.sources.base import (
+    BaseSource,
+    SourceParseError,
+    deduplicate_results,
+    usable_full_text,
+)
 from reportagent.sources.date_window import in_date_window
 from reportagent.sources.content_fetch import (
-    MAX_HTML_BYTES, article_text, bounded_download, hydrate_pdf, pdf_links,
+    MAX_HTML_BYTES,
+    article_text,
+    bounded_download,
+    hydrate_pdf,
+    pdf_links,
 )
 from reportagent.utils.topic_expansion import expand_topics
 
@@ -67,24 +76,64 @@ TOPIC_TO_QTYPES = {
     "市场中性": [2],
 }
 
-QUANT_KEYWORDS = [kw.lower() for kw in [
-    "量化策略", "量化选股", "量化投资", "量化模型", "量化配置",
-    "量化对冲", "主动量化", "宏观量化", "量化经济", "量化周报",
-    "金工", "金融工程",
-    "因子模型", "多因子", "因子选股", "因子投资", "因子配置",
-    "因子周报", "因子策略", "因子表现", "因子收益",
-    "选股模型", "选股策略",
-    "统计套利", "算法交易", "程序化交易",
-    "CTA", "管理期货",
-    "组合优化", "波动率模型", "期权定价", "期权策略",
-    "风险平价", "风险预算", "Smart Beta", "smartbeta",
-    "配对交易", "市场微观结构", "高频交易", "高频策略",
-    "指数增强", "市场中性", "绝对收益",
-    "Black-Litterman", "均值方差",
-    "机器学习选股", "深度学习策略",
-    "factor model", "arbitrage",
-    "HFT", "backtest", "risk parity", "mean-variance",
-]]
+QUANT_KEYWORDS = [
+    kw.lower()
+    for kw in [
+        "量化策略",
+        "量化选股",
+        "量化投资",
+        "量化模型",
+        "量化配置",
+        "量化对冲",
+        "主动量化",
+        "宏观量化",
+        "量化经济",
+        "量化周报",
+        "金工",
+        "金融工程",
+        "因子模型",
+        "多因子",
+        "因子选股",
+        "因子投资",
+        "因子配置",
+        "因子周报",
+        "因子策略",
+        "因子表现",
+        "因子收益",
+        "选股模型",
+        "选股策略",
+        "统计套利",
+        "算法交易",
+        "程序化交易",
+        "CTA",
+        "管理期货",
+        "组合优化",
+        "波动率模型",
+        "期权定价",
+        "期权策略",
+        "风险平价",
+        "风险预算",
+        "Smart Beta",
+        "smartbeta",
+        "配对交易",
+        "市场微观结构",
+        "高频交易",
+        "高频策略",
+        "指数增强",
+        "市场中性",
+        "绝对收益",
+        "Black-Litterman",
+        "均值方差",
+        "机器学习选股",
+        "深度学习策略",
+        "factor model",
+        "arbitrage",
+        "HFT",
+        "backtest",
+        "risk parity",
+        "mean-variance",
+    ]
+]
 
 EXCLUDE_PATTERNS = ["量化宽松", "轻量化", "减量化"]
 
@@ -120,20 +169,29 @@ class EastMoneySource(BaseSource):
             for qt in q_types:
                 try:
                     results = await self._fetch_reports(
-                        client, qt, date_from, date_to,
+                        client,
+                        qt,
+                        date_from,
+                        date_to,
                         FETCH_PAGE_SIZE * FETCH_PAGES_PER_QTYPE,
                     )
                     all_results.extend(results)
                     await asyncio.sleep(self.rate_limit_seconds)
                 except Exception as e:
-                    logger.warning("EastMoney %s", self.last_search.record_error(e, f"qType {qt}"))
+                    logger.warning(
+                        "EastMoney %s", self.last_search.record_error(e, f"qType {qt}")
+                    )
 
-        dated = [row for row in deduplicate_results(all_results)
-                 if in_date_window(row.published_date, criteria.date_from, criteria.date_to)]
+        dated = [
+            row
+            for row in deduplicate_results(all_results)
+            if in_date_window(row.published_date, criteria.date_from, criteria.date_to)
+        ]
         filtered = self._filter_by_keywords(dated, criteria)
         logger.info(
             "EastMoney: fetched %d, filtered to %d quant-related",
-            len(all_results), len(filtered),
+            len(all_results),
+            len(filtered),
         )
         selected = filtered[: criteria.max_results_per_source]
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
@@ -145,7 +203,10 @@ class EastMoneySource(BaseSource):
         return selected
 
     async def hydrate_result(
-        self, result: SearchResult, *, pdf_directory: Path | None = None,
+        self,
+        result: SearchResult,
+        *,
+        pdf_directory: Path | None = None,
     ) -> SearchResult:
         """Fetch public research evidence without models or database writes."""
         async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
@@ -153,35 +214,54 @@ class EastMoneySource(BaseSource):
             if not links and result.raw_metadata.get("pdf_link"):
                 links = [result.raw_metadata["pdf_link"]]
             if links:
-                return await hydrate_pdf(client, result, links, self.last_search, pdf_directory=pdf_directory)
-            return await self._fetch_detail(client, result, download_pdfs=True, pdf_directory=pdf_directory)
+                return await hydrate_pdf(
+                    client, result, links, self.last_search, pdf_directory=pdf_directory
+                )
+            return await self._fetch_detail(
+                client, result, download_pdfs=True, pdf_directory=pdf_directory
+            )
 
     async def _fetch_detail(
-        self, client, result: SearchResult, *, download_pdfs: bool | None = None,
+        self,
+        client,
+        result: SearchResult,
+        *,
+        download_pdfs: bool | None = None,
         pdf_directory: Path | None = None,
     ) -> SearchResult:
         if not result.source_url:
             raise SourceParseError("missing report detail URL")
         data = await bounded_download(client, result.source_url, MAX_HTML_BYTES)
         soup = BeautifulSoup(data, "html.parser")
-        article = soup.select_one(".ctx-content, .newsContent, .news-content, .report-content, article")
+        article = soup.select_one(
+            ".ctx-content, .newsContent, .news-content, .report-content, article"
+        )
         text = article_text(article)
         links = pdf_links(soup, result.source_url)
-        updates = {"abstract": text[:1500] if text else None,
-                   "raw_metadata": {**result.raw_metadata,
-                                    "content_kind": "html" if text else "metadata_only",
-                                    "text_scope": "html_article" if text else "metadata_only",
-                                    "pdf_link": links[0] if links else None,
-                                    "pdf_links": links}}
+        updates = {
+            "abstract": text[:1500] if text else None,
+            "raw_metadata": {
+                **result.raw_metadata,
+                "content_kind": "html" if text else "metadata_only",
+                "text_scope": "html_article" if text else "metadata_only",
+                "pdf_link": links[0] if links else None,
+                "pdf_links": links,
+            },
+        }
         if usable_full_text(text):
             updates.update(full_text=text, abstract_only=bool(links))
         result = result.model_copy(update=updates)
         # Public HTML is often an excerpt; the linked report is the better source.
         should_download = self.download_pdfs if download_pdfs is None else download_pdfs
         if links and should_download:
-            result = await hydrate_pdf(client, result, links, self.last_search, pdf_directory=pdf_directory)
+            result = await hydrate_pdf(
+                client, result, links, self.last_search, pdf_directory=pdf_directory
+            )
         if not result.abstract and not result.full_text and not links:
-            self.last_search.record_error(SourceParseError("no research text or public PDF in report page"), "article content")
+            self.last_search.record_error(
+                SourceParseError("no research text or public PDF in report page"),
+                "article content",
+            )
         return result
 
     def _filter_by_keywords(
@@ -194,27 +274,33 @@ class EastMoneySource(BaseSource):
         scored: list[tuple[int, SearchResult]] = []
         for r in results:
             search_text = (
-                (r.title or "") + " " +
-                (r.abstract or "") + " " +
-                r.raw_metadata.get("industry_name", "") + " " +
-                r.raw_metadata.get("stock_name", "")
+                (r.title or "")
+                + " "
+                + (r.abstract or "")
+                + " "
+                + r.raw_metadata.get("industry_name", "")
+                + " "
+                + r.raw_metadata.get("stock_name", "")
             ).lower()
 
             if any(ep in search_text for ep in EXCLUDE_PATTERNS):
                 continue
 
             precise_score = sum(
-                1 for t in all_terms
-                if t in search_text and t not in AMBIGUOUS_TERMS
+                1 for t in all_terms if t in search_text and t not in AMBIGUOUS_TERMS
             )
             ambig_score = sum(
-                1 for t in all_terms
-                if t in search_text and t in AMBIGUOUS_TERMS
+                1 for t in all_terms if t in search_text and t in AMBIGUOUS_TERMS
             )
-            user_precise = sum(
-                1 for t in user_terms
-                if t in search_text and t not in AMBIGUOUS_TERMS
-            ) if user_terms else 0
+            user_precise = (
+                sum(
+                    1
+                    for t in user_terms
+                    if t in search_text and t not in AMBIGUOUS_TERMS
+                )
+                if user_terms
+                else 0
+            )
 
             if precise_score == 0 and ambig_score > 0:
                 continue
@@ -270,8 +356,12 @@ class EastMoneySource(BaseSource):
                 if not isinstance(pages, int) or isinstance(pages, bool) or pages < 0:
                     raise SourceParseError("invalid JSON pagination")
             except Exception as error:
-                logger.warning("EastMoney %s", self.last_search.record_error(
-                    error, f"qType {q_type} page {page_no}"))
+                logger.warning(
+                    "EastMoney %s",
+                    self.last_search.record_error(
+                        error, f"qType {q_type} page {page_no}"
+                    ),
+                )
                 break  # Keep earlier pages, then continue with other qTypes.
 
             self.last_search.fetched += len(items)
@@ -282,11 +372,15 @@ class EastMoneySource(BaseSource):
                         raise SourceParseError("invalid report item")
                     sr = self._parse_item(item, q_type)
                     if not sr or not sr.title.strip() or not sr.source_url:
-                        raise SourceParseError("report item missing title or identifier")
+                        raise SourceParseError(
+                            "report item missing title or identifier"
+                        )
                     results.append(sr)
                     parsed_count += 1
                 except Exception as error:
-                    self.last_search.record_error(error, f"qType {q_type} page {page_no} item")
+                    self.last_search.record_error(
+                        error, f"qType {q_type} page {page_no} item"
+                    )
             if parsed_count or not items:
                 self.last_search.successful_requests += 1
             if len(results) >= max_results:
@@ -306,7 +400,11 @@ class EastMoneySource(BaseSource):
         info_code = item.get("infoCode", "")
         org_name = item.get("orgSName") or item.get("orgName", "")
         researcher = item.get("researcher", "")
-        authors = [a.strip() for a in researcher.split(",") if a.strip()] if researcher else []
+        authors = (
+            [a.strip() for a in researcher.split(",") if a.strip()]
+            if researcher
+            else []
+        )
 
         pub_date_str = item.get("publishDate", "")
         pub_date = None
@@ -378,6 +476,8 @@ class EastMoneySource(BaseSource):
         if criteria.date_from:
             date_from = criteria.date_from.strftime("%Y-%m-%d")
         else:
-            date_from = (datetime.now(timezone.utc) - timedelta(days=180)).strftime("%Y-%m-%d")
+            date_from = (datetime.now(timezone.utc) - timedelta(days=180)).strftime(
+                "%Y-%m-%d"
+            )
 
         return date_from, date_to

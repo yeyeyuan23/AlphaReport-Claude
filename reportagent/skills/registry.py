@@ -1,4 +1,5 @@
 """Canonical skill registry for every Agent adapter and the CLI."""
+
 from __future__ import annotations
 
 import hashlib
@@ -55,8 +56,11 @@ def load_all_skills() -> list[dict[str, Any]]:
         for path in paths:
             data = _read(path)
             if data:
-                data.update(_source=source, _file=path.parent.name if path.name == "SKILL.md" else path.stem,
-                            _path=str(path.resolve()))
+                data.update(
+                    _source=source,
+                    _file=path.parent.name if path.name == "SKILL.md" else path.stem,
+                    _path=str(path.resolve()),
+                )
                 skills.append(data)
     return skills
 
@@ -82,12 +86,20 @@ def skill_resource(name: str, filename: str) -> Path:
     return path
 
 
-def save_user_skill(name: str, description: str, prompt_template: str,
-                    default_params: dict[str, Any] | None = None) -> str:
+def save_user_skill(
+    name: str,
+    description: str,
+    prompt_template: str,
+    default_params: dict[str, Any] | None = None,
+) -> str:
     slug = re.sub(r"[^a-z0-9_-]+", "-", name.lower()).strip("-_")
     slug = (slug[:48] or "skill") + "-" + hashlib.sha256(name.encode()).hexdigest()[:12]
     path = _user_skills_dir() / f"{slug}.yaml"
-    data = {"name": name, "description": description, "prompt_template": prompt_template}
+    data = {
+        "name": name,
+        "description": description,
+        "prompt_template": prompt_template,
+    }
     if default_params:
         data["default_params"] = default_params
     # Update old user YAMLs in place instead of leaving two definitions for one name.
@@ -96,7 +108,9 @@ def save_user_skill(name: str, description: str, prompt_template: str,
         if old and old["name"] == name:
             path = existing
             break
-    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
+    path.write_text(
+        yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
     return str(path)
 
 
@@ -116,6 +130,11 @@ def format_skills_context(skills: list[dict[str, Any]]) -> str:
     parts = ["\n## Shared skills — use these workflows and their referenced services"]
     for skill in skills:
         if skill.get("default_params"):
-            parts.append("Defaults: " + yaml.safe_dump(skill["default_params"], allow_unicode=True).strip())
-        parts.append(f"\n### {skill['name']}\n{skill.get('description', '')}\nSource: {skill.get('_path', '')}\n{skill.get('prompt_template', '').strip()}")
+            parts.append(
+                "Defaults: "
+                + yaml.safe_dump(skill["default_params"], allow_unicode=True).strip()
+            )
+        parts.append(
+            f"\n### {skill['name']}\n{skill.get('description', '')}\nSource: {skill.get('_path', '')}\n{skill.get('prompt_template', '').strip()}"
+        )
     return "\n".join(parts)

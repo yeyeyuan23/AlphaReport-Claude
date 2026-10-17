@@ -1,30 +1,32 @@
-import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import { getReports, getReportStats } from "../services/api";
-import { EvaluationBadge, RelevanceLabel } from "../components/ResearchEvaluation";
-import type { ReportSummary, ReportStats } from "../types";
+import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { getReports, getReportStats } from '../services/api';
+import { EvaluationBadge, RelevanceLabel } from '../components/ResearchEvaluation';
+import type { ReportSummary, ReportStats } from '../types';
 import {
   SOURCE_LABELS,
   MARKET_LABELS,
   ASSET_LABELS,
   FREQUENCY_LABELS,
   TOPIC_LABELS,
-} from "../types";
+} from '../types';
 
 const FILTERS = [
-  { key: "market", label: "市场", options: MARKET_LABELS },
-  { key: "asset_class", label: "资产", options: ASSET_LABELS },
-  { key: "frequency", label: "频率", options: FREQUENCY_LABELS },
-  { key: "topic", label: "主题", options: TOPIC_LABELS },
+  { key: 'market', label: '市场', options: MARKET_LABELS },
+  { key: 'asset_class', label: '资产', options: ASSET_LABELS },
+  { key: 'frequency', label: '频率', options: FREQUENCY_LABELS },
+  { key: 'topic', label: '主题', options: TOPIC_LABELS },
 ] as const;
-
 
 export default function ReportLibraryPage() {
   const [result, setResult] = useState<{
-    queryKey: string; reports: ReportSummary[]; total: number; error?: string;
+    queryKey: string;
+    reports: ReportSummary[];
+    total: number;
+    error?: string;
   } | null>(null);
   const [stats, setStats] = useState<ReportStats | null>(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<Record<string, string>>({});
   const [offset, setOffset] = useState(0);
   const limit = 20;
@@ -36,22 +38,33 @@ export default function ReportLibraryPage() {
 
   useEffect(() => {
     let active = true;
-    getReports({ search: search || undefined, ...filters, limit, offset }).then((res) => {
-      if (!active) return;
-      if (!res.success || !res.data) throw new Error("Reports unavailable");
-      setResult({ queryKey, reports: res.data.reports, total: res.data.total });
-    }).catch(() => {
-      if (active) setResult({ queryKey, reports: [], total: 0, error: "研报加载失败，请稍后重试" });
-    });
-    return () => { active = false; };
+    getReports({ search: search || undefined, ...filters, limit, offset })
+      .then((res) => {
+        if (!active) return;
+        if (!res.success || !res.data) throw new Error('Reports unavailable');
+        setResult({ queryKey, reports: res.data.reports, total: res.data.total });
+      })
+      .catch(() => {
+        if (active)
+          setResult({ queryKey, reports: [], total: 0, error: '研报加载失败，请稍后重试' });
+      });
+    return () => {
+      active = false;
+    };
   }, [search, filters, offset, queryKey]);
 
   useEffect(() => {
     let active = true;
-    getReportStats().then((res) => {
-      if (active && res.success && res.data) setStats(res.data);
-    }).catch(() => { /* The report list remains usable without optional statistics. */ });
-    return () => { active = false; };
+    getReportStats()
+      .then((res) => {
+        if (active && res.success && res.data) setStats(res.data);
+      })
+      .catch(() => {
+        /* The report list remains usable without optional statistics. */
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const setFilter = (key: string, val: string) => {
@@ -83,9 +96,7 @@ export default function ReportLibraryPage() {
 
         {FILTERS.map(({ key, label, options }) => (
           <div key={key} className="bg-white rounded-xl border border-gray-200 p-4 mb-3">
-            <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">
-              {label}
-            </h3>
+            <h3 className="text-xs font-semibold text-gray-500 uppercase mb-2">{label}</h3>
             <div className="space-y-1">
               {Object.entries(options).map(([val, lbl]) => (
                 <button
@@ -93,8 +104,8 @@ export default function ReportLibraryPage() {
                   onClick={() => setFilter(key, val)}
                   className={`block w-full text-left px-2 py-1.5 rounded text-sm transition-colors ${
                     filters[key] === val
-                      ? "bg-indigo-50 text-indigo-700 font-medium"
-                      : "text-gray-600 hover:bg-gray-50"
+                      ? 'bg-indigo-50 text-indigo-700 font-medium'
+                      : 'text-gray-600 hover:bg-gray-50'
                   }`}
                 >
                   {lbl}
@@ -119,7 +130,10 @@ export default function ReportLibraryPage() {
           />
           {Object.keys(filters).length > 0 && (
             <button
-              onClick={() => { setOffset(0); setFilters({}); }}
+              onClick={() => {
+                setOffset(0);
+                setFilters({});
+              }}
               className="text-xs text-gray-500 hover:text-gray-700"
             >
               清除筛选
@@ -132,9 +146,7 @@ export default function ReportLibraryPage() {
           <div className="flex flex-wrap gap-1.5 mb-3">
             {Object.entries(filters).map(([k, v]) => {
               const dim = FILTERS.find((f) => f.key === k);
-              const label = dim
-                ? (dim.options as Record<string, string>)[v] || v
-                : v;
+              const label = dim ? (dim.options as Record<string, string>)[v] || v : v;
               return (
                 <span
                   key={k}
@@ -151,22 +163,19 @@ export default function ReportLibraryPage() {
         {loading ? (
           <div className="text-center py-12 text-gray-400">加载中...</div>
         ) : result?.error ? (
-          <div role="alert" className="text-center py-12 text-gray-500">{result.error}</div>
+          <div role="alert" className="text-center py-12 text-gray-500">
+            {result.error}
+          </div>
         ) : reports.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-gray-400">暂无研报</p>
-            <p className="text-xs text-gray-300 mt-1">
-              请通过飞书机器人采集研报后刷新此页
-            </p>
+            <p className="text-xs text-gray-300 mt-1">请通过飞书机器人采集研报后刷新此页</p>
           </div>
         ) : (
           <>
             <div className="space-y-3">
               {reports.map((r) => (
-                <ReportCard
-                  key={r.id}
-                  report={r}
-                />
+                <ReportCard key={r.id} report={r} />
               ))}
             </div>
 
@@ -206,9 +215,7 @@ function ReportCard({ report }: { report: ReportSummary }) {
   ].filter(Boolean);
 
   return (
-    <div
-      className="bg-white rounded-xl border border-gray-200 p-4 transition-all hover:border-indigo-200 hover:shadow-sm"
-    >
+    <div className="bg-white rounded-xl border border-gray-200 p-4 transition-all hover:border-indigo-200 hover:shadow-sm">
       <div className="flex items-start gap-3">
         {/* Content - clickable to detail */}
         <Link to={`/library/${report.id}`} className="min-w-0 flex-1">
@@ -218,9 +225,7 @@ function ReportCard({ report }: { report: ReportSummary }) {
                 {report.title}
               </h3>
               {report.authors.length > 0 && (
-                <p className="text-xs text-gray-400 mt-1">
-                  {report.authors.join(", ")}
-                </p>
+                <p className="text-xs text-gray-400 mt-1">{report.authors.join(', ')}</p>
               )}
             </div>
             <div className="shrink-0 flex flex-col items-end gap-1">
@@ -242,17 +247,21 @@ function ReportCard({ report }: { report: ReportSummary }) {
 
           {report.evaluation?.research_question && (
             <p className="text-xs text-gray-700 mt-2 line-clamp-2 leading-relaxed">
-              <span className="font-medium">研究问题：</span>{report.evaluation.research_question}
+              <span className="font-medium">研究问题：</span>
+              {report.evaluation.research_question}
             </p>
           )}
           {report.evaluation?.findings?.length ? (
             <p className="text-xs text-gray-500 mt-1 line-clamp-2 leading-relaxed">
-              <span className="font-medium">主要发现：</span>{report.evaluation.findings[0].claim}
+              <span className="font-medium">主要发现：</span>
+              {report.evaluation.findings[0].claim}
             </p>
-          ) : report.abstract && (
-            <p className="text-xs text-gray-500 mt-2 line-clamp-2 whitespace-pre-line">
-              {report.abstract}
-            </p>
+          ) : (
+            report.abstract && (
+              <p className="text-xs text-gray-500 mt-2 line-clamp-2 whitespace-pre-line">
+                {report.abstract}
+              </p>
+            )
           )}
 
           {dimTags.length > 0 && (
@@ -277,8 +286,6 @@ function ReportCard({ report }: { report: ReportSummary }) {
             {report.published_date?.slice(0, 10) || report.created_at?.slice(0, 10)}
           </div>
         </Link>
-
-
       </div>
     </div>
   );

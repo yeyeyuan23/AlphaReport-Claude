@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 """Production entrypoint — avoids `python -m uvicorn` subprocess issues."""
+
 import uvicorn
 
 if __name__ == "__main__":

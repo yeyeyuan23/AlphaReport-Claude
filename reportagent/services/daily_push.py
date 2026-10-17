@@ -17,17 +17,27 @@ from pathlib import Path
 
 
 from dotenv import load_dotenv
-load_dotenv()
+
 
 from reportagent.db.engine import init_db, get_session_factory
 from reportagent.utils.config import get_config, PROJECT_ROOT
 from reportagent.services.public_url import sync_public_url, get_web_base_url
-from reportagent.skills.registry import skill_resource
-from reportagent.services.report_quality import review_report_ids, select_candidates, pending_review, review_fingerprint
+from reportagent.services.report_quality import (
+    review_report_ids,
+    select_candidates,
+    pending_review,
+    review_fingerprint,
+)
 from reportagent.services.report_briefing import render_briefing
 from reportagent.services.feishu_markdown import card_sections
-from reportagent.services.paper_scoring import load_enabled_directions, scoring_fingerprint, screening_is_current
+from reportagent.services.paper_scoring import (
+    scoring_fingerprint as scoring_fingerprint,
+    load_enabled_directions,
+    screening_is_current,
+)
 from reportagent.services.scheduled_collection import read_latest_collection
+
+load_dotenv()
 
 logger = logging.getLogger("daily_push")
 
@@ -40,14 +50,21 @@ APP_SECRET = os.environ.get(cfg.get("app_secret_env", "FEISHU_APP_SECRET"), "")
 UI_BASE_URL = get_web_base_url()
 
 # Feishu receive targets — comma-separated open_ids or chat_ids
-FEISHU_RECEIVE_IDS = os.environ.get("FEISHU_DAILY_PUSH_IDS", "").split(",") if os.environ.get("FEISHU_DAILY_PUSH_IDS") else []
-FEISHU_RECEIVE_TYPE = os.environ.get("FEISHU_DAILY_PUSH_TYPE", "open_id")  # "open_id" | "chat_id"
+FEISHU_RECEIVE_IDS = (
+    os.environ.get("FEISHU_DAILY_PUSH_IDS", "").split(",")
+    if os.environ.get("FEISHU_DAILY_PUSH_IDS")
+    else []
+)
+FEISHU_RECEIVE_TYPE = os.environ.get(
+    "FEISHU_DAILY_PUSH_TYPE", "open_id"
+)  # "open_id" | "chat_id"
+
 
 # ── Load push directions from config ────────────────────
 @dataclass(frozen=True)
 class DailyPushOptions:
-    receive_ids: str = ''
-    receive_type: str = ''
+    receive_ids: str = ""
+    receive_type: str = ""
     dry_run: bool = False
     no_collect: bool = True  # Compatibility flag; daily reports never collect.
     output: str | None = None
@@ -58,6 +75,7 @@ class DailyPushOptions:
 
 def _load_push_settings() -> dict:
     import yaml
+
     path = PROJECT_ROOT / "configs/push_directions.yaml"
     with path.open(encoding="utf-8") as handle:
         return (yaml.safe_load(handle) or {}).get("push_settings", {})
@@ -78,10 +96,20 @@ def _paper_metadata(row) -> dict:
     """Snapshot only the report metadata used by daily rendering and delivery."""
     return {
         "id": row.id,
-        **{field: getattr(row, field) or "" for field in (
-            "title", "authors", "abstract", "source", "source_url", "arxiv_id", "doi", "topics",
-            "selection_reason",
-        )},
+        **{
+            field: getattr(row, field) or ""
+            for field in (
+                "title",
+                "authors",
+                "abstract",
+                "source",
+                "source_url",
+                "arxiv_id",
+                "doi",
+                "topics",
+                "selection_reason",
+            )
+        },
         "published_date": row.published_date.isoformat() if row.published_date else "",
         "has_full_text": row.has_full_text,
         "selection_provenance_json": row.selection_provenance_json,
@@ -97,37 +125,79 @@ def _refresh_candidate_metadata(candidates: list[dict]) -> list[dict]:
     if not candidates:
         return []
     from reportagent.models.database import Report
+
     with get_session_factory()() as session:
-        current = {row.id: row for row in session.query(Report).filter(
-            Report.id.in_([paper["id"] for paper in candidates]),
-        ).all()}
+        current = {
+            row.id: row
+            for row in session.query(Report)
+            .filter(
+                Report.id.in_([paper["id"] for paper in candidates]),
+            )
+            .all()
+        }
         refreshed = []
         for paper in candidates:
             row = current.get(paper["id"])
             if row is None:
-                refreshed.append({**paper, "evaluation": pending_review(paper, "论文记录已删除，请重新获取并评估。")})
+                refreshed.append(
+                    {
+                        **paper,
+                        "evaluation": pending_review(
+                            paper, "论文记录已删除，请重新获取并评估。"
+                        ),
+                    }
+                )
                 continue
-            snapshot = {field: getattr(row, field) for field in (
-                "source", "arxiv_id", "title", "abstract", "full_text", "has_full_text", "selection_relevance",
-                "selection_score", "selection_reason", "selection_provenance_json",
-            )}
+            snapshot = {
+                field: getattr(row, field)
+                for field in (
+                    "source",
+                    "arxiv_id",
+                    "title",
+                    "abstract",
+                    "full_text",
+                    "has_full_text",
+                    "selection_relevance",
+                    "selection_score",
+                    "selection_reason",
+                    "selection_provenance_json",
+                )
+            }
             try:
                 saved = json.loads(row.evaluation_json or "null")
             except (TypeError, ValueError):
                 saved = None
             matches = isinstance(saved, dict) and saved == paper.get("evaluation")
-            if matches and (saved.get("status") == "reviewed" or saved.get("fingerprint")):
+            if matches and (
+                saved.get("status") == "reviewed" or saved.get("fingerprint")
+            ):
                 model = saved.get("model")
-                matches = (isinstance(model, str) and bool(model)
-                           and saved.get("fingerprint") == review_fingerprint(snapshot, model))
-            evaluation = saved if matches else pending_review(
-                snapshot, "准备日报期间原文或已保存评估已更新，请重新评估。")
-            refreshed.append({**paper, **_paper_metadata(row), "ui_url": paper["ui_url"],
-                              "evaluation": evaluation})
+                matches = (
+                    isinstance(model, str)
+                    and bool(model)
+                    and saved.get("fingerprint") == review_fingerprint(snapshot, model)
+                )
+            evaluation = (
+                saved
+                if matches
+                else pending_review(
+                    snapshot, "准备日报期间原文或已保存评估已更新，请重新评估。"
+                )
+            )
+            refreshed.append(
+                {
+                    **paper,
+                    **_paper_metadata(row),
+                    "ui_url": paper["ui_url"],
+                    "evaluation": evaluation,
+                }
+            )
         return refreshed
 
 
-def get_todays_papers(report_ids: list[int] | None = None) -> tuple[list[dict], str, str]:
+def get_todays_papers(
+    report_ids: list[int] | None = None,
+) -> tuple[list[dict], str, str]:
     """Get papers in the publication window with current, eligible relevance scores.
 
     使用 published_date（发表日期），非 created_at（入库日期）。
@@ -143,20 +213,30 @@ def get_todays_papers(report_ids: list[int] | None = None) -> tuple[list[dict], 
         from reportagent.models.database import Report
         from sqlalchemy import desc
 
-        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        today_end = today_start.replace(hour=23, minute=59, second=59, microsecond=999999)
+        today_start = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
+        today_end = today_start.replace(
+            hour=23, minute=59, second=59, microsecond=999999
+        )
         window_start = today_start - timedelta(days=PUSH_WINDOW_DAYS - 1)
 
-        logger.info(f"Query window: published_date {window_start.strftime('%Y-%m-%d')} "
-                    f"~ {today_end.strftime('%Y-%m-%d')} "
-                    f"({PUSH_WINDOW_DAYS} days), current relevance required")
+        logger.info(
+            f"Query window: published_date {window_start.strftime('%Y-%m-%d')} "
+            f"~ {today_end.strftime('%Y-%m-%d')} "
+            f"({PUSH_WINDOW_DAYS} days), current relevance required"
+        )
 
         q = session.query(Report)
         if report_ids:
             q = q.filter(Report.id.in_(report_ids))
         else:
-            q = q.filter(Report.published_date >= window_start, Report.published_date <= today_end,
-                         Report.selection_relevance >= PUSH_SETTINGS.get("llm_filter_threshold", 6.0))
+            q = q.filter(
+                Report.published_date >= window_start,
+                Report.published_date <= today_end,
+                Report.selection_relevance
+                >= PUSH_SETTINGS.get("llm_filter_threshold", 6.0),
+            )
         q = q.order_by(desc(Report.selection_relevance), desc(Report.published_date))
         reports = q.all()
         if not report_ids:
@@ -174,28 +254,40 @@ def get_todays_papers(report_ids: list[int] | None = None) -> tuple[list[dict], 
         # 实际取到了哪几天的论文
         day_counts: dict[str, int] = {}
         for r in reports:
-            day = r.published_date.strftime("%Y-%m-%d") if r.published_date else "unknown"
+            day = (
+                r.published_date.strftime("%Y-%m-%d") if r.published_date else "unknown"
+            )
             day_counts[day] = day_counts.get(day, 0) + 1
         days_sorted = sorted(d for d in day_counts if d != "unknown")
-        logger.info("Papers by published_date: "
-                    + ", ".join(f"{d}: {day_counts[d]}" for d in sorted(day_counts, reverse=True)))
+        logger.info(
+            "Papers by published_date: "
+            + ", ".join(
+                f"{d}: {day_counts[d]}" for d in sorted(day_counts, reverse=True)
+            )
+        )
 
         if days_sorted:
             label_start, label_end = days_sorted[0], days_sorted[-1]
         else:
             label_start = label_end = today_start.strftime("%Y-%m-%d")
-        date_label = label_end if label_start == label_end else f"{label_start} ~ {label_end}"
+        date_label = (
+            label_end if label_start == label_end else f"{label_start} ~ {label_end}"
+        )
 
         papers = [_paper_metadata(row) for row in reports]
 
         selection_count = sum(1 for p in papers if p.get("selection_score", 0) > 0)
-        logger.info(f"Found {len(papers)} papers for push ({selection_count} LLM-selected), date label: {date_label}")
+        logger.info(
+            f"Found {len(papers)} papers for push ({selection_count} LLM-selected), date label: {date_label}"
+        )
         return papers, date_label, date_label
     finally:
         session.close()
 
 
-def deep_analyze_selected(paper_ids: list[int], depth: str = "standard", per_paper_timeout: int = 240) -> None:
+def deep_analyze_selected(
+    paper_ids: list[int], depth: str = "standard", per_paper_timeout: int = 240
+) -> None:
     """Run full-depth analysis (analyze.py --report-id) for only the papers that made
     it through selection and got pushed. This runs AFTER the push so it never delays
     delivery, and only touches the handful of selected papers instead of every
@@ -205,20 +297,32 @@ def deep_analyze_selected(paper_ids: list[int], depth: str = "standard", per_pap
     """
     for rid in paper_ids:
         cmd = [
-            sys.executable, "-m", "reportagent.cli.analyze",
-            "--report-id", str(rid), "--depth", depth,
+            sys.executable,
+            "-m",
+            "reportagent.cli.analyze",
+            "--report-id",
+            str(rid),
+            "--depth",
+            depth,
         ]
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=per_paper_timeout,
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=per_paper_timeout,
                 cwd=str(PROJECT_ROOT),
             )
             if result.returncode == 0:
                 logger.info(f"  Deep-analyzed report {rid}")
             else:
-                logger.warning(f"  Deep analysis failed for report {rid}: {result.stderr[:300]}")
+                logger.warning(
+                    f"  Deep analysis failed for report {rid}: {result.stderr[:300]}"
+                )
         except subprocess.TimeoutExpired:
-            logger.warning(f"  Deep analysis timed out for report {rid} (>{per_paper_timeout}s)")
+            logger.warning(
+                f"  Deep analysis timed out for report {rid} (>{per_paper_timeout}s)"
+            )
         except Exception as e:
             logger.warning(f"  Deep analysis error for report {rid}: {e}")
 
@@ -248,7 +352,7 @@ def fallback_briefing(papers: list[dict], date_label: str = "") -> str:
     for src, count in sources.items():
         lines.append(f"- {src}: {count} 篇")
 
-    lines.append(f"\n### 📄 论文速览\n")
+    lines.append("\n### 📄 论文速览\n")
     for p in papers:
         title = p["title"][:80]
         url = p.get("ui_url", "")
@@ -262,10 +366,13 @@ def fallback_briefing(papers: list[dict], date_label: str = "") -> str:
 
 def ensure_paper_links(briefing: str, papers: list[dict]) -> str:
     """The model may omit links; delivery completeness must not depend on it."""
-    missing = [p for p in papers if p.get("ui_url") and f"({p['ui_url']})" not in briefing]
+    missing = [
+        p for p in papers if p.get("ui_url") and f"({p['ui_url']})" not in briefing
+    ]
     if missing:
         briefing += "\n\n### 论文链接\n" + "\n".join(
-            f"- {p['title'][:80]} [📄 查看]({p['ui_url']})" for p in missing)
+            f"- {p['title'][:80]} [📄 查看]({p['ui_url']})" for p in missing
+        )
     return briefing
 
 
@@ -288,23 +395,29 @@ def send_complete_text(receive_id: str, text: str, receive_type: str) -> bool:
 # Step 4: Send Feishu message
 # ═══════════════════════════════════════════════════
 
+
 def send_feishu_text(receive_id: str, text: str, receive_type: str = "open_id"):
     """Send a text message via Feishu API."""
     import lark_oapi as lark
     from lark_oapi.api.im.v1.model.create_message_request import CreateMessageRequest
-    from lark_oapi.api.im.v1.model.create_message_request_body import CreateMessageRequestBody
+    from lark_oapi.api.im.v1.model.create_message_request_body import (
+        CreateMessageRequestBody,
+    )
 
     client = lark.Client.builder().app_id(APP_ID).app_secret(APP_SECRET).build()
     content = json.dumps({"text": text}, ensure_ascii=False)
-    request = CreateMessageRequest.builder() \
-        .receive_id_type(receive_type) \
+    request = (
+        CreateMessageRequest.builder()
+        .receive_id_type(receive_type)
         .request_body(
             CreateMessageRequestBody.builder()
             .receive_id(receive_id)
             .msg_type("text")
             .content(content)
             .build()
-        ).build()
+        )
+        .build()
+    )
     try:
         resp = client.im.v1.message.create(request)
         if resp.success():
@@ -318,7 +431,13 @@ def send_feishu_text(receive_id: str, text: str, receive_type: str = "open_id"):
         return False
 
 
-def send_feishu_card(receive_id: str, briefing: str, papers: list[dict], date_label: str = "", receive_type: str = "open_id"):
+def send_feishu_card(
+    receive_id: str,
+    briefing: str,
+    papers: list[dict],
+    date_label: str = "",
+    receive_type: str = "open_id",
+):
     """Send an interactive card (rich format) to Feishu."""
 
     label = date_label or datetime.now().strftime("%Y-%m-%d")
@@ -328,20 +447,29 @@ def send_feishu_card(receive_id: str, briefing: str, papers: list[dict], date_la
     elements = []
 
     # Header
-    elements.append({
-        "tag": "markdown",
-        "content": f"**📊 量化研报日报 — {label}**\n本期选入 {len(papers)} 篇库中论文"
-    })
+    elements.append(
+        {
+            "tag": "markdown",
+            "content": f"**📊 量化研报日报 — {label}**\n本期选入 {len(papers)} 篇库中论文",
+        }
+    )
 
     # Native section breaks keep lists and the next heading visually separate.
     elements.extend(card_sections(briefing, omit_leading_title=True))
 
     # Divider + action note
     elements.append({"tag": "hr"})
-    elements.append({
-        "tag": "note",
-        "elements": [{"tag": "plain_text", "content": "基于已保存评估生成 · 原文证据与待核验项见论文详情 | AlphaReport"}]
-    })
+    elements.append(
+        {
+            "tag": "note",
+            "elements": [
+                {
+                    "tag": "plain_text",
+                    "content": "基于已保存评估生成 · 原文证据与待核验项见论文详情 | AlphaReport",
+                }
+            ],
+        }
+    )
 
     card = {
         "config": {"wide_screen_mode": True},
@@ -354,19 +482,24 @@ def send_feishu_card(receive_id: str, briefing: str, papers: list[dict], date_la
 
     import lark_oapi as lark
     from lark_oapi.api.im.v1.model.create_message_request import CreateMessageRequest
-    from lark_oapi.api.im.v1.model.create_message_request_body import CreateMessageRequestBody
+    from lark_oapi.api.im.v1.model.create_message_request_body import (
+        CreateMessageRequestBody,
+    )
 
     client = lark.Client.builder().app_id(APP_ID).app_secret(APP_SECRET).build()
     card_json = json.dumps(card, ensure_ascii=False)
-    request = CreateMessageRequest.builder() \
-        .receive_id_type(receive_type) \
+    request = (
+        CreateMessageRequest.builder()
+        .receive_id_type(receive_type)
         .request_body(
             CreateMessageRequestBody.builder()
             .receive_id(receive_id)
             .msg_type("interactive")
             .content(card_json)
             .build()
-        ).build()
+        )
+        .build()
+    )
     try:
         resp = client.im.v1.message.create(request)
         if resp.success():
@@ -403,22 +536,39 @@ def daily_run_lock():
 
 def save_run_record(result: dict) -> None:
     from reportagent.models.database import ReportRun
+
     init_db()
     with get_session_factory()() as session:
-        session.merge(ReportRun(run_id=result["run_id"], status=result["status"],
-                                result_json=json.dumps(result, ensure_ascii=False)))
+        session.merge(
+            ReportRun(
+                run_id=result["run_id"],
+                status=result["status"],
+                result_json=json.dumps(result, ensure_ascii=False),
+            )
+        )
         session.commit()
 
 
 def run_daily_push(options: DailyPushOptions) -> dict:
     """One bounded, recorded workflow; analysis always precedes delivery."""
-    if options.max_reviews is not None and (type(options.max_reviews) is not int or not 1 <= options.max_reviews <= 12):
+    if options.max_reviews is not None and (
+        type(options.max_reviews) is not int or not 1 <= options.max_reviews <= 12
+    ):
         raise ValueError("每期全文评估数量必须在 1 到 12 之间")
     with daily_run_lock():
-        result = {"run_id": str(uuid.uuid4()), "status": "running", "source_statuses": [],
-                  "report_ids": [], "deliveries": {}, "stages": {}, "warnings": [],
-                  "started_at": datetime.now(timezone.utc).isoformat()}
-        artifact = PROJECT_ROOT / "data" / "daily_reports" / (result["run_id"] + ".json")
+        result = {
+            "run_id": str(uuid.uuid4()),
+            "status": "running",
+            "source_statuses": [],
+            "report_ids": [],
+            "deliveries": {},
+            "stages": {},
+            "warnings": [],
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
+        artifact = (
+            PROJECT_ROOT / "data" / "daily_reports" / (result["run_id"] + ".json")
+        )
         result["run_artifact_path"] = str(artifact)
         try:
             result.update(_prepare_and_deliver(options, result))
@@ -437,14 +587,20 @@ def run_daily_push(options: DailyPushOptions) -> dict:
                 # Final run state, including early failures and send results.
                 artifact.parent.mkdir(parents=True, exist_ok=True)
                 temporary = artifact.with_suffix(".json.tmp")
-                temporary.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+                temporary.write_text(
+                    json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
                 temporary.replace(artifact)
 
 
 def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
     global UI_BASE_URL, PUSH_SETTINGS
     PUSH_SETTINGS = _load_push_settings()
-    max_reviews = options.max_reviews if options.max_reviews is not None else PUSH_SETTINGS.get("max_reviews", 12)
+    max_reviews = (
+        options.max_reviews
+        if options.max_reviews is not None
+        else PUSH_SETTINGS.get("max_reviews", 12)
+    )
     if type(max_reviews) is not int or not 1 <= max_reviews <= 12:
         raise ValueError("每期全文评估数量必须在 1 到 12 之间")
     max_featured = min(5, int(PUSH_SETTINGS.get("max_featured", 5)))
@@ -456,30 +612,59 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
             logger.warning("Public URL sync skipped; using configured URL")
         load_dotenv(override=True)
     UI_BASE_URL = get_web_base_url()
-    receive_ids = [s.strip() for s in (options.receive_ids or os.environ.get("FEISHU_DAILY_PUSH_IDS", "")).split(",") if s.strip()]
-    receive_type = options.receive_type or os.environ.get("FEISHU_DAILY_PUSH_TYPE", "open_id")
+    receive_ids = [
+        s.strip()
+        for s in (
+            options.receive_ids or os.environ.get("FEISHU_DAILY_PUSH_IDS", "")
+        ).split(",")
+        if s.strip()
+    ]
+    receive_type = options.receive_type or os.environ.get(
+        "FEISHU_DAILY_PUSH_TYPE", "open_id"
+    )
     if not options.dry_run and not receive_ids:
         raise ValueError("请明确指定飞书收件人")
     collection = read_latest_collection(PROJECT_ROOT)
     source_statuses = collection.get("source_statuses", []) if collection else []
     checked_at = collection["completed_at"] if collection else None
-    run["stages"]["collection"] = {"status": "not_run", "reason": "report_reads_library_only"}
+    run["stages"]["collection"] = {
+        "status": "not_run",
+        "reason": "report_reads_library_only",
+    }
     run["collection_run"] = collection
     if collection and collection["status"] in {"failed", "partial", "cancelled"}:
-        run["warnings"].append("最近一次定时采集未完整成功；本次仅使用库中已有资料，最新资料覆盖可能不完整。")
+        run["warnings"].append(
+            "最近一次定时采集未完整成功；本次仅使用库中已有资料，最新资料覆盖可能不完整。"
+        )
     ids = [int(s.strip()) for s in options.report_ids.split(",") if s.strip()]
     run["stages"]["relevance"] = {"status": "skipped", "reason": "explicit_report_ids"}
     if not ids:
         # Apply the current rubric to unjudged/stale library rows.
         try:
-            scored = subprocess.run([sys.executable, "-m", "reportagent.cli.llm_filter", "--published-days", str(PUSH_WINDOW_DAYS),
-                                     "--batch-size", str(PUSH_SETTINGS.get("llm_batch_size", 10))],
-                                    capture_output=True, text=True, timeout=300, cwd=str(PROJECT_ROOT))
+            scored = subprocess.run(
+                [
+                    sys.executable,
+                    "-m",
+                    "reportagent.cli.llm_filter",
+                    "--published-days",
+                    str(PUSH_WINDOW_DAYS),
+                    "--batch-size",
+                    str(PUSH_SETTINGS.get("llm_batch_size", 10)),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                cwd=str(PROJECT_ROOT),
+            )
             run["stages"]["relevance"] = {
-                "status": "failed" if scored.returncode else "ok", "returncode": scored.returncode,
+                "status": "failed" if scored.returncode else "ok",
+                "returncode": scored.returncode,
             }
         except (subprocess.SubprocessError, OSError) as exc:
-            run["stages"]["relevance"] = {"status": "failed", "error": type(exc).__name__}
+            run["stages"]["relevance"] = {
+                "status": "failed",
+                "error": type(exc).__name__,
+            }
         if run["stages"]["relevance"]["status"] == "failed":
             warning = "相关性筛选未完整成功；本期只包含已通过当前筛选标准的有效候选，覆盖可能不完整。"
             run["warnings"].append(warning)
@@ -492,8 +677,18 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
     if not candidates and run["stages"]["relevance"]["status"] == "failed":
         raise RuntimeError("相关性筛选失败且没有可用候选，本次不能作为正常空日报。")
     review_audit = {}
-    assessments = asyncio.run(review_report_ids(run["report_ids"], force=options.force_review,
-                                               max_reviews=max_reviews, audit=review_audit)) if candidates else {}
+    assessments = (
+        asyncio.run(
+            review_report_ids(
+                run["report_ids"],
+                force=options.force_review,
+                max_reviews=max_reviews,
+                audit=review_audit,
+            )
+        )
+        if candidates
+        else {}
+    )
     run["stages"]["review"] = review_audit
     candidates = [p for p in candidates if p["id"] in assessments]
     run["report_ids"] = [p["id"] for p in candidates]
@@ -503,12 +698,21 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
     run["papers"] = candidates
 
     def render(papers):
-        text = render_briefing(papers, date_label, source_statuses=source_statuses,
-                               max_featured=max_featured, source_checked_at=checked_at)
+        text = render_briefing(
+            papers,
+            date_label,
+            source_statuses=source_statuses,
+            max_featured=max_featured,
+            source_checked_at=checked_at,
+        )
         if not papers:
             text += "\n\n本期暂无符合日期范围与筛选条件的论文。"
         if run["warnings"]:
-            text = "\n".join(f"> ⚠ {warning}" for warning in run["warnings"]) + "\n\n" + text
+            text = (
+                "\n".join(f"> ⚠ {warning}" for warning in run["warnings"])
+                + "\n\n"
+                + text
+            )
         return text
 
     briefing = render(candidates)
@@ -518,17 +722,30 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
     path.write_text(briefing, encoding="utf-8")
     if options.output:
         Path(options.output).write_text(briefing, encoding="utf-8")
-    run.update(artifact_path=str(path), paper_count=len(candidates), source_statuses=source_statuses, briefing=briefing)
+    run.update(
+        artifact_path=str(path),
+        paper_count=len(candidates),
+        source_statuses=source_statuses,
+        briefing=briefing,
+    )
     if options.dry_run:
         print(briefing)
-        return {"status": "partial" if run["warnings"] else "preview", "outcome": "preview", "artifact_path": str(path)}
+        return {
+            "status": "partial" if run["warnings"] else "preview",
+            "outcome": "preview",
+            "artifact_path": str(path),
+        }
     any_failure = False
     for recipient in dict.fromkeys(receive_ids):
-        success = send_feishu_card(recipient, briefing, candidates, date_label, receive_type)
+        success = send_feishu_card(
+            recipient, briefing, candidates, date_label, receive_type
+        )
         run["deliveries"][recipient] = success
         if not success:
             any_failure = True
     if any_failure:
         raise RuntimeError("部分飞书投递未成功，请查看本次运行中的逐收件人发送结果")
-    status = "empty" if not candidates else "partial" if run["warnings"] else "delivered"
+    status = (
+        "empty" if not candidates else "partial" if run["warnings"] else "delivered"
+    )
     return {"status": status, "outcome": "delivered", "artifact_path": str(path)}

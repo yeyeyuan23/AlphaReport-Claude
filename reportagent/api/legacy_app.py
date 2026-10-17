@@ -1,20 +1,30 @@
 """Optional historical LangGraph API; not the default deployment entrypoint."""
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from reportagent.db.engine import init_db
-from reportagent.api import collection, reports, classification, system, chat, reproduction
+from reportagent.api import (
+    collection,
+    reports,
+    classification,
+    system,
+    chat,
+    reproduction,
+)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import logging
+
     _log = logging.getLogger(__name__)
     init_db()
     try:
         from reportagent.services.scheduler import start_scheduler
+
         start_scheduler()
         print("[MAIN] Scheduler started OK", flush=True)
     except Exception as e:
@@ -23,6 +33,7 @@ async def lifespan(app: FastAPI):
     yield
     try:
         from reportagent.services.scheduler import stop_scheduler
+
         stop_scheduler()
     except Exception:
         pass
@@ -52,4 +63,7 @@ app.include_router(chat.router)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("reportagent.api.legacy_app:app", host="0.0.0.0", port=8000, reload=True)
+
+    uvicorn.run(
+        "reportagent.api.legacy_app:app", host="0.0.0.0", port=8000, reload=True
+    )

@@ -38,7 +38,9 @@ def _report_to_dict(r) -> dict:
         "doi": r.doi,
         "arxiv_id": r.arxiv_id,
         "published_date": r.published_date.isoformat() if r.published_date else None,
-        "publication_date_info": json.loads(r.publication_date_info_json) if r.publication_date_info_json else {},
+        "publication_date_info": json.loads(r.publication_date_info_json)
+        if r.publication_date_info_json
+        else {},
         "has_full_text": r.has_full_text,
         "markets": r.markets.split(",") if r.markets else [],
         "asset_classes": r.asset_classes.split(",") if r.asset_classes else [],
@@ -48,7 +50,9 @@ def _report_to_dict(r) -> dict:
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "classification_confidence": r.classification_confidence,
         "classification_method": r.classification_method,
-        "classification_provenance": json.loads(r.classification_provenance_json) if r.classification_provenance_json else {},
+        "classification_provenance": json.loads(r.classification_provenance_json)
+        if r.classification_provenance_json
+        else {},
     }
 
 
@@ -58,13 +62,25 @@ def main():
     parser.add_argument("--get", type=int, help="Get report by ID")
     parser.add_argument("--search", type=str, help="Search reports")
     parser.add_argument("--stats", action="store_true", help="Show DB stats")
-    parser.add_argument("--update-analysis", type=int, help="Update analysis for report ID")
-    parser.add_argument("--update-summary", type=int, help="Update summary for report ID")
-    parser.add_argument("--update-knowledge-card", type=int, help="Update knowledge card for report ID")
-    parser.add_argument("--file", type=str, help="JSON file for --update-analysis / --update-knowledge-card")
+    parser.add_argument(
+        "--update-analysis", type=int, help="Update analysis for report ID"
+    )
+    parser.add_argument(
+        "--update-summary", type=int, help="Update summary for report ID"
+    )
+    parser.add_argument(
+        "--update-knowledge-card", type=int, help="Update knowledge card for report ID"
+    )
+    parser.add_argument(
+        "--file",
+        type=str,
+        help="JSON file for --update-analysis / --update-knowledge-card",
+    )
     parser.add_argument("--text", type=str, help="Text for --update-summary")
     parser.add_argument("--limit", type=int, default=20)
-    parser.add_argument("--full", action="store_true", help="Include full text in output")
+    parser.add_argument(
+        "--full", action="store_true", help="Include full text in output"
+    )
     parser.add_argument("--json-output", type=str, help="Output JSON file")
 
     args = parser.parse_args()
@@ -88,7 +104,9 @@ def main():
             reports, total = repo.list_reports(params)
             result = {"total": total, "reports": [_report_to_dict(r) for r in reports]}
             if args.json_output:
-                Path(args.json_output).write_text(json.dumps(result, ensure_ascii=False, indent=2))
+                Path(args.json_output).write_text(
+                    json.dumps(result, ensure_ascii=False, indent=2)
+                )
             else:
                 print(json.dumps(result, ensure_ascii=False, indent=2))
 
@@ -113,7 +131,9 @@ def main():
                 except Exception:
                     pass
             if args.json_output:
-                Path(args.json_output).write_text(json.dumps(data, ensure_ascii=False, indent=2))
+                Path(args.json_output).write_text(
+                    json.dumps(data, ensure_ascii=False, indent=2)
+                )
             else:
                 print(json.dumps(data, ensure_ascii=False, indent=2))
 
@@ -121,7 +141,11 @@ def main():
         elif args.search:
             params = ReportListParams(search=args.search, limit=args.limit)
             reports, total = repo.list_reports(params)
-            result = {"query": args.search, "total": total, "reports": [_report_to_dict(r) for r in reports]}
+            result = {
+                "query": args.search,
+                "total": total,
+                "reports": [_report_to_dict(r) for r in reports],
+            }
             print(json.dumps(result, ensure_ascii=False, indent=2))
 
         # ── Update Analysis ──
@@ -149,7 +173,9 @@ def main():
             if r:
                 r.knowledge_card_json = kc
                 session.commit()
-                logger.info(f"Knowledge card saved for report {args.update_knowledge_card}")
+                logger.info(
+                    f"Knowledge card saved for report {args.update_knowledge_card}"
+                )
             else:
                 logger.error(f"Report {args.update_knowledge_card} not found")
 

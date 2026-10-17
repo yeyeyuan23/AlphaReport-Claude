@@ -4,7 +4,10 @@ import logging
 
 from reportagent.agents.state import AgentState
 from reportagent.classifiers.rule_classifier import RuleClassifier
-from reportagent.classifiers.llm_classifier import LLMClassifier, ClassificationEvidenceError
+from reportagent.classifiers.llm_classifier import (
+    LLMClassifier,
+    ClassificationEvidenceError,
+)
 from reportagent.models.schemas import ClassifiedReport, ClassificationResult
 
 logger = logging.getLogger(__name__)
@@ -51,19 +54,25 @@ class ClassificationAgent:
                     final = self._merge_results(rule_result, llm_result)
                     llm_used += 1
                 except ClassificationEvidenceError:
-                    final = ClassificationResult(method="unverified", provenance={"status": "unverified"})
+                    final = ClassificationResult(
+                        method="unverified", provenance={"status": "unverified"}
+                    )
                     unverified += 1
-                    state["messages"].append(f"Classification evidence invalid: {title[:40]}; stored without labels")
+                    state["messages"].append(
+                        f"Classification evidence invalid: {title[:40]}; stored without labels"
+                    )
                 except Exception as e:
                     logger.warning("LLM classification for '%s': %s", title[:50], e)
                     final = rule_result
             else:
                 final = rule_result
 
-            classified.append(ClassifiedReport(
-                search_result=sr,
-                classification=final,
-            ))
+            classified.append(
+                ClassifiedReport(
+                    search_result=sr,
+                    classification=final,
+                )
+            )
 
             msg = f"Classified {i + 1}/{total}: {title[:40]}..."
             state["messages"].append(msg)

@@ -4,7 +4,7 @@ import asyncio
 import logging
 
 from reportagent.agents.state import AgentState
-from reportagent.models.schemas import SearchResult, SourceType
+from reportagent.models.schemas import SearchResult
 from reportagent.sources.base import BaseSource
 from reportagent.llm.client import LLMClient
 from reportagent.utils.hashing import normalize_text
@@ -24,7 +24,8 @@ class CollectionAgent:
         state["messages"].append("Starting collection across sources...")
 
         enabled_sources = [
-            s for s in self.sources
+            s
+            for s in self.sources
             if s.source_type in criteria.sources and s.is_available()
         ]
 
@@ -35,7 +36,9 @@ class CollectionAgent:
             return state
 
         source_names = [s.source_type.value for s in enabled_sources]
-        state["messages"].append(f"Searching {len(enabled_sources)} sources: {', '.join(source_names)}")
+        state["messages"].append(
+            f"Searching {len(enabled_sources)} sources: {', '.join(source_names)}"
+        )
 
         tasks = [source.search(criteria) for source in enabled_sources]
         try:

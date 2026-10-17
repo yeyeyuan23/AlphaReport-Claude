@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TypedDict, Optional, Callable, Any
+from typing import TypedDict, Optional, Callable
 
 from reportagent.models.schemas import (
     UserCriteria,

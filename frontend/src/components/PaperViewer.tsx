@@ -1,14 +1,14 @@
-import { useEffect, useState } from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   SOURCE_LABELS,
   MARKET_LABELS,
   ASSET_LABELS,
   FREQUENCY_LABELS,
   TOPIC_LABELS,
-} from "@/types";
-import type { ReportDetail } from "@/types";
+} from '@/types';
+import type { ReportDetail } from '@/types';
 
 interface PaperViewerProps {
   report: ReportDetail;
@@ -19,7 +19,9 @@ export default function PaperViewer({ report }: PaperViewerProps) {
 }
 
 function PaperViewerContent({ report }: PaperViewerProps) {
-  const [pdf, setPdf] = useState<{ status: "checking" | "ready" | "unavailable"; url?: string }>({ status: "checking" });
+  const [pdf, setPdf] = useState<{ status: 'checking' | 'ready' | 'unavailable'; url?: string }>({
+    status: 'checking',
+  });
   const [readBody, setReadBody] = useState(false);
   const pdfUrl = `/api/v1/reports/${report.id}/pdf`;
   const hasBody = Boolean(report.abstract?.trim() || report.full_text?.trim());
@@ -30,24 +32,24 @@ function PaperViewerContent({ report }: PaperViewerProps) {
     let objectUrl: string | undefined;
     const timeout = window.setTimeout(() => {
       controller.abort();
-      if (active) setPdf({ status: "unavailable" });
+      if (active) setPdf({ status: 'unavailable' });
     }, 15000);
 
     async function loadPdf() {
       try {
         const response = await fetch(pdfUrl, { signal: controller.signal });
-        const mediaType = response.headers.get("Content-Type")?.split(";")[0].trim().toLowerCase();
-        if (!response.ok || mediaType !== "application/pdf") {
+        const mediaType = response.headers.get('Content-Type')?.split(';')[0].trim().toLowerCase();
+        if (!response.ok || mediaType !== 'application/pdf') {
           await response.body?.cancel();
-          throw new Error("PDF unavailable");
+          throw new Error('PDF unavailable');
         }
         const blob = await response.blob();
-        if (!blob.size) throw new Error("Empty PDF");
+        if (!blob.size) throw new Error('Empty PDF');
         if (!active || controller.signal.aborted) return;
         objectUrl = URL.createObjectURL(blob);
-        setPdf({ status: "ready", url: objectUrl });
+        setPdf({ status: 'ready', url: objectUrl });
       } catch {
-        if (active) setPdf({ status: "unavailable" });
+        if (active) setPdf({ status: 'unavailable' });
       } finally {
         window.clearTimeout(timeout);
       }
@@ -63,19 +65,19 @@ function PaperViewerContent({ report }: PaperViewerProps) {
 
   const allTags = [
     ...report.markets.map((m) => ({
-      label: "市场",
+      label: '市场',
       value: MARKET_LABELS[m as keyof typeof MARKET_LABELS] || m,
     })),
     ...report.asset_classes.map((a) => ({
-      label: "资产",
+      label: '资产',
       value: ASSET_LABELS[a as keyof typeof ASSET_LABELS] || a,
     })),
     ...report.frequencies.map((f) => ({
-      label: "频率",
+      label: '频率',
       value: FREQUENCY_LABELS[f as keyof typeof FREQUENCY_LABELS] || f,
     })),
     ...report.topics.map((t) => ({
-      label: "主题",
+      label: '主题',
       value: TOPIC_LABELS[t as keyof typeof TOPIC_LABELS] || t,
     })),
   ];
@@ -84,15 +86,11 @@ function PaperViewerContent({ report }: PaperViewerProps) {
     <div className="flex flex-col h-full">
       {/* Metadata Header */}
       <div className="px-4 py-3 border-b shrink-0">
-        <h1 className="text-base font-semibold leading-snug mb-1.5">
-          {report.title}
-        </h1>
+        <h1 className="text-base font-semibold leading-snug mb-1.5">{report.title}</h1>
 
         <div className="flex items-center gap-2 mb-1.5 flex-wrap">
           {report.authors.length > 0 && (
-            <span className="text-sm text-muted-foreground">
-              {report.authors.join(", ")}
-            </span>
+            <span className="text-sm text-muted-foreground">{report.authors.join(', ')}</span>
           )}
           <Badge variant="secondary" className="text-xs">
             {SOURCE_LABELS[report.source] || report.source}
@@ -117,24 +115,32 @@ function PaperViewerContent({ report }: PaperViewerProps) {
 
       <div className="flex items-center gap-2 px-4 py-2 border-b shrink-0">
         {hasBody && (
-          <Button variant="outline" size="sm" onClick={() => setReadBody(!readBody)}
-            disabled={readBody && pdf.status !== "ready"}>
-            {readBody ? "查看 PDF" : "阅读正文"}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setReadBody(!readBody)}
+            disabled={readBody && pdf.status !== 'ready'}
+          >
+            {readBody ? '查看 PDF' : '阅读正文'}
           </Button>
         )}
         <Button asChild variant="outline" size="sm">
-          <a href={pdfUrl} target="_blank" rel="noopener noreferrer">在新窗口打开 PDF</a>
+          <a href={pdfUrl} target="_blank" rel="noopener noreferrer">
+            在新窗口打开 PDF
+          </a>
         </Button>
       </div>
 
       <div className="flex-1 min-h-0 bg-muted/30">
-        {!readBody && pdf.status === "ready" ? (
+        {!readBody && pdf.status === 'ready' ? (
           <iframe src={pdf.url} className="w-full h-full" title="PDF Viewer" />
-        ) : !readBody && pdf.status === "checking" ? (
-          <div role="status" className="p-8 text-sm text-muted-foreground">正在检查 PDF...</div>
+        ) : !readBody && pdf.status === 'checking' ? (
+          <div role="status" className="p-8 text-sm text-muted-foreground">
+            正在检查 PDF...
+          </div>
         ) : (
           <div className="h-full p-6 overflow-auto text-sm">
-            {pdf.status === "unavailable" && (
+            {pdf.status === 'unavailable' && (
               <p className="text-muted-foreground mb-4">PDF 暂时无法显示</p>
             )}
             {!hasBody && <p className="text-muted-foreground">暂无可显示的正文或摘要</p>}

@@ -482,3 +482,20 @@ bash -n start.sh scripts/ops/run_bot.sh scripts/ops/keepalive.sh scripts/ops/syn
 自动测试默认只收集 `tests/unit/` 和 `tests/integration/`，使用固定输入、临时数据库和替代外部接口。离线护栏禁止真实网络、模型和消息发送。前端构建和 lint 是不同检查。
 
 真实多来源采集、DeepSeek 分类/批量分析、全库相关性筛选和周报内容验收单独放在 `tests/acceptance/`，显式运行并保存产物。自动检查可判断日期、去重、状态和证据完整性；分析是否准确、有洞察，需要对照原文评阅。目录分工、执行方式和评阅标准见 [tests/README.md](tests/README.md)。
+
+
+## 自动检查（CI）
+
+每次推送、提交 PR 或在 GitHub Actions 手动运行时，`CI` 工作流执行：Python 格式与 lint、Python 3.10/3.12 离线测试、前端格式与 ESLint、前端组件测试和 TypeScript/生产构建。检查完整源码；首次接入已统一现有文件格式。GitHub 检查只读代码，不发布网站，也不需要模型或飞书密钥。
+
+本地运行同一套检查：
+
+```bash
+.venv/bin/python -m pip install -r requirements/test.txt -r requirements/lint.txt
+.venv/bin/python -m ruff format --check .
+.venv/bin/python -m ruff check .
+.venv/bin/python -m pytest -q
+(cd frontend && npm ci && npm run format:check && npm run lint && npm test && npm run build)
+```
+
+自动修正排版使用 `.venv/bin/python -m ruff format .` 和 `(cd frontend && npm run format)`。格式检查不会改写文件；lint 与测试失败需要修复对应代码后重新推送。

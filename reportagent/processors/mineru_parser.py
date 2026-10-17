@@ -5,7 +5,6 @@ import logging
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -96,18 +95,18 @@ def _extract_latex_from_text(text: str) -> str:
     elif t.startswith("$") and t.endswith("$"):
         t = t[1:-1]
     # Remove \\tag{...} markers
-    t = re.sub(r'\\tag\{[^}]*\}', '', t)
+    t = re.sub(r"\\tag\{[^}]*\}", "", t)
     # Collapse excessive newlines
-    t = re.sub(r'\n{3,}', '\n\n', t)
+    t = re.sub(r"\n{3,}", "\n\n", t)
 
     # Token-based cleaning: split on spaces, merge runs of single-char tokens
     # (like "r e t 2 0") but preserve LaTeX commands (tokens starting with \)
-    tokens = t.split(' ')
+    tokens = t.split(" ")
     result = []
     i = 0
     while i < len(tokens):
         tok = tokens[i]
-        if tok.startswith('\\') or len(tok) != 1:
+        if tok.startswith("\\") or len(tok) != 1:
             result.append(tok)
             i += 1
         else:
@@ -115,28 +114,28 @@ def _extract_latex_from_text(text: str) -> str:
             j = i + 1
             while j < len(tokens):
                 nxt = tokens[j]
-                if nxt.startswith('\\') or len(nxt) != 1:
+                if nxt.startswith("\\") or len(nxt) != 1:
                     break
                 run.append(nxt)
                 j += 1
-            result.append(''.join(run))
+            result.append("".join(run))
             i = j
-    t = ' '.join(result)
+    t = " ".join(result)
 
     # Fix \\_ to _ (MinerU uses escaped underscore; in math mode _ is subscript)
-    t = t.replace('\\_', '_')
+    t = t.replace("\\_", "_")
 
     # Remove spaces inside braces
-    t = re.sub(r'\{\s+', '{', t)
-    t = re.sub(r'\s+\}', '}', t)
+    t = re.sub(r"\{\s+", "{", t)
+    t = re.sub(r"\s+\}", "}", t)
 
     # Fix ". " / "." artifacts that should be underscores in variable names
-    t = re.sub(r'([a-zA-Z0-9]) \. ([a-zA-Z0-9])', r'\1_\2', t)
-    t = re.sub(r'([a-zA-Z])\.([a-zA-Z])', r'\1_\2', t)
+    t = re.sub(r"([a-zA-Z0-9]) \. ([a-zA-Z0-9])", r"\1_\2", t)
+    t = re.sub(r"([a-zA-Z])\.([a-zA-Z])", r"\1_\2", t)
 
     # Remove spaces before ^ and _
-    t = re.sub(r'\s*\^\s*', '^', t)
-    t = re.sub(r'\s*_\s*', '_', t)
+    t = re.sub(r"\s*\^\s*", "^", t)
+    t = re.sub(r"\s*_\s*", "_", t)
 
     return t.strip()
 
@@ -149,7 +148,11 @@ class MinerUParser:
             try:
                 content_list = _run_mineru_parse(pdf_path, tmp_dir)
             except Exception as e:
-                logger.warning("MinerU parse failed for %s: %s, falling back to PyMuPDF", pdf_path, e)
+                logger.warning(
+                    "MinerU parse failed for %s: %s, falling back to PyMuPDF",
+                    pdf_path,
+                    e,
+                )
                 return self._fallback_parse(pdf_path)
 
         return self._build_result(content_list, pdf_path)
@@ -172,28 +175,34 @@ class MinerUParser:
             if item_type == "text":
                 text_parts.append(item.get("text", ""))
             elif item_type == "table":
-                tables.append({
-                    "table_body": item.get("table_body", ""),
-                    "table_caption": item.get("table_caption", []),
-                    "page_idx": page_idx,
-                })
+                tables.append(
+                    {
+                        "table_body": item.get("table_body", ""),
+                        "table_caption": item.get("table_caption", []),
+                        "page_idx": page_idx,
+                    }
+                )
             elif item_type == "image":
-                images.append({
-                    "img_path": item.get("img_path", ""),
-                    "image_caption": item.get("image_caption", []),
-                    "page_idx": page_idx,
-                })
+                images.append(
+                    {
+                        "img_path": item.get("img_path", ""),
+                        "image_caption": item.get("image_caption", []),
+                        "page_idx": page_idx,
+                    }
+                )
             elif item_type == "equation":
                 latex = item.get("latex", "")
                 text = item.get("text", "")
                 # MinerU often puts LaTeX in the `text` field wrapped in $$...$$
                 if not latex and text:
                     latex = _extract_latex_from_text(text)
-                equations.append({
-                    "latex": latex,
-                    "text": text,
-                    "page_idx": page_idx,
-                })
+                equations.append(
+                    {
+                        "latex": latex,
+                        "text": text,
+                        "page_idx": page_idx,
+                    }
+                )
 
         return ParsedContent(
             text="\n".join(text_parts),
@@ -207,6 +216,7 @@ class MinerUParser:
 
     def _fallback_parse(self, pdf_path: str) -> ParsedContent:
         import fitz
+
         doc = fitz.open(pdf_path)
         try:
             text_parts = [page.get_text() for page in doc]
