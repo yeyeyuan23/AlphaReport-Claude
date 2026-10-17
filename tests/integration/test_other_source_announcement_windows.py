@@ -1,10 +1,16 @@
 """Offline source-owned announcement windows and complete metadata pagination."""
 
 import asyncio
+import json
 from datetime import datetime, timezone
 
 import httpx
 import pytest
+from tests.support.source_fixtures import (
+    bigquant_info,
+    bigquant_document,
+    bigquant_page,
+)
 
 from reportagent.models.schemas import UserCriteria
 from reportagent.sources.bigquant_source import BigQuantSource
@@ -137,32 +143,24 @@ def test_eastmoney_unlimited_incomplete_pagination_is_diagnostic(payload, reason
     assert len(rows) <= 1
 
 
-def test_bigquant_unlimited_ignores_manual_page_cap_and_processes_beyond_15(
-    monkeypatch,
-):
+def test_bigquant_unlimited_processes_all_reported_pages_beyond_15(monkeypatch):
     pages = []
 
     def respond(request):
-        if "/collection/" in request.url.path:
-            page = int(request.url.params["page"])
-            pages.append(page)
-            if page == 13:
-                return httpx.Response(200, text='<div class="ant-empty">暂无文档</div>')
-            return httpx.Response(
-                200,
-                text="<h1>Collection</h1>"
-                + "".join(
-                    f'<a href="/wiki/doc/{page}-{n}">portfolio model</a>'
-                    for n in range(2)
-                ),
-            )
-        assert not request.url.path.endswith(".pdf")
-        return httpx.Response(200, text=article("2026-10-15 09:00:00"))
+        if request.url.path.endswith("collections.info"):
+            return bigquant_info()
+        offset = json.loads(request.content)["offset"]
+        page = offset // 2 + 1
+        pages.append(page)
+        if page == 13:
+            return bigquant_page([])
+        return bigquant_page(
+            [bigquant_document(f"{page}-{n}", original="2020-01-02") for n in range(2)],
+            next_offset=offset + 2,
+        )
 
     mock_http(monkeypatch, respond)
-    source = BigQuantSource(
-        rate_limit_seconds=0, max_listing_pages=1, download_pdfs=False
-    )
+    source = BigQuantSource(rate_limit_seconds=0, download_pdfs=False)
     rows = asyncio.run(source.search(criteria()))
     assert len(rows) == 24
     assert pages == list(range(1, 14))
@@ -170,37 +168,27 @@ def test_bigquant_unlimited_ignores_manual_page_cap_and_processes_beyond_15(
     assert rows[0].announced_at == datetime(2026, 10, 15, 1, tzinfo=timezone.utc)
     assert (
         rows[0].raw_metadata["announcement_info"]["source"]
-        == "meta:article:published_time"
+        == "bigquant_api:publishedAt"
     )
     assert source.last_search.errors == []
 
 
 def test_bigquant_announcement_dates_are_independent_of_original_dates(monkeypatch):
-    bodies = {
-        "before": article("2026-10-15T07:59:59+08:00"),
-        "start": article("2026-10-15T08:00:00+08:00"),
-        "end": article("2026-10-16T08:00:00+08:00"),
-        "unknown": article(),
-    }
-
-    def respond(request):
-        if "/collection/" in request.url.path:
-            if request.url.params["page"] != "1":
-                return httpx.Response(
-                    200, text='<div class="empty-state">暂无内容</div>'
-                )
-            return httpx.Response(
-                200,
-                text="".join(
-                    f'<a href="/wiki/doc/{name}">portfolio model</a>' for name in bodies
-                ),
-            )
-        return httpx.Response(200, text=bodies[request.url.path.rsplit("/", 1)[1]])
-
-    mock_http(monkeypatch, respond)
+    rows = [
+        bigquant_document("end", published="2026-10-16T08:00:00+08:00"),
+        bigquant_document("start", published="2026-10-15T08:00:00+08:00"),
+        bigquant_document("before", published="2026-10-15T07:59:59+08:00"),
+        bigquant_document("unknown", published=None),
+    ]
+    mock_http(
+        monkeypatch,
+        lambda request: bigquant_info()
+        if request.url.path.endswith("collections.info")
+        else bigquant_page(rows),
+    )
     source = BigQuantSource(rate_limit_seconds=0, download_pdfs=False)
-    rows = asyncio.run(source.search(criteria()))
-    assert [r.source_url.rsplit("/", 1)[1] for r in rows] == ["start"]
+    results = asyncio.run(source.search(criteria()))
+    assert [r.source_url.rsplit("/", 1)[1] for r in results] == ["start"]
     assert any(
         "announcement date unavailable" in error for error in source.last_search.errors
     )
@@ -211,13 +199,12 @@ def test_bigquant_unlimited_keeps_partial_candidates_on_listing_failure(
     monkeypatch, mode
 ):
     def respond(request):
-        if "/collection/" in request.url.path:
-            if request.url.params["page"] == "2" and mode == "failure":
-                return httpx.Response(503)
-            return httpx.Response(
-                200, text='<a href="/wiki/doc/one">portfolio model</a>'
-            )
-        return httpx.Response(200, text=article("2026-10-15T10:00:00+08:00"))
+        if request.url.path.endswith("collections.info"):
+            return bigquant_info()
+        offset = json.loads(request.content)["offset"]
+        if offset and mode == "failure":
+            return httpx.Response(503)
+        return bigquant_page([bigquant_document("one")], next_offset=offset + 1)
 
     mock_http(monkeypatch, respond)
     source = BigQuantSource(rate_limit_seconds=0, download_pdfs=False)
@@ -431,23 +418,19 @@ def test_bigquant_announcement_retains_generic_titles_in_listing_order(monkeypat
 
     def respond(request):
         requests.append(request.url.path)
-        if "/collection/" in request.url.path:
-            if request.url.params["page"] == "1":
-                return httpx.Response(
-                    200,
-                    text=(
-                        '<a href="/wiki/doc/generic">A new perspective</a>'
-                        '<a href="/wiki/doc/matched">Portfolio risk</a>'
-                    ),
-                )
-            return httpx.Response(200, text='<div class="ant-empty">暂无文档</div>')
-        assert not request.url.path.endswith(".pdf")
-        return httpx.Response(200, text=article("2026-10-15 09:00:00"))
+        if request.url.path.endswith("collections.info"):
+            return bigquant_info()
+        return bigquant_page(
+            [
+                bigquant_document("generic", title="A new perspective"),
+                bigquant_document("matched", title="Portfolio risk"),
+            ]
+        )
 
     mock_http(monkeypatch, respond)
     source = BigQuantSource(rate_limit_seconds=0, download_pdfs=False)
     rows = asyncio.run(source.search(criteria()))
-    assert [row.source_url.rsplit("/", 1)[1] for row in rows] == ["generic", "matched"]
-    assert all("Portfolio covariance and risk evidence" in row.abstract for row in rows)
+    assert [r.source_url.rsplit("/", 1)[1] for r in rows] == ["generic", "matched"]
+    assert all("Portfolio covariance and risk evidence" in r.abstract for r in rows)
     assert not any(path.endswith(".pdf") for path in requests)
     assert source.last_search.errors == []

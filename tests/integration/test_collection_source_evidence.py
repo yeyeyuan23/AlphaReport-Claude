@@ -7,6 +7,11 @@ from xml.etree import ElementTree
 
 import httpx
 import pytest
+from tests.support.source_fixtures import (
+    bigquant_info,
+    bigquant_document,
+    bigquant_page,
+)
 
 
 from reportagent.models.schemas import UserCriteria, SourceType
@@ -106,31 +111,19 @@ def test_arxiv_date_filter_converts_offsets_and_excludes_unknown_dates():
 
 def test_bigquant_date_window_applies_before_limit_and_unknown_is_excluded(monkeypatch):
     def respond(request):
-        path = request.url.path
-        if "/collection/" in path:
-            return httpx.Response(
-                200,
-                text="<h1>Collection</h1>"
-                + "".join(
-                    f'<a href="/wiki/doc/{name}">portfolio risk model {name}</a>'
-                    for name in ["old", "unknown", "in-range"]
-                ),
-            )
-        date = {
-            "old": "2020-01-01",
-            "unknown": None,
-            "in-range": "2026-10-11T23:30:00Z",
-        }[path.rsplit("/", 1)[1]]
-        meta = f'<meta name="citation_date" content="{date}">' if date else ""
-        return httpx.Response(
-            200,
-            text=meta
-            + "<article><h1>Portfolio risk</h1><p>A portfolio model estimates risk using observed market data.</p></article>",
+        if request.url.path.endswith("collections.info"):
+            return bigquant_info()
+        return bigquant_page(
+            [
+                bigquant_document("old", original="2020-01-01"),
+                bigquant_document("unknown"),
+                bigquant_document("in-range", original="2026-10-11T23:30:00Z"),
+            ]
         )
 
     mock_http(monkeypatch, respond)
     rows = asyncio.run(
-        BigQuantSource(rate_limit_seconds=0, max_listing_pages=1).search(
+        BigQuantSource(rate_limit_seconds=0).search(
             UserCriteria(
                 topics=["portfolio"],
                 date_from=datetime(2026, 10, 5),
@@ -202,35 +195,29 @@ def test_bigquant_skips_out_of_window_and_undated_pdfs_before_download(
 
     def respond(request):
         path = request.url.path
-        if "/collection/" in path:
-            return httpx.Response(
-                200,
-                text="<h1>Collection</h1>"
-                + "".join(
-                    f'<a href="/wiki/doc/{name}">portfolio {name}</a>' for name in dates
-                ),
+        if path.endswith("collections.info"):
+            return bigquant_info()
+        if path.endswith("documents.list"):
+            return bigquant_page(
+                [
+                    bigquant_document(
+                        name,
+                        title=f"Portfolio {name}",
+                        original=day,
+                        text=f'<a href="/pdf/{name}.pdf">PDF</a>',
+                    )
+                    for name, day in dates.items()
+                ]
             )
-        if path.endswith(".pdf"):
-            downloads.append(path)
-            return (
-                httpx.Response(200, content=attachment)
-                if path in {"/pdf/lower.pdf", "/pdf/upper.pdf"}
-                else httpx.Response(404)
-            )
-        name = path.rsplit("/", 1)[1]
-        meta = (
-            f'<meta name="citation_date" content="{dates[name]}">'
-            if dates[name]
-            else ""
-        )
-        return httpx.Response(
-            200,
-            text=meta + f"<article><h1>Portfolio {name}</h1>"
-            f'<a href="/pdf/{name}.pdf">PDF</a></article>',
+        downloads.append(path)
+        return (
+            httpx.Response(200, content=attachment)
+            if path in {"/pdf/lower.pdf", "/pdf/upper.pdf"}
+            else httpx.Response(404)
         )
 
     mock_http(monkeypatch, respond)
-    source = BigQuantSource(rate_limit_seconds=0, max_listing_pages=1)
+    source = BigQuantSource(rate_limit_seconds=0)
     rows = asyncio.run(
         source.search(
             UserCriteria(
@@ -264,10 +251,15 @@ def test_bigquant_undated_pdf_is_available_without_a_date_window(
     )
 
     def respond(request):
-        if "/collection/" in request.url.path:
-            return httpx.Response(
-                200,
-                text='<h1>Collection</h1><a href="/wiki/doc/undated">portfolio undated</a>',
+        if request.url.path.endswith("collections.info"):
+            return bigquant_info()
+        if request.url.path.endswith("documents.list"):
+            return bigquant_page(
+                [
+                    bigquant_document(
+                        "undated", text='<a href="/pdf/undated.pdf">PDF</a>'
+                    )
+                ]
             )
         if request.url.path.endswith(".pdf"):
             return httpx.Response(200, content=attachment)
@@ -277,7 +269,7 @@ def test_bigquant_undated_pdf_is_available_without_a_date_window(
         )
 
     mock_http(monkeypatch, respond)
-    source = BigQuantSource(rate_limit_seconds=0, max_listing_pages=1)
+    source = BigQuantSource(rate_limit_seconds=0)
     if entrypoint == "search":
         rows = asyncio.run(source.search(UserCriteria(topics=["portfolio"])))
         assert len(rows) == 1
@@ -502,25 +494,25 @@ def test_bigquant_bad_pdf_does_not_remove_valid_sibling(collect, monkeypatch, tm
 
     def respond(request):
         path = request.url.path
-        if "/collection/" in path:
-            return httpx.Response(
-                200,
-                text='<a href="/wiki/doc/bad">portfolio risk bad</a><a href="/wiki/doc/good">portfolio risk good</a>',
+        if path.endswith("collections.info"):
+            return bigquant_info()
+        if path.endswith("documents.list"):
+            return bigquant_page(
+                [
+                    bigquant_document(
+                        key,
+                        title=f"Portfolio optimization quantitative risk model {key}",
+                        text=f'<p>We study portfolio risk budgets and evaluate covariance allocation models.</p><a href="/{key}.pdf">PDF</a>',
+                    )
+                    for key in ["bad", "good"]
+                ]
             )
         if path.endswith("good.pdf"):
             return httpx.Response(200, content=pdf_bytes(text))
-        if path.endswith("bad.pdf"):
-            return httpx.Response(200, text="<html>blocked</html>")
-        key = path.rsplit("/", 1)[1]
-        return httpx.Response(
-            200,
-            text=f"<article><h1>Portfolio optimization quantitative risk model {key}</h1>"
-            "<p>We study portfolio risk budgets and evaluate covariance allocation models.</p>"
-            f'<a href="/{key}.pdf">PDF</a></article>',
-        )
+        return httpx.Response(200, text="<html>blocked</html>")
 
     mock_http(monkeypatch, respond)
-    result, rows = collect([BigQuantSource(rate_limit_seconds=0, max_listing_pages=1)])
+    result, rows = collect([BigQuantSource(rate_limit_seconds=0)])
     assert len(rows) == 2
     good = next(row for row in rows if row.title.endswith("good"))
     assert good.full_text and good.pdf_path

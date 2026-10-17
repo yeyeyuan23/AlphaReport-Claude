@@ -67,9 +67,6 @@ def build_sources(source_names: list[str] | None = None) -> list[BaseSource]:
                     rate_limit_seconds=get_config(
                         "sources", name, "rate_limit_seconds", default=2.0
                     ),
-                    max_listing_pages=get_config(
-                        "sources", name, "max_pages", default=10
-                    ),
                     download_pdfs=get_config(
                         "sources", name, "download_pdfs", default=True
                     ),

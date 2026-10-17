@@ -18,7 +18,7 @@ from reportagent.sources.base import (
     deduplicate_results,
     usable_full_text,
 )
-from reportagent.sources.date_window import in_date_window, utc_datetime
+from reportagent.sources.date_window import candidate_in_window, utc_datetime
 from reportagent.sources.content_fetch import (
     MAX_HTML_BYTES,
     article_text,
@@ -198,14 +198,7 @@ class EastMoneySource(BaseSource):
                     SourceParseError("announcement date unavailable"), "report date"
                 )
                 continue
-            if not in_date_window(stamp, criteria.date_from, criteria.date_to):
-                continue
-            if (
-                criteria.date_to_exclusive
-                and criteria.date_to
-                and stamp
-                and utc_datetime(stamp) >= utc_datetime(criteria.date_to)
-            ):
+            if not candidate_in_window(row, criteria):
                 continue
             dated.append(row)
         # Announcement collection delegates relevance to the shared abstract

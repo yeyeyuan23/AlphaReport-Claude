@@ -6,6 +6,11 @@ from unittest.mock import patch
 
 import httpx
 import pytest
+from tests.support.source_fixtures import (
+    bigquant_info,
+    bigquant_document,
+    bigquant_page,
+)
 
 from reportagent.models.schemas import SourceType
 from reportagent.sources.arxiv_source import ArxivSource
@@ -190,34 +195,27 @@ def test_eastmoney_bad_item_does_not_discard_siblings(collect, monkeypatch):
 )
 def test_bigquant_unrecognized_listing_is_parse_failure(collect, monkeypatch, body):
     mock_http(monkeypatch, lambda request: httpx.Response(200, text=body))
-    result, _ = collect([BigQuantSource(rate_limit_seconds=0, max_listing_pages=1)])
+    result, _ = collect([BigQuantSource(rate_limit_seconds=0)])
     assert result.get("status") == "failed"
     assert result["source_statuses"][0]["status"] == "error"
 
 
 def test_bigquant_dedup_and_bad_detail_preserve_good_article(collect, monkeypatch):
-    def respond(request):
-        if "/collection/" in request.url.path:
-            return httpx.Response(
-                200,
-                text='<html><body><a href="/wiki/doc/good">portfolio risk</a>'
-                '<a href="/wiki/doc/good">portfolio risk duplicate</a>'
-                '<a href="/wiki/doc/bad">portfolio risk bad</a></body></html>',
-            )
-        if request.url.path.endswith("good"):
-            return httpx.Response(
-                200,
-                text="<html><h1>Portfolio optimization</h1><article><p>"
-                "A quantitative finance portfolio risk model and its methodology."
-                "</p></article></html>",
-            )
-        return httpx.Response(200, text="<html><h1>Login required</h1></html>")
-
-    mock_http(monkeypatch, respond)
-    result, rows = collect([BigQuantSource(rate_limit_seconds=0, max_listing_pages=1)])
+    good = bigquant_document(
+        "good", title="Portfolio optimization quantitative risk model"
+    )
+    bad = bigquant_document("bad")
+    bad["urlId"] = None
+    mock_http(
+        monkeypatch,
+        lambda request: bigquant_info()
+        if request.url.path.endswith("collections.info")
+        else bigquant_page([good, good, bad]),
+    )
+    result, rows = collect([BigQuantSource(rate_limit_seconds=0)])
     assert len(rows) == 1
-    status = result.get("source_statuses", [{}])[0]
-    assert status.get("status") == "partial"
+    status = result["source_statuses"][0]
+    assert status["status"] == "partial"
     assert (status["fetched"], status["valid"]) == (3, 1)
 
 
@@ -362,9 +360,11 @@ def test_unusable_pdf_extraction_does_not_count_as_full_text(collect, monkeypatc
 def test_bigquant_explicit_empty_state_is_empty(collect, monkeypatch):
     mock_http(
         monkeypatch,
-        lambda request: httpx.Response(200, text="<html><h1>Wiki</h1>暂无文档</html>"),
+        lambda request: bigquant_info()
+        if request.url.path.endswith("collections.info")
+        else bigquant_page([]),
     )
-    result, _ = collect([BigQuantSource(rate_limit_seconds=0, max_listing_pages=1)])
+    result, _ = collect([BigQuantSource(rate_limit_seconds=0)])
     assert result["source_statuses"][0]["status"] == "empty"
 
 

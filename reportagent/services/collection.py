@@ -269,26 +269,16 @@ async def collect_reports(
                         break
                     try:
                         if online and criteria.date_basis == "announcement":
-                            from reportagent.services.report_periods import (
-                                publication_time,
+                            from reportagent.sources.date_window import (
+                                candidate_in_window,
                             )
-                            from reportagent.sources.date_window import utc_datetime
 
-                            stamp = publication_time(sr)
-                            if stamp is None:
+                            if sr.announced_at is None:
                                 errors.append(
                                     "announcement date unavailable; metadata not stored and PDF not downloaded"
                                 )
                                 continue
-                            if criteria.date_from and stamp < utc_datetime(
-                                criteria.date_from
-                            ):
-                                continue
-                            if criteria.date_to and (
-                                stamp >= utc_datetime(criteria.date_to)
-                                if criteria.date_to_exclusive
-                                else stamp > utc_datetime(criteria.date_to)
-                            ):
+                            if not candidate_in_window(sr, criteria):
                                 continue
                         if online:
                             from reportagent.services.collection_screening import (

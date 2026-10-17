@@ -18,7 +18,11 @@ import httpx
 
 from reportagent.models.schemas import SearchResult, SourceType, UserCriteria
 from reportagent.sources.base import SearchDiagnostics, SourceParseError
-from reportagent.sources.date_window import utc_datetime
+from reportagent.sources.date_window import (
+    candidate_in_window,
+    in_criteria_window,
+    utc_datetime,
+)
 
 
 ANNOUNCEMENT_CATEGORIES = (
@@ -71,16 +75,6 @@ def _rss_date(value: str | None) -> datetime:
         raise SourceParseError(
             "RSS missing valid timezone-aware announcement pubDate"
         ) from error
-
-
-def in_announcement_window(stamp: datetime, criteria: UserCriteria) -> bool:
-    start, end = criteria.date_from, criteria.date_to
-    if start and stamp < utc_datetime(start):
-        return False
-    if end:
-        cutoff = utc_datetime(end)
-        return stamp < cutoff if criteria.date_to_exclusive else stamp <= cutoff
-    return True
 
 
 def _parse_item(item: ET.Element, feed_url: str, batch_pubdate: str) -> SearchResult:
@@ -179,7 +173,7 @@ def parse_announcement_feed(
         not start
         or not end
         or utc_datetime(end) - utc_datetime(start) > timedelta(days=1)
-        or not in_announcement_window(batch, criteria)
+        or not in_criteria_window(batch, criteria)
     ):
         diagnostics.record_error(
             SourceParseError(
@@ -218,7 +212,7 @@ def parse_announcement_feed(
                 "cross",
             }:
                 continue
-            if in_announcement_window(result.announced_at, criteria):
+            if candidate_in_window(result, criteria):
                 results.append(result)
         except Exception as error:
             diagnostics.record_error(error, stage + " item")

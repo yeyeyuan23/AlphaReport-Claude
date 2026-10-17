@@ -94,3 +94,41 @@ def atom_feed(entries, total):
         'xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/">'
         f"<opensearch:totalResults>{total}</opensearch:totalResults>{entries}</feed>"
     )
+
+
+def bigquant_info():
+    return httpx.Response(200, json={"ok": True, "data": {"id": "public-collection"}})
+
+
+def bigquant_document(
+    name,
+    *,
+    title="portfolio risk model",
+    text="Portfolio covariance and risk evidence. " * 5,
+    published="2026-10-15T01:00:00Z",
+    original=None,
+):
+    if original:
+        text = f"原报告发布日期：{original}\n" + text
+    return {
+        "id": name,
+        "urlId": name,
+        "title": title,
+        "text": text,
+        "publishedAt": published,
+    }
+
+
+def bigquant_page(rows, next_offset=None):
+    return httpx.Response(
+        200,
+        json={
+            "ok": True,
+            "data": rows,
+            "pagination": {
+                "nextPath": None
+                if next_offset is None
+                else f"/api/documents.list?offset={next_offset}"
+            },
+        },
+    )

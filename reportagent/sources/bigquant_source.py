@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timezone
 import json
 import logging
 from pathlib import Path
 import re
 from typing import Optional
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -16,7 +15,12 @@ from bs4 import BeautifulSoup
 from reportagent.models.schemas import UserCriteria, SearchResult, SourceType
 from reportagent.sources.base import BaseSource, SourceParseError, canonical_url
 from reportagent.utils.topic_expansion import expand_topics
-from reportagent.sources.date_window import in_date_window, utc_datetime
+from reportagent.sources.date_window import (
+    candidate_in_window,
+    in_date_window,
+)
+from reportagent.processors.paper_sections import extract_paper_sections
+from reportagent.sources.bigquant_catalog import discover_catalog
 from reportagent.sources.base import usable_full_text
 from reportagent.sources.content_fetch import (
     MAX_HTML_BYTES,
@@ -30,8 +34,6 @@ from reportagent.sources.content_fetch import (
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://bigquant.com"
-COLLECTION_PATH = "/wiki/collection/dLopDVBB53"
-DEFAULT_MAX_PAGES = 10
 DEFAULT_RATE_LIMIT = 2.0
 
 AUTHOR_PATTERN = re.compile(r"由(.+?)创建")
@@ -218,11 +220,9 @@ class BigQuantSource(BaseSource):
     def __init__(
         self,
         rate_limit_seconds: float = DEFAULT_RATE_LIMIT,
-        max_listing_pages: int = DEFAULT_MAX_PAGES,
         download_pdfs: bool = True,
     ):
         self.rate_limit_seconds = rate_limit_seconds
-        self.max_listing_pages = max_listing_pages
         self.download_pdfs = download_pdfs
 
     @property
@@ -256,129 +256,118 @@ class BigQuantSource(BaseSource):
             )
 
     async def search(self, criteria: UserCriteria) -> list[SearchResult]:
+        """Normalize source metadata; shared policy decides date eligibility."""
         self._start_search()
-        expanded = expand_topics(criteria.topics, criteria.keywords, lang="all")
-        terms = [t.lower() for t in expanded]
-        candidates: list[tuple[str, str, int]] = []
-        seen_paths: set[str] = set()
-
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            page_no = 1
-            unlimited = criteria.max_results_per_source is None
-            while unlimited or page_no <= self.max_listing_pages:
-                try:
-                    entries = await self._fetch_listing_page(client, page_no)
-                except Exception as e:
-                    logger.warning(
-                        "BigQuant %s",
-                        self.last_search.record_error(e, f"listing page {page_no}"),
+        terms = [
+            t.lower()
+            for t in expand_topics(criteria.topics, criteria.keywords, lang="all")
+        ]
+        results = []
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            try:
+                async for row, stamp in discover_catalog(
+                    client, criteria, self.last_search, self.rate_limit_seconds
+                ):
+                    result = await self._prepare_candidate(
+                        client, row, stamp, criteria, terms
                     )
-                    break
-
-                self.last_search.successful_requests += 1
-                self.last_search.fetched += len(entries)
-                if not entries:
-                    break
-
-                new_paths = 0
-                for title, doc_path in entries:
-                    key = canonical_url(
-                        f"{BASE_URL}{doc_path}"
-                        if doc_path.startswith("/")
-                        else doc_path
-                    )
-                    if key in seen_paths:
-                        continue
-                    seen_paths.add(key)
-                    new_paths += 1
-                    score = (
-                        0
-                        if criteria.date_basis == "announcement"
-                        else self._score(title.lower(), terms)
-                    )
-                    if criteria.date_basis == "announcement" or score > 0 or not terms:
-                        candidates.append((title, doc_path, score))
-
-                if not new_paths:
-                    self.last_search.record_error(
-                        SourceParseError("listing pagination made no progress"),
-                        f"listing page {page_no}",
-                    )
-                    break
-                if not unlimited and page_no >= self.max_listing_pages:
-                    # A bounded manual search intentionally samples its configured
-                    # page count. Scheduled unlimited searches never take this branch.
-                    break
-                await asyncio.sleep(self.rate_limit_seconds)
-                page_no += 1
-
-            if criteria.date_basis != "announcement":
-                candidates.sort(key=lambda x: x[2], reverse=True)
-            results: list[SearchResult] = []
-            for title, doc_path, _ in candidates:
-                try:
-                    sr = await self._fetch_detail(
-                        client,
-                        title,
-                        doc_path,
-                        date_from=criteria.date_from,
-                        date_to=criteria.date_to,
-                        date_basis=criteria.date_basis,
-                        date_to_exclusive=criteria.date_to_exclusive,
-                    )
-                    if sr:
-                        results.append(sr)
+                    if result is not None:
+                        results.append(result)
                     if (
                         criteria.max_results_per_source is not None
                         and len(results) >= criteria.max_results_per_source
                     ):
                         break
-                    await asyncio.sleep(self.rate_limit_seconds)
-                except Exception as e:
-                    logger.warning(
-                        "BigQuant %s",
-                        self.last_search.record_error(e, "article detail"),
-                    )
-
-        logger.info(
-            "BigQuant: scanned %d titles, matched %d, fetched %d details",
-            self.last_search.fetched,
-            len(candidates),
-            len(results),
-        )
+            except Exception as error:
+                self.last_search.record_error(error, "catalog search")
         return results
 
-    async def _fetch_listing_page(
-        self, client: httpx.AsyncClient, page_no: int
-    ) -> list[tuple[str, str]]:
-        url = f"{BASE_URL}{COLLECTION_PATH}?page={page_no}"
-        body = await bounded_download(client, url, MAX_HTML_BYTES)
-        soup = BeautifulSoup(body, "html.parser")
-        entries: list[tuple[str, str]] = []
-        for a in soup.find_all("a", href=True):
-            href = a["href"]
-            if "/wiki/doc/" in href:
-                title = a.get_text(strip=True)
-                if title:
-                    entries.append((title, href))
-        if not entries:
-            # An arbitrary login/challenge/error page must not be called an empty
-            # collection. Accept only an explicit empty-state element or message.
-            empty = soup.select_one(".ant-empty, .empty-state, [data-testid='empty']")
-            text = soup.get_text(" ", strip=True).lower()
-            empty_message = any(
-                marker in text
-                for marker in (
-                    "暂无内容",
-                    "暂无文档",
-                    "暂无文章",
-                    "no documents",
-                    "no results",
+    async def _prepare_candidate(self, client, row, stamp, criteria, terms):
+        if (
+            criteria.date_basis != "announcement"
+            and terms
+            and not self._score(str(row.get("title", "")).lower(), terms)
+        ):
+            return None
+        try:
+            result = self._catalog_result(row, stamp)
+            if not candidate_in_window(result, criteria):
+                return None
+            if self.download_pdfs and result.raw_metadata["pdf_links"]:
+                result = await hydrate_pdf(
+                    client, result, result.raw_metadata["pdf_links"], self.last_search
                 )
+            return result
+        except Exception as error:
+            self.last_search.record_error(error, "document metadata")
+            return None
+
+    def _catalog_result(self, row: dict, stamp: datetime) -> SearchResult:
+        title, slug, raw = row.get("title"), row.get("urlId"), row.get("text")
+        if (
+            not isinstance(title, str)
+            or not title.strip()
+            or not isinstance(slug, str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]+", slug)
+        ):
+            raise SourceParseError("catalog missing document title or public identity")
+        raw = raw if isinstance(raw, str) else ""
+        url = f"{BASE_URL}/wiki/doc/{slug}"
+        soup = BeautifulSoup(raw, "html.parser")
+        links = self._catalog_links(raw, soup, url)
+        text = self._catalog_text(raw)
+        abstract = extract_paper_sections(text or "")["abstract"] or text
+        original, date_source = _publication_date(soup, soup, url)
+        if not abstract and not links:
+            raise SourceParseError(
+                "catalog document has no research text or public PDF"
             )
-            if not empty and not (soup.find("h1") and empty_message):
-                raise SourceParseError("unrecognized HTML collection page")
-        return entries
+        return SearchResult(
+            title=title.strip(),
+            source=SourceType.BIGQUANT,
+            source_url=url,
+            abstract=abstract,
+            full_text=text if usable_full_text(text) else None,
+            abstract_only=bool(links) or not usable_full_text(text),
+            published_date=original,
+            announced_at=stamp,
+            raw_metadata={
+                "doc_path": f"/wiki/doc/{slug}",
+                "source_item_id": row["id"],
+                "pdf_link": links[0] if links else None,
+                "pdf_links": links,
+                "published_date_source": date_source,
+                "announcement_info": {
+                    "source": "bigquant_api:publishedAt",
+                    "evidence": row["publishedAt"],
+                },
+                "content_kind": "html" if text else "metadata_only",
+                "text_scope": "html_article" if text else "metadata_only",
+            },
+        )
+
+    @staticmethod
+    def _catalog_links(raw, soup, url):
+        links = pdf_links(soup, url)
+        for match in re.finditer(r"\[[^\]]*\]\(([^\s)]+)(?:\s+\"[^\"]*\")?\)", raw):
+            link = urljoin(url, match[1])
+            if (
+                urlsplit(link).scheme in {"http", "https"}
+                and ".pdf" in urlsplit(link).path.lower()
+                and link not in links
+            ):
+                links.append(link)
+        return links
+
+    @staticmethod
+    def _catalog_text(raw):
+        body = re.sub(
+            r"\[[^\]]*\]\(([^\s)]*\.pdf(?:\?[^\s)]*)?)(?:\s+\"[^\"]*\")?\)",
+            "",
+            raw,
+            flags=re.I,
+        )
+        return article_text(BeautifulSoup(body, "html.parser"))
 
     async def _fetch_detail(
         self,
@@ -436,13 +425,8 @@ class BigQuantSource(BaseSource):
         # Determine eligibility from page evidence before downloading attachments.
         # With no date bounds, explicit single-report reads can still hydrate an
         # undated paper; a dated collection must exclude unknown publication dates.
-        if not in_date_window(eligibility_date, date_from, date_to):
-            return None
-        if (
-            date_to_exclusive
-            and date_to
-            and eligibility_date
-            and utc_datetime(eligibility_date) >= utc_datetime(date_to)
+        if not in_date_window(
+            eligibility_date, date_from, date_to, end_exclusive=date_to_exclusive
         ):
             return None
 

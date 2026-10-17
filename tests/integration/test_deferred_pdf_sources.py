@@ -5,6 +5,11 @@ from pathlib import Path
 
 import httpx
 import pytest
+from tests.support.source_fixtures import (
+    bigquant_info,
+    bigquant_document,
+    bigquant_page,
+)
 
 from reportagent.models.schemas import SearchResult, SourceType, UserCriteria
 from reportagent.sources import content_fetch
@@ -75,10 +80,18 @@ def offline(monkeypatch, tmp_path):
                     "TotalPage": 1,
                 },
             )
-        if "/collection/" in path:
-            return httpx.Response(
-                200,
-                text='<h1>Collection</h1><a href="/wiki/doc/fixture">Portfolio risk</a>',
+        if path.endswith("collections.info"):
+            return bigquant_info()
+        if path.endswith("documents.list"):
+            return bigquant_page(
+                [
+                    bigquant_document(
+                        "fixture",
+                        title="Portfolio risk",
+                        text=PREVIEW
+                        + '<a href="/first.pdf">Report A</a><a href="/second.pdf">Report B</a>',
+                    )
+                ]
             )
         if not state["detail_available"]:
             return httpx.Response(404)
@@ -105,7 +118,7 @@ def offline(monkeypatch, tmp_path):
 
 def public_source(kind, monkeypatch, **kwargs):
     if kind == "bigquant":
-        return BigQuantSource(rate_limit_seconds=0, max_listing_pages=1, **kwargs)
+        return BigQuantSource(rate_limit_seconds=0, **kwargs)
     source = EastMoneySource(rate_limit_seconds=0, **kwargs)
     monkeypatch.setattr(source, "_resolve_qtypes", lambda _: [2])
     return source

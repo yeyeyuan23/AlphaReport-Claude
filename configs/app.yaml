@@ -34,7 +34,6 @@ sources:
   bigquant:
     enabled: true
     rate_limit_seconds: 2
-    max_pages: 10
 
 # ── Classification ────────────────────────────────────
 classification:

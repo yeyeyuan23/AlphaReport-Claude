@@ -46,7 +46,6 @@ def test_both_callers_apply_configured_constructor_options(
             "eastmoney": {"rate_limit_seconds": 0.25, "download_pdfs": False},
             "bigquant": {
                 "rate_limit_seconds": 0.5,
-                "max_pages": 0,
                 "download_pdfs": False,
             },
         },
@@ -65,7 +64,6 @@ def test_both_callers_apply_configured_constructor_options(
     assert eastmoney.download_pdfs is False
     assert isinstance(bigquant, BigQuantSource)
     assert bigquant.rate_limit_seconds == 0.5
-    assert bigquant.max_listing_pages == 0
     assert bigquant.download_pdfs is False
 
 
@@ -83,7 +81,6 @@ def test_both_callers_preserve_missing_configuration_defaults(
     assert arxiv.rate_limit_seconds == 3.0
     assert eastmoney.rate_limit_seconds == 1.0
     assert bigquant.rate_limit_seconds == 2.0
-    assert bigquant.max_listing_pages == 10
     assert all(s.download_pdfs is True for s in (arxiv, eastmoney, bigquant))
 
 
