@@ -359,7 +359,17 @@ async def prepare_report(arxiv_id: str, *, force: bool = False) -> tuple[Path, d
                 == review_fingerprint(review_input, get_llm_model())
             ):
                 cached["report_id"] = store_paper(paper, result, evaluation)
+                # Analysis is reusable; library identities and public URLs are not.
+                # Older artifacts may omit the presentation-only label/model.
+                cached["brief"] = make_brief(
+                    paper,
+                    result,
+                    cached.get("model") or get_llm_model(),
+                    {"label": "阅读评估", **evaluation},
+                    report_id=cached["report_id"],
+                )
                 save_artifact(path, cached)
+                path.with_suffix(".md").write_text(cached["brief"], encoding="utf-8")
                 logger.info(
                     "Reusing completed analysis and delivery receipts: %s", path
                 )
