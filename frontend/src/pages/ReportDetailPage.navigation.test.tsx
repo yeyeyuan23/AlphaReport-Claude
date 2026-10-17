@@ -76,3 +76,20 @@ test('an unavailable newly selected report clears the previous report', async ()
   expect(await screen.findByText('研报不存在')).toBeInTheDocument();
   expect(screen.queryByRole('heading', { name: 'Report 1' })).not.toBeInTheDocument();
 });
+
+test('the briefing panel renders canonical sections supplied by report detail', async () => {
+  vi.mocked(api.getReport).mockResolvedValue({
+    success: true,
+    data: report({
+      title: 'Canonical report',
+      briefing_sections: [
+        { title: 'Server methodology', icon: '🔬', content: 'Rolling train and test' },
+      ],
+    }),
+  });
+  renderDetail();
+  await screen.findByRole('heading', { name: 'Canonical report' });
+  fireEvent.keyDown(screen.getByRole('tab', { name: '研报简报' }), { key: 'Enter' });
+  expect(await screen.findByText('Rolling train and test')).toBeVisible();
+  expect(api.getResearchBriefing).not.toHaveBeenCalled();
+});

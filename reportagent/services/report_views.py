@@ -118,38 +118,8 @@ def read_evaluation(value, *, paper: dict | None = None) -> dict | None:
         return None
 
 
-def map_analysis_to_knowledge_card(analysis: dict) -> dict:
-    """Map existing AnalysisResult dict to KnowledgeCard fields."""
-    methodology = analysis.get("methodology") or {}
-    assessment = analysis.get("assessment") or {}
-
-    highlights = list(assessment.get("key_contributions", [])[:3])
-    if not highlights:
-        highlights = assessment.get("strengths", [])[:3]
-
-    steps = []
-    for pt in methodology.get("analysis_points", []):
-        if isinstance(pt, dict):
-            step_text = pt.get("analysis", "") or pt.get("title", "")
-            if step_text:
-                steps.append(step_text)
-
-    return {
-        "summary": assessment.get("marginal_contribution_summary", "")
-        or analysis.get("core_contribution", ""),
-        "highlights": highlights,
-        "methodology_steps": steps,
-        "results": analysis.get("summary", ""),
-        "marginal_contributions": assessment.get("marginal_contribution_summary", ""),
-        "implications": assessment.get("practical_implications", []),
-        "topics": [],
-        "asset_classes": [],
-        "quality_score": assessment.get("overall_quality_score"),
-    }
-
-
 def map_analysis_to_briefing_sections(analysis: dict) -> list[dict]:
-    """Map existing AnalysisResult to briefing sections (fallback)."""
+    """Canonical deterministic presentation of saved analysis for every web view."""
     methodology = analysis.get("methodology") or {}
     assessment = analysis.get("assessment") or {}
     data_used = analysis.get("data_used") or {}
@@ -172,11 +142,13 @@ def map_analysis_to_briefing_sections(analysis: dict) -> list[dict]:
             parts.append(f"频率：{data_used['frequency']}")
         if data_used.get("universe"):
             parts.append(f"股票池：{data_used['universe']}")
+        if data_used.get("instruments"):
+            parts.append(f"工具：{'、'.join(data_used['instruments'])}")
         if parts:
             problem_parts.append(f"**数据：** {' | '.join(parts)}")
     if analysis.get("benchmark_models"):
         problem_parts.append(
-            f"**基准模型：** {', '.join(analysis['benchmark_models'])}"
+            f"**基准模型：** {'、'.join(analysis['benchmark_models'])}"
         )
     if problem_parts:
         sections.append(
@@ -189,7 +161,7 @@ def map_analysis_to_briefing_sections(analysis: dict) -> list[dict]:
 
     # 2) 核心方法
     method_parts = []
-    for pt in methodology.get("analysis_points", []):
+    for pt in methodology.get("analysis_points") or []:
         if isinstance(pt, dict):
             title = pt.get("title", "")
             analysis_text = pt.get("analysis", "")
@@ -199,9 +171,44 @@ def map_analysis_to_briefing_sections(analysis: dict) -> list[dict]:
     if factors:
         fl = "\n".join(
             f"- **{f.get('name', '')}**（{f.get('type', '')}）：{f.get('construction', '')}"
+            + (f" [{f['raw_or_neutralized']}]" if f.get("raw_or_neutralized") else "")
             for f in factors
         )
         method_parts.append(f"**因子清单：**\n{fl}")
+    architecture = methodology.get("model_architecture") or {}
+    if architecture:
+        lines = [f"**模型架构：** {architecture.get('type', '')}"]
+        for field, label in (
+            ("layers_or_structure", "结构"),
+            ("loss_function", "损失函数"),
+            ("regularization", "正则化"),
+            ("training_scheme", "训练方式"),
+        ):
+            if architecture.get(field):
+                value = architecture[field]
+                if field == "loss_function":
+                    value = f"${value}$"
+                lines.append(f"- {label}：{value}")
+        method_parts.append("\n".join(lines))
+    portfolio = methodology.get("portfolio_construction") or {}
+    if portfolio:
+        lines = ["**组合构建：**"]
+        for field, label in (
+            ("weighting", "加权方式"),
+            ("rebalance_frequency", "再平衡频率"),
+            ("constraints", "约束条件"),
+            ("transaction_cost_model", "交易成本"),
+        ):
+            if portfolio.get(field):
+                lines.append(f"- {label}：{portfolio[field]}")
+        method_parts.append("\n".join(lines))
+    key_formulas = [
+        f"**核心公式：**\n$${equation.get('latex', '')}$$\n\n{equation.get('meaning', '')}"
+        for equation in analysis.get("equations") or []
+        if equation.get("is_key_formula")
+    ]
+    if key_formulas:
+        method_parts.append("---\n\n" + "\n\n".join(key_formulas))
     if method_parts:
         sections.append(
             {"title": "核心方法", "icon": "🔬", "content": "\n\n".join(method_parts)}
@@ -237,6 +244,50 @@ def map_analysis_to_briefing_sections(analysis: dict) -> list[dict]:
         emp_parts.append(
             "**不足：**\n" + "\n".join(f"- {w}" for w in assessment["weaknesses"])
         )
+    bias_risks = assessment.get("bias_risks") or {}
+    if bias_risks:
+        labels = {
+            "none": "无风险 ✅",
+            "low": "低风险 ⚠️",
+            "medium": "中风险 ⚠️",
+            "high": "高风险 ❌",
+            "unknown": "未知 ❓",
+        }
+        lines = []
+        for field, label in (
+            ("look_ahead_bias", "前视偏差"),
+            ("survivorship_bias", "幸存者偏差"),
+            ("data_snooping", "数据窥探"),
+        ):
+            if bias_risks.get(field):
+                value = bias_risks[field]
+                lines.append(f"- {label}：{labels.get(value, value)}")
+        if bias_risks.get("overfitting_concern") not in (None, "", "none"):
+            lines.append(f"- 过拟合风险：{bias_risks['overfitting_concern']}")
+        if lines:
+            emp_parts.append("**偏差风险评估：**\n" + "\n".join(lines))
+    reproducibility = assessment.get("reproducibility") or {}
+    if reproducibility:
+        text = f"**可复现性：** {reproducibility.get('level', '')}"
+        if reproducibility.get("has_data_source"):
+            text += " · 有数据源"
+        if reproducibility.get("has_code_available"):
+            text += " · 有代码"
+        emp_parts.append(text)
+    applicability = assessment.get("a_share_applicability") or {}
+    if applicability:
+        status = (
+            "可直接应用 ✅"
+            if applicability.get("directly_applicable")
+            else "需要适配 ⚠️"
+        )
+        emp_parts.append(f"**A股适用性：** {status}")
+        if applicability.get("adaptations_needed"):
+            emp_parts.append(
+                f"适配需求：{'；'.join(applicability['adaptations_needed'])}"
+            )
+        if applicability.get("key_constraints"):
+            emp_parts.append(f"关键限制：{'；'.join(applicability['key_constraints'])}")
     if emp_parts:
         sections.append(
             {"title": "实证检验与评估", "icon": "📊", "content": "\n\n".join(emp_parts)}

@@ -51,8 +51,8 @@ CURRENT_FIELDS = {
 DETAIL_FIELDS = {"full_text", "summary", "tables_json", "equations_json", "analysis"}
 
 
-@pytest.fixture(params=[library], ids=["current"])
-def reader(request):
+@pytest.fixture
+def reader():
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
@@ -161,16 +161,15 @@ def reader(request):
         with factory() as db:
             yield db
 
-    # Mount each real router separately: no scheduler, real model, or unrelated API.
+    # Mount the reader alone: no scheduler, real model, or unrelated API.
     app = FastAPI()
-    app.include_router(request.param.router)
-    app.dependency_overrides[request.param.get_db] = database
+    app.include_router(library.router)
+    app.dependency_overrides[library.get_db] = database
     with TestClient(app) as client:
         yield SimpleNamespace(
             client=client,
             factory=factory,
-            adapter=request.param,
-            current=request.param is library,
+            adapter=library,
             commits=commits,
         )
     engine.dispose()
@@ -266,14 +265,16 @@ def test_validation_remains_at_the_http_boundary(
     assert reader.commits == []
 
 
-def test_list_and_detail_keep_distinct_current_and_legacy_wire_fields(reader):
+def test_list_and_detail_preserve_their_wire_fields(reader):
     listed = get_data(reader)["reports"][0]
     detail = get_data(reader, "/1")
-    fields = BASE_FIELDS | (CURRENT_FIELDS if reader.current else set())
+    fields = BASE_FIELDS | CURRENT_FIELDS
     assert set(listed) == fields
-    assert set(detail) == fields | DETAIL_FIELDS | (
-        {"knowledge_card"} if reader.current else set()
-    )
+    assert set(detail) == fields | DETAIL_FIELDS | {
+        "knowledge_card",
+        "briefing_sections",
+    }
+    assert isinstance(detail["briefing_sections"], list)
     for key in fields:
         assert detail[key] == listed[key]
     assert listed["authors"] == ["First Author", "Second Author"]
@@ -290,18 +291,17 @@ def test_list_and_detail_keep_distinct_current_and_legacy_wire_fields(reader):
     with reader.factory() as db:
         assert detail["full_text"] == db.get(Report, 1).full_text
         assert db.get(Report, 1).knowledge_card_json is None
-    if reader.current:
-        assert listed["publication_date_info"] == {
-            "precision": "day",
-            "evidence": "10 October 2026",
-        }
-        assert listed["classification_provenance"] == {
-            "method": "llm",
-            "evidence": ["portfolio"],
-        }
-        assert listed["selection_relevance"] == 8
-        assert listed["evaluation"]["status"] == "reviewed"
-        assert detail["knowledge_card"]["status"] == "ready"
+    assert listed["publication_date_info"] == {
+        "precision": "day",
+        "evidence": "10 October 2026",
+    }
+    assert listed["classification_provenance"] == {
+        "method": "llm",
+        "evidence": ["portfolio"],
+    }
+    assert listed["selection_relevance"] == 8
+    assert listed["evaluation"]["status"] == "reviewed"
+    assert detail["knowledge_card"]["status"] == "ready"
     assert reader.commits == []
 
 
@@ -494,8 +494,7 @@ def test_nullable_summary_fields_keep_empty_arrays_and_null_dates(reader):
         "pdf_path",
     ):
         assert row[key] is None
-    if reader.current:
-        assert row["publication_date_info"] == {}
-        assert row["classification_provenance"] == {}
-        assert row["evaluation"] is None
-        assert row["selection_relevance"] is None
+    assert row["publication_date_info"] == {}
+    assert row["classification_provenance"] == {}
+    assert row["evaluation"] is None
+    assert row["selection_relevance"] is None

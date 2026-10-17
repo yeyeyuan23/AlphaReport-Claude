@@ -115,7 +115,10 @@ function ReportDetailContent({ id }: { id?: string }) {
                 <ResearchEvaluation evaluation={report.evaluation} />
                 {(!report.evaluation || report.analysis) && (
                   <div className="min-h-64">
-                    <ResearchBriefing reportId={report.id} analysis={report.analysis ?? null} />
+                    <ResearchBriefing
+                      reportId={report.id}
+                      briefingSections={report.briefing_sections}
+                    />
                   </div>
                 )}
               </TabsContent>

@@ -1,4 +1,5 @@
 import type {
+  BriefingSection,
   ReportSummary,
   ReportDetail,
   ReportStats,
@@ -66,7 +67,7 @@ export async function getReportStats() {
 }
 
 export interface ResearchBriefingResult {
-  sections?: { title: string; icon: string; content: string }[];
+  sections?: BriefingSection[];
   content?: string;
   source: string;
   error?: string;

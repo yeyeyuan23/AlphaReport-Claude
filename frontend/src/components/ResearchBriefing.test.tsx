@@ -1,25 +1,15 @@
 import { act, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import ResearchBriefing from './ResearchBriefing';
-import type { AnalysisResult } from '@/types';
+import type { BriefingSection } from '@/types';
 import { deferred, json } from '@/test/fixtures';
 
 function success(content: string) {
   return json({ success: true, data: { content, source: 'evaluation' } });
 }
 
-function analysis(summary: string): AnalysisResult {
-  return {
-    research_question: 'What explains the returns?',
-    core_contribution: '',
-    method_category: '',
-    data_used: { market: '', instruments: [], frequency: '', sample_period: '', universe: '' },
-    benchmark_models: [],
-    equations: [],
-    summary,
-    depth: 'full',
-    analyzed_at: '2026-10-17',
-  };
+function sections(content: string): BriefingSection[] {
+  return [{ title: 'Canonical findings', icon: '📌', content }];
 }
 
 describe('ResearchBriefing request states', () => {
@@ -121,13 +111,13 @@ describe('ResearchBriefing request states', () => {
   );
 
   it.each(['success', 'failure'] as const)(
-    'ignores an API %s after analysis becomes available for the same report',
+    'ignores an API %s after canonical sections become available for the same report',
     async (outcome) => {
       const previous = deferred<Response>();
       const fetch = vi.fn().mockReturnValueOnce(previous.promise);
       vi.stubGlobal('fetch', fetch);
       const { rerender } = render(<ResearchBriefing reportId={1} />);
-      rerender(<ResearchBriefing reportId={1} analysis={analysis('Current analysis')} />);
+      rerender(<ResearchBriefing reportId={1} briefingSections={sections('Current analysis')} />);
       expect(screen.getByText('Current analysis')).toBeVisible();
       await act(async () => {
         if (outcome === 'success') previous.resolve(success('Stale briefing'));
@@ -140,12 +130,31 @@ describe('ResearchBriefing request states', () => {
     },
   );
 
-  it('drops rendered analysis and fetches only when the next report needs an API briefing', async () => {
+  it('renders supplied canonical sections without requesting another briefing', () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    render(
+      <ResearchBriefing reportId={1} briefingSections={sections('Saved canonical content')} />,
+    );
+    expect(screen.getByRole('heading', { name: '📌Canonical findings' })).toBeVisible();
+    expect(screen.getByText('Saved canonical content')).toBeVisible();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('explains an authoritative empty briefing without another request', () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    render(<ResearchBriefing reportId={1} briefingSections={[]} />);
+    expect(screen.getByText('暂无研报简报数据')).toBeVisible();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('drops supplied sections and fetches only when the next report needs an API briefing', async () => {
     const next = deferred<Response>();
     const fetch = vi.fn().mockReturnValueOnce(next.promise);
     vi.stubGlobal('fetch', fetch);
     const { rerender } = render(
-      <ResearchBriefing reportId={1} analysis={analysis('First analysis')} />,
+      <ResearchBriefing reportId={1} briefingSections={sections('First analysis')} />,
     );
     expect(screen.getByText('First analysis')).toBeVisible();
     expect(fetch).not.toHaveBeenCalled();

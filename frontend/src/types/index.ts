@@ -49,6 +49,13 @@ export interface ReportDetail extends ReportSummary {
   tables_json?: string;
   equations_json?: string;
   analysis?: AnalysisResult;
+  briefing_sections?: BriefingSection[];
+}
+
+export interface BriefingSection {
+  title: string;
+  icon: string;
+  content: string;
 }
 
 export interface ResearchEvidence {

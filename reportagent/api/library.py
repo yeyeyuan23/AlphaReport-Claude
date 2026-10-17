@@ -77,6 +77,9 @@ def get_report(report_id: int, db: Session = Depends(get_db)):
     )
     if data is None:
         raise HTTPException(status_code=404, detail="Report not found")
+    data["briefing_sections"] = _map_analysis_to_briefing_sections(
+        data.get("analysis") or {}
+    )
     return {"success": True, "data": data}
 
 
@@ -130,11 +133,18 @@ async def get_research_briefing(
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
 
-    # 1) Client-side mapping is preferred — return analysis_json so the
-    #    frontend ResearchBriefing component can build sections directly.
-    #    This endpoint provides the LLM-generated narrative version.
+    # Normal reads share the detail view's deterministic presentation.
+    # Only an explicit force request may ask a model for a new narrative.
     analysis = read_current_analysis(report)
     if analysis:
+        if not force:
+            return {
+                "success": True,
+                "data": {
+                    "sections": _map_analysis_to_briefing_sections(analysis),
+                    "source": "mapped",
+                },
+            }
         try:
             # Build context for LLM
             ctx_parts = []
