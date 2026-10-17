@@ -127,10 +127,13 @@ arXiv 公告模式读取各分类官方 RSS，`pubDate` 是公告日期；`lastB
   建议方案单独标注，成功卡片保存到 `analysis_json.reproduction_preparation`。
   网页和普通聊天按需调用同一服务，不下载数据或运行实验。
 
-Web 中两项定时任务独立配置，每天含周末执行：`daily_collection` 默认北京时间 08:00
+Web 中三项定时任务独立配置：`daily_collection` 默认每天北京时间 08:00
 调用 `scheduled_collection`，通过共享采集服务入库；`daily_report` 默认 09:00
-调用与手动 `/daily` 相同的报告服务。`cli.scheduled_collect` 可按配置补跑采集。
-手动 `/daily`、`/weekly` 不依赖定时开关，周报自动运行使用外部调度。
+调用与手动 `/daily` 相同的报告服务，两项每天含周末执行；`weekly_report` 默认每周五 09:00
+在线程中调用与手动 `/weekly` 相同的周报服务。三项均由 `configs/app.yaml` 的 `enabled`、
+`schedule_cron`、`timezone` 配置，周报另用 `day_of_week` 指定星期（`mon` 至 `sun`）。
+`cli.scheduled_collect` 可按配置补跑采集。手动 `/daily`、`/weekly` 不依赖定时开关。
+健康接口的 `schedule` 包含周报开关和下次执行时间；已有外部周报调度需移除或关闭内置任务以避免重复发送。
 
 ## 后台处理与维护工具
 

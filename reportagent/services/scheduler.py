@@ -1,4 +1,4 @@
-"""Independent daily ingestion and Feishu reporting jobs, hosted by the Web service."""
+"""Independent collection, daily and weekly Feishu jobs hosted by the Web service."""
 
 from __future__ import annotations
 
@@ -15,12 +15,12 @@ logger = logging.getLogger(__name__)
 _scheduler: AsyncIOScheduler | None = None
 
 
-def _trigger(config: dict, default_time: str) -> CronTrigger:
+def _trigger(config: dict, default_time: str, *, day_of_week: str = "*") -> CronTrigger:
     hour, minute = map(int, config.get("schedule_cron", default_time).split(":"))
     return CronTrigger(
         hour=hour,
         minute=minute,
-        day_of_week="*",
+        day_of_week=day_of_week,
         timezone=ZoneInfo(config.get("timezone", "Asia/Shanghai")),
     )
 
@@ -37,13 +37,23 @@ async def _report():
     return await asyncio.to_thread(run_daily_push, DailyPushOptions())
 
 
+async def _weekly_report():
+    from reportagent.services.weekly_report import (
+        WeeklyReportOptions,
+        run_weekly_report,
+    )
+
+    return await asyncio.to_thread(run_weekly_report, WeeklyReportOptions())
+
+
 def start_scheduler():
     global _scheduler
     if _scheduler and _scheduler.running:
         return
     collection = get_config("daily_collection", default={})
     report = get_config("daily_report", default={})
-    if not collection.get("enabled", False) and not report.get("enabled", False):
+    weekly = get_config("weekly_report", default={})
+    if not any(config.get("enabled", False) for config in (collection, report, weekly)):
         logger.info("[scheduler] Collection and reporting disabled.")
         return
     scheduler = AsyncIOScheduler(timezone=ZoneInfo("Asia/Shanghai"))
@@ -67,6 +77,18 @@ def start_scheduler():
             coalesce=True,
             misfire_grace_time=3600,
         )
+    if weekly.get("enabled", False):
+        scheduler.add_job(
+            _weekly_report,
+            trigger=_trigger(
+                weekly, "09:00", day_of_week=weekly.get("day_of_week", "fri")
+            ),
+            id="feishu_weekly_report",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
     scheduler.start()
     _scheduler = scheduler
     for job in scheduler.get_jobs():
@@ -83,17 +105,22 @@ def stop_scheduler():
 def get_schedule_status() -> dict:
     collection = get_config("daily_collection", default={})
     report = get_config("daily_report", default={})
+    weekly = get_config("weekly_report", default={})
     running = _scheduler is not None and _scheduler.running
     collect_job = _scheduler.get_job("daily_collection") if running else None
     report_job = _scheduler.get_job("feishu_daily_report") if running else None
+    weekly_job = _scheduler.get_job("feishu_weekly_report") if running else None
     return {
         "running": running,
         "config_enabled": collection.get("enabled", False)
-        or report.get("enabled", False),
+        or report.get("enabled", False)
+        or weekly.get("enabled", False),
         "collection_enabled": collection.get("enabled", False),
         "report_enabled": report.get("enabled", False),
+        "weekly_enabled": weekly.get("enabled", False),
         "collection_next_run": collect_job.next_run_time.isoformat()
         if collect_job
         else None,
         "report_next_run": report_job.next_run_time.isoformat() if report_job else None,
+        "weekly_next_run": weekly_job.next_run_time.isoformat() if weekly_job else None,
     }

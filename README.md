@@ -58,7 +58,7 @@
 | 报告 | 资料范围 | 运行方式 |
 |---|---|---|
 | 日报 | 截至报告当天北京时间 08:00，往前 24 小时公开发布的资料，在线来源按 `announced_at` 筛选 | 私聊 `/daily`；服务持续运行时，默认每天北京时间 09:00 通过飞书机器人自动推送 |
-| 周报 | 截至报告当天北京时间 08:00，往前 168 小时（7×24 小时）公开发布的库中资料，在线来源按 `announced_at` 筛选 | 私聊 `/weekly`；定时发送需配置外部调度 |
+| 周报 | 截至报告当天北京时间 08:00，往前 168 小时（7×24 小时）公开发布的库中资料，在线来源按 `announced_at` 筛选 | 私聊 `/weekly`；服务持续运行时，默认每周五北京时间 09:00 通过飞书机器人自动推送 |
 
 日报和周报底部附有“研报库首页”链接，使用 `ALPHAREPORT_BASE_URL` 配置的网页地址。
 
@@ -170,14 +170,25 @@ ALPHAREPORT_BASE_URL=https://your-report-site.example
 
 ### 常驻与定时任务
 
-服务持续运行时，后台的两项独立调度默认开启，时区均为 `Asia/Shanghai`，周末也执行。日报通过飞书机器人推送到配置的会话，不需要打开网页：
+服务持续运行时，后台的三项独立调度默认开启，时区均为 `Asia/Shanghai`。采集与日报每天执行，含周末；周报每周五执行。报告通过飞书机器人推送到配置的会话，不需要打开网页：
 
 | 配置 | 默认时间 | 工作 |
 |---|---|---|
 | `daily_collection` | 每天 08:00 | 检查前 24 小时全部来源公告，先相关性筛选再分类、入库和下载，不发报告 |
 | `daily_report` | 每天 09:00 | 从论文库生成日报，通过飞书机器人推送，不触发采集 |
+| `weekly_report` | 每周五 09:00 | 从论文库生成周报，通过飞书机器人推送，不触发采集 |
 
-在 `configs/app.yaml` 修改 `schedule_cron`（格式 `HH:MM`）或 `enabled` 后重启后端服务。两项任务可分别关闭；手动 `/daily`、`/weekly` 不依赖定时开关。只保留一个承载调度的后端进程，自动日报需有推送目标。采集状态保存在 `data/collections/`，`latest.json` 是最近一次完成的记录。
+在 `configs/app.yaml` 修改 `schedule_cron`（格式 `HH:MM`）或 `enabled` 后重启后端服务。周报的星期用 `day_of_week` 配置，`mon`、`tue`、`wed`、`thu`、`fri`、`sat`、`sun` 分别表示周一至周日：
+
+```yaml
+weekly_report:
+  enabled: true
+  timezone: "Asia/Shanghai"
+  day_of_week: "fri"
+  schedule_cron: "09:00"
+```
+
+三项任务可分别关闭；手动 `/daily`、`/weekly` 不依赖定时开关。只保留一个承载调度的后端进程，自动日/周报需有推送目标。周五 09:00 日报与周报都会运行，各自使用 24/168 小时的资料范围。`/api/v1/health` 的 `schedule` 字段展示各任务开关及下次执行时间。采集状态保存在 `data/collections/`，`latest.json` 是最近一次完成的记录。
 
 需要持续开机的主机，并让运行账户能访问飞书、来源和模型接口、找到 `claude`。服务守护可使用：
 
@@ -187,15 +198,14 @@ bash scripts/ops/keepalive.sh
 
 脚本检查服务 PID，必要时后台启动 `start.sh`，日志写入 `data/bot.log`；它不是模型或飞书连接的健康检查。后台常驻与开机自启不同，后者需配置 cron、launchd 或 systemd。
 
-以下外部 cron **不会随仓库自动安装**。示例主机时区为 `Asia/Shanghai`，每五分钟检查服务，周一 09:30 发周报；先替换工作目录和包含 `claude` 的实际 `PATH`，并确认预览与收件人：
+以下外部 cron **不会随仓库自动安装**。示例每五分钟检查服务；先替换工作目录和包含 `claude` 的实际 `PATH`：
 
 ```cron
 PATH=/home/your-user/.local/bin:/usr/local/bin:/usr/bin:/bin
 */5 * * * * cd /absolute/path/to/AlphaReport-Claude && /bin/bash scripts/ops/keepalive.sh
-30 9 * * 1 cd /absolute/path/to/AlphaReport-Claude && .venv/bin/python -m reportagent.cli.weekly_report >> data/cron-weekly.log 2>&1
 ```
 
-如用外部调度替代采集或日报，应关闭对应内置任务并重启后端服务，避免重复执行；只定时发送周报无需关闭内置任务。手动补跑、报告预览及可选预算命令见 [后台处理与维护工具](docs/architecture.md#后台处理与维护工具)。报告的 `--dry-run` 不投递，但可能调用模型、更新评分与评估；日报还会保存运行记录。
+如用外部调度替代采集、日报或周报，应关闭对应内置任务并重启后端服务，避免重复执行。已有外部周报定时任务也应移除，或将 `weekly_report.enabled` 设为 `false`。手动补跑、报告预览及可选预算命令见 [后台处理与维护工具](docs/architecture.md#后台处理与维护工具)。报告的 `--dry-run` 不投递，但可能调用模型、更新评分与评估；日报还会保存运行记录。
 
 ### Docker 部署
 

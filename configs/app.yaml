@@ -70,7 +70,7 @@ feishu:
   app_secret_env: "FEISHU_APP_SECRET"
   verification_token_env: "FEISHU_VERIFICATION_TOKEN"
 
-# ── Independent daily collection and reporting ─────────
+# ── Independent collection and reporting schedules ─────
 daily_collection:
   enabled: true
   timezone: "Asia/Shanghai"
@@ -81,6 +81,12 @@ daily_collection:
 daily_report:
   enabled: true  # Web 运行时，每天从论文库生成并发送日报
   timezone: "Asia/Shanghai"
+  schedule_cron: "09:00"
+
+weekly_report:
+  enabled: true  # Web 运行时，每周从论文库生成并发送周报
+  timezone: "Asia/Shanghai"
+  day_of_week: "fri"  # mon/tue/wed/thu/fri/sat/sun 分别为周一至周日
   schedule_cron: "09:00"
 
 # ── Server ────────────────────────────────────────────

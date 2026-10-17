@@ -17,6 +17,14 @@
 `disabled`，避免分类预算被思考内容耗尽。单次调用可显式覆盖；OpenAI 路径不传此参数。
 `daily_collection.enabled` 和 `daily_report.enabled` 默认分别开启，调度器由 Web 后端承载；单独启动飞书机器人不会启动调度器。默认每天北京时间 08:00 多来源采集入库，09:00 从论文库生成日报，周末也执行。两项开关独立，`schedule_cron` 为 `HH:MM`。自动采集与日报共用报告当天北京时间 08:00 前 24 小时的公告窗口，`max_results_per_source=None` 表示完整枚举；不再配置候选数量或独立3天回查窗口。周报查询同一截止点前 168 小时的库中公告。均包含起点、不含截止点，与入库时间无关；修改任务执行时间不会自动改变 08:00 报告截止点。在线报告按独立持久化的 `announced_at` 筛选，原始 `published_date` 不改写；缺少精确公告时间的来源提示证据不足。arXiv RSS 仅有最近批次，过期或无法覆盖所需窗口时记录部分完成。日/周报不调用采集，不记录逐篇已推送标记。
 
+`weekly_report` 与上述两项调度独立，默认 `enabled: true`、`day_of_week: "fri"`、
+`schedule_cron: "09:00"`、`timezone: "Asia/Shanghai"`，即每周五北京时间 09:00 从库中生成并推送周报。
+星期使用 `mon/tue/wed/thu/fri/sat/sun`（周一至周日），时间格式为 `HH:MM`；修改后重启 Web 后端。
+三项任务可分别关闭，手动 `/weekly` 不受定时开关影响。周报目标由 `.env` 的
+`FEISHU_WEEKLY_PUSH_IDS`、`FEISHU_WEEKLY_PUSH_TYPE` 配置，未设目标时沿用日报目标和类型。
+周五 09:00 日报和周报分别运行；已有外部周报调度应移除或关闭对应内置任务，避免重复发送。
+健康接口 `/api/v1/health` 返回周报的 `weekly_enabled` 与 `weekly_next_run`。
+
 Web 的监听地址与端口由 `ALPHAREPORT_BIND_HOST`、`ALPHAREPORT_PORT` 环境变量控制。
 部署检查与运行时共用 `feishu.app_id_env`、`feishu.app_secret_env` 和 `llm.api_key_env` 的凭据配置；更换模型服务时不额外要求 DeepSeek 专属密钥。
 `push_directions.yaml` 中实际生效的 `push_settings` 包括：相关性阈值 `llm_filter_threshold`、
