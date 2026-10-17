@@ -43,12 +43,8 @@ def test_material_type_uses_document_evidence(header, expected):
 
 
 @pytest.fixture
-def factory():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    result = sessionmaker(bind=engine, expire_on_commit=False)
-    yield result
-    engine.dispose()
+def factory(memory_session_factory):
+    return memory_session_factory
 
 
 def incoming(**updates):

@@ -4,10 +4,9 @@ import json
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from reportagent.db.repository import ReportRepository
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 from reportagent.models.schemas import (
     ClassifiedReport,
     ClassificationResult,
@@ -18,12 +17,9 @@ from reportagent.utils.hashing import content_hash
 
 
 @pytest.fixture
-def library():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    with sessionmaker(bind=engine)() as session:
+def library(memory_session_factory):
+    with memory_session_factory(expire_on_commit=True) as session:
         yield session, ReportRepository(session)
-    engine.dispose()
 
 
 def incoming(**values):

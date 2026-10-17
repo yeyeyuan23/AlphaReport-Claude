@@ -6,10 +6,7 @@ import json
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from reportagent.models.database import Base
 from reportagent.models.schemas import SearchResult, SourceType
 from reportagent.services import one_report
 from reportagent.services.report_quality import SCHEMA_VERSION, review_fingerprint
@@ -25,11 +22,14 @@ from tests.support.report_fixtures import TEXT, complete_analysis
     ],
 )
 def test_cached_brief_refreshes_current_links_and_markdown_without_model(
-    tmp_path, monkeypatch, old_id, old_host, include_model
+    tmp_path,
+    monkeypatch,
+    old_id,
+    old_host,
+    include_model,
+    expiring_memory_session_factory,
 ):
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine)
+    factory = expiring_memory_session_factory
     pdf = tmp_path / "paper.pdf"
     pdf.write_bytes(b"%PDF-1.4 fixture")
     paper = SearchResult(
@@ -57,52 +57,49 @@ def test_cached_brief_refreshes_current_links_and_markdown_without_model(
         raise AssertionError("Valid cached analysis must not invoke a model")
 
     monkeypatch.setattr(one_report, "LLMClient", no_model)
-    try:
-        report_id = one_report.store_paper(paper)
-        old_link = f"{old_host}/library/{old_id}"
-        receipts = [
-            {
-                "chat_id": "oc_saved",
-                "message_id": "saved",
-                "sent_at": "2026-01-01T00:00:00Z",
-            }
-        ]
-        cache = {
-            "report_id": old_id,
-            "pdf_sha256": hashlib.sha256(pdf.read_bytes()).hexdigest(),
-            "analysis_fingerprint": "current-policy",
-            "analysis": complete_analysis(),
-            "evaluation": {
-                "status": "reviewed",
-                "tier": "browse",
-                "schema_version": SCHEMA_VERSION,
-                "model": "fixture-model",
-                "text_complete": True,
-                "fingerprint": review_fingerprint(
-                    one_report._stored_review_input(report_id), "fixture-model"
-                ),
-            },
-            "brief": f"Old brief: {old_link}",
-            "deliveries": receipts,
+    report_id = one_report.store_paper(paper)
+    old_link = f"{old_host}/library/{old_id}"
+    receipts = [
+        {
+            "chat_id": "oc_saved",
+            "message_id": "saved",
+            "sent_at": "2026-01-01T00:00:00Z",
         }
-        if include_model:
-            cache["model"] = "fixture-model"
-        path = tmp_path / "data" / "one_reports" / f"{paper.arxiv_id}.json"
-        one_report.save_artifact(path, cache)
-        path.with_suffix(".md").write_text(cache["brief"])
-        returned_path, result = asyncio.run(one_report.prepare_report(paper.arxiv_id))
-        current_link = f"https://current.example/library/{report_id}"
-        assert returned_path == path
-        assert result["report_id"] == report_id
-        assert current_link in result["brief"]
-        assert old_link not in result["brief"]
-        assert paper.source_url in result["brief"]
-        assert paper.title in result["brief"]
-        assert result["deliveries"] == receipts
-        assert result["analysis"] == cache["analysis"]
-        assert result["evaluation"] == cache["evaluation"]
-        assert json.loads(path.read_text()) == result
-        assert path.with_suffix(".md").read_text() == result["brief"]
-        assert asyncio.run(one_report.prepare_report(paper.arxiv_id))[1] == result
-    finally:
-        engine.dispose()
+    ]
+    cache = {
+        "report_id": old_id,
+        "pdf_sha256": hashlib.sha256(pdf.read_bytes()).hexdigest(),
+        "analysis_fingerprint": "current-policy",
+        "analysis": complete_analysis(),
+        "evaluation": {
+            "status": "reviewed",
+            "tier": "browse",
+            "schema_version": SCHEMA_VERSION,
+            "model": "fixture-model",
+            "text_complete": True,
+            "fingerprint": review_fingerprint(
+                one_report._stored_review_input(report_id), "fixture-model"
+            ),
+        },
+        "brief": f"Old brief: {old_link}",
+        "deliveries": receipts,
+    }
+    if include_model:
+        cache["model"] = "fixture-model"
+    path = tmp_path / "data" / "one_reports" / f"{paper.arxiv_id}.json"
+    one_report.save_artifact(path, cache)
+    path.with_suffix(".md").write_text(cache["brief"])
+    returned_path, result = asyncio.run(one_report.prepare_report(paper.arxiv_id))
+    current_link = f"https://current.example/library/{report_id}"
+    assert returned_path == path
+    assert result["report_id"] == report_id
+    assert current_link in result["brief"]
+    assert old_link not in result["brief"]
+    assert paper.source_url in result["brief"]
+    assert paper.title in result["brief"]
+    assert result["deliveries"] == receipts
+    assert result["analysis"] == cache["analysis"]
+    assert result["evaluation"] == cache["evaluation"]
+    assert json.loads(path.read_text()) == result
+    assert path.with_suffix(".md").read_text() == result["brief"]
+    assert asyncio.run(one_report.prepare_report(paper.arxiv_id))[1] == result

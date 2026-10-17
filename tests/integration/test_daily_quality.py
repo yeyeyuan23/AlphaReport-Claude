@@ -4,11 +4,9 @@ from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from reportagent.services.report_periods import get_daily_range
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 from reportagent.services import daily_push as daily
 from tests.support.report_fixtures import Model, paper, response, module
 
@@ -119,15 +117,13 @@ def test_reading_priority_features_sound_work_across_sources_and_discloses_limit
     assert label in brief
 
 
-def test_daily_does_not_select_old_score_after_abstract_changes():
+def test_daily_does_not_select_old_score_after_abstract_changes(memory_session_factory):
     from reportagent.services.paper_scoring import (
         evidence_fingerprint,
         scoring_fingerprint,
     )
 
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    factory = memory_session_factory
     with factory() as session:
         row = Report(
             title="Old score",
@@ -155,7 +151,6 @@ def test_daily_does_not_select_old_score_after_abstract_changes():
     ):
         result = daily.get_todays_papers()
     assert result[0] == []
-    engine.dispose()
 
 
 def test_report_date_and_original_publication_date_are_distinct():
@@ -183,10 +178,10 @@ def test_daily_template_edits_take_effect_without_another_model_call(tmp_path):
         )
 
 
-def test_daily_reviews_before_render_and_dry_run_never_records_delivery(tmp_path):
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+def test_daily_reviews_before_render_and_dry_run_never_records_delivery(
+    tmp_path, memory_session_factory
+):
+    factory = memory_session_factory
     with factory() as s:
         s.add(
             Report(
@@ -237,7 +232,6 @@ def test_daily_reviews_before_render_and_dry_run_never_records_delivery(tmp_path
     assert events == ["review", "render"]
     assert result["status"] == "preview"
     send.assert_not_called()
-    engine.dispose()
 
 
 def test_duplicate_daily_job_is_rejected_before_work_starts(tmp_path):

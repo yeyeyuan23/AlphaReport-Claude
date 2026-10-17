@@ -3,10 +3,9 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from reportagent.db.repository import ReportRepository
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 from reportagent.services.report_views import report_to_dict
 from reportagent.models.schemas import (
     ClassifiedReport,
@@ -16,10 +15,10 @@ from reportagent.models.schemas import (
 )
 
 
-def test_selection_keeps_direction_and_relevance_and_rescores_changed_rubric():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    with sessionmaker(bind=engine)() as session:
+def test_selection_keeps_direction_and_relevance_and_rescores_changed_rubric(
+    memory_session_factory,
+):
+    with memory_session_factory(expire_on_commit=True) as session:
         row = Report(
             title="Portfolio",
             source="arxiv",
@@ -46,7 +45,6 @@ def test_selection_keeps_direction_and_relevance_and_rescores_changed_rubric():
             row.id
         ]
         assert report_to_dict(row)["evaluation"] is None
-    engine.dispose()
 
 
 def test_database_migration_is_additive_and_idempotent():
@@ -122,10 +120,10 @@ def test_concurrent_service_starts_initialize_one_consistent_database(tmp_path):
         engine.dispose()
 
 
-def test_new_revision_invalidates_previous_analysis_and_screening():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    with sessionmaker(bind=engine)() as session:
+def test_new_revision_invalidates_previous_analysis_and_screening(
+    memory_session_factory,
+):
+    with memory_session_factory(expire_on_commit=True) as session:
         repo = ReportRepository(session)
 
         def revision(number):
@@ -161,13 +159,12 @@ def test_new_revision_invalidates_previous_analysis_and_screening():
             is None
         )
         assert row.is_selected is False
-    engine.dispose()
 
 
-def test_changed_title_revision_keeps_identity_and_cannot_be_downgraded():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    with sessionmaker(bind=engine)() as session:
+def test_changed_title_revision_keeps_identity_and_cannot_be_downgraded(
+    memory_session_factory,
+):
+    with memory_session_factory(expire_on_commit=True) as session:
         repo = ReportRepository(session)
 
         def revision(number):
@@ -193,7 +190,6 @@ def test_changed_title_revision_keeps_identity_and_cannot_be_downgraded():
         assert same == original
         assert session.get(Report, same).arxiv_id == "2005.13665v2"
         assert session.query(Report).count() == 1
-    engine.dispose()
 
 
 def test_legacy_quote_gate_is_shown_as_outdated_assessment_not_active_screening():

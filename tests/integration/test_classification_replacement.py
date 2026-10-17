@@ -6,11 +6,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from reportagent.db.repository import ReportRepository
-from reportagent.models.database import Base, Report, Tag
+from reportagent.models.database import Report, Tag
 from reportagent.models.schemas import (
     ClassifiedReport,
     ClassificationResult,
@@ -22,10 +20,8 @@ from reportagent.services import batch_classification as batch
 
 
 @pytest.fixture
-def library():
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine)
+def library(expiring_memory_session_factory):
+    factory = expiring_memory_session_factory
     with factory() as session:
         report = Report(
             title="Stock prediction",
@@ -41,8 +37,7 @@ def library():
         ]
         session.add(report)
         session.commit()
-    yield factory
-    engine.dispose()
+    return factory
 
 
 def corrected():

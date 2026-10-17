@@ -3,10 +3,9 @@
 import json
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, object_session
+from sqlalchemy.orm import object_session
 
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 from reportagent.services import report_quality as quality
 from reportagent.services import knowledge_cards
 from reportagent.services.report_views import report_to_dict
@@ -15,13 +14,11 @@ from tests.support.report_fixtures import paper, response
 
 
 @pytest.fixture
-def reviewed(monkeypatch):
+def reviewed(monkeypatch, memory_session_factory):
     monkeypatch.setattr(config, "get_llm_model", lambda: "fixture-model")
     monkeypatch.setattr(quality, "get_llm_model", lambda: "fixture-model")
     monkeypatch.setattr(knowledge_cards, "get_llm_model", lambda: "fixture-model")
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    with sessionmaker(bind=engine)() as session:
+    with memory_session_factory(expire_on_commit=True) as session:
         data = paper()
         row = Report(**data, content_hash="fixture", authors="[]")
         session.add(row)
@@ -40,7 +37,6 @@ def reviewed(monkeypatch):
         row.evaluation_json = json.dumps(evaluation)
         session.commit()
         yield row, evaluation
-    engine.dispose()
 
 
 def test_current_complete_review_is_still_visible(reviewed):

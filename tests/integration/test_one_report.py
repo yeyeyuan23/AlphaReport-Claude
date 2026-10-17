@@ -5,9 +5,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 from reportagent.models.schemas import AnalysisResult, SearchResult, SourceType
 from reportagent.services.one_report import (
     collect_paper,
@@ -20,6 +18,7 @@ from reportagent.services.one_report import (
 )
 
 
+from tests.support.database import memory_database
 from tests.support.report_fixtures import TEXT, complete_analysis
 
 
@@ -105,9 +104,7 @@ class CollectionTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotEqual(before, one_report.analysis_fingerprint())
 
     async def test_cached_revision_restores_matching_database_contents(self):
-        engine = create_engine("sqlite:///:memory:")
-        Base.metadata.create_all(engine)
-        factory = sessionmaker(bind=engine)
+        factory = self.enterContext(memory_database())
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             pdf = root / "paper.pdf"
@@ -198,7 +195,6 @@ class CollectionTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(
                         json.loads(stored.analysis_json), result.model_dump()
                     )
-        engine.dispose()
 
     async def test_pending_quality_retries_without_repeating_valid_analysis(self):
         from reportagent.services import one_report, report_quality
@@ -303,91 +299,74 @@ class SharedEvaluationSnapshotTests(unittest.IsolatedAsyncioTestCase):
     async def test_new_single_evaluation_uses_exact_persisted_snapshot(self):
         from reportagent.services import one_report, report_quality
 
-        engine = create_engine("sqlite:///:memory:")
-        Base.metadata.create_all(engine)
-        factory = sessionmaker(bind=engine, expire_on_commit=False)
-        try:
-            with tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                pdf = root / "paper.pdf"
-                pdf.write_bytes(b"pdf")
-                paper = SearchResult(
-                    title="Portfolio methods",
-                    abstract="We study portfolio methods and costs.",
-                    full_text=TEXT,
-                    abstract_only=False,
-                    source=SourceType.ARXIV,
-                    arxiv_id="2005.13665v1",
-                    pdf_path=str(pdf),
-                )
-                llm = MagicMock(model="fixture", thinking="disabled", calls=[])
-                llm._client.close = AsyncMock()
-                agent = MagicMock(_config={"analysis": {"phases": {}}})
-                agent.analyze_report_directly = AsyncMock(
-                    return_value=AnalysisResult.model_validate(complete_analysis())
-                )
+        factory = self.enterContext(memory_database(expire_on_commit=False))
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            pdf = root / "paper.pdf"
+            pdf.write_bytes(b"pdf")
+            paper = SearchResult(
+                title="Portfolio methods",
+                abstract="We study portfolio methods and costs.",
+                full_text=TEXT,
+                abstract_only=False,
+                source=SourceType.ARXIV,
+                arxiv_id="2005.13665v1",
+                pdf_path=str(pdf),
+            )
+            llm = MagicMock(model="fixture", thinking="disabled", calls=[])
+            llm._client.close = AsyncMock()
+            agent = MagicMock(_config={"analysis": {"phases": {}}})
+            agent.analyze_report_directly = AsyncMock(
+                return_value=AnalysisResult.model_validate(complete_analysis())
+            )
 
-                async def evaluate(snapshot, model, **kwargs):
-                    with factory() as session:
-                        row = session.query(Report).one()
-                        expected = report_quality.review_fingerprint(
-                            vars(row), model.model
-                        )
-                    assert (
-                        report_quality.review_fingerprint(snapshot, model.model)
-                        == expected
-                    )
-                    return {
-                        "status": "reviewed",
-                        "tier": "browse",
-                        "fingerprint": expected,
-                    }
+            async def evaluate(snapshot, model, **kwargs):
+                with factory() as session:
+                    row = session.query(Report).one()
+                    expected = report_quality.review_fingerprint(vars(row), model.model)
+                assert (
+                    report_quality.review_fingerprint(snapshot, model.model) == expected
+                )
+                return {
+                    "status": "reviewed",
+                    "tier": "browse",
+                    "fingerprint": expected,
+                }
 
-                with (
-                    patch.object(one_report, "PROJECT_ROOT", root),
-                    patch.object(one_report, "init_db"),
-                    patch.object(
-                        one_report, "get_session_factory", return_value=factory
-                    ),
-                    patch.object(
-                        one_report, "collect_paper", new=AsyncMock(return_value=paper)
-                    ),
-                    patch.object(one_report, "LLMClient", return_value=llm),
-                    patch.object(one_report, "AnalysisAgent", return_value=agent),
-                    patch.object(
-                        report_quality, "evaluate_paper", side_effect=evaluate
-                    ),
-                    patch.object(one_report, "make_brief", return_value="brief"),
-                ):
-                    await one_report.prepare_report(paper.arxiv_id)
-        finally:
-            engine.dispose()
+            with (
+                patch.object(one_report, "PROJECT_ROOT", root),
+                patch.object(one_report, "init_db"),
+                patch.object(one_report, "get_session_factory", return_value=factory),
+                patch.object(
+                    one_report, "collect_paper", new=AsyncMock(return_value=paper)
+                ),
+                patch.object(one_report, "LLMClient", return_value=llm),
+                patch.object(one_report, "AnalysisAgent", return_value=agent),
+                patch.object(report_quality, "evaluate_paper", side_effect=evaluate),
+                patch.object(one_report, "make_brief", return_value="brief"),
+            ):
+                await one_report.prepare_report(paper.arxiv_id)
 
     async def test_storing_same_paper_without_new_result_preserves_success(self):
         from reportagent.services import one_report
 
-        engine = create_engine("sqlite:///:memory:")
-        Base.metadata.create_all(engine)
-        factory = sessionmaker(bind=engine)
-        try:
-            paper = SearchResult(
-                title="Same paper",
-                source=SourceType.ARXIV,
-                arxiv_id="2005.13665v1",
-                full_text=TEXT,
+        factory = self.enterContext(memory_database())
+        paper = SearchResult(
+            title="Same paper",
+            source=SourceType.ARXIV,
+            arxiv_id="2005.13665v1",
+            full_text=TEXT,
+        )
+        result = AnalysisResult.model_validate(complete_analysis())
+        with (
+            patch.object(one_report, "init_db"),
+            patch.object(one_report, "get_session_factory", return_value=factory),
+        ):
+            rid = one_report.store_paper(
+                paper, result, {"status": "reviewed", "tier": "browse"}
             )
-            result = AnalysisResult.model_validate(complete_analysis())
-            with (
-                patch.object(one_report, "init_db"),
-                patch.object(one_report, "get_session_factory", return_value=factory),
-            ):
-                rid = one_report.store_paper(
-                    paper, result, {"status": "reviewed", "tier": "browse"}
-                )
-                one_report.store_paper(paper)
-            with factory() as session:
-                row = session.get(Report, rid)
-                assert row.analysis_json == result.model_dump_json()
-                assert json.loads(row.evaluation_json)["status"] == "reviewed"
-        finally:
-            engine.dispose()
+            one_report.store_paper(paper)
+        with factory() as session:
+            row = session.get(Report, rid)
+            assert row.analysis_json == result.model_dump_json()
+            assert json.loads(row.evaluation_json)["status"] == "reviewed"

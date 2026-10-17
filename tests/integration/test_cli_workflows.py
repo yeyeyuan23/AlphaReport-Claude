@@ -11,10 +11,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 from reportagent.models.schemas import SearchResult, SourceType
 from tests.support.collection_scoring import RelevanceModel
 
@@ -48,15 +46,15 @@ def test_cli_commands_offer_documented_options(name, flag):
     assert flag in result.stdout
 
 
-def test_collection_is_callable_without_processes_and_stores_real_rows():
+def test_collection_is_callable_without_processes_and_stores_real_rows(
+    memory_session_factory,
+):
     module = "reportagent.services.collection"
     assert importlib.util.find_spec(module), (
         "Collection must be callable outside scripts"
     )
     collection = importlib.import_module(module)
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+    factory = memory_session_factory
     paper = SearchResult(
         title="Portfolio optimization with transaction costs",
         abstract="A quantitative finance portfolio risk model.",
@@ -67,30 +65,27 @@ def test_collection_is_callable_without_processes_and_stores_real_rows():
         is_available=lambda: True,
         search=AsyncMock(return_value=[paper]),
     )
-    try:
-        with (
-            patch.object(collection, "init_db"),
-            patch.object(collection, "get_session_factory", return_value=factory),
-            patch.object(collection, "build_sources", return_value=[source]),
-            patch.object(collection, "LLMClient", side_effect=RelevanceModel),
-            patch.object(collection, "LLMClassifier", return_value=None),
-        ):
-            result = asyncio.run(
-                collection.collect_reports(
-                    collection.CollectionOptions(
-                        topics="组合优化", sources="arxiv", no_analysis=True
-                    )
+    with (
+        patch.object(collection, "init_db"),
+        patch.object(collection, "get_session_factory", return_value=factory),
+        patch.object(collection, "build_sources", return_value=[source]),
+        patch.object(collection, "LLMClient", side_effect=RelevanceModel),
+        patch.object(collection, "LLMClassifier", return_value=None),
+    ):
+        result = asyncio.run(
+            collection.collect_reports(
+                collection.CollectionOptions(
+                    topics="组合优化", sources="arxiv", no_analysis=True
                 )
             )
-        assert result["topics"] == ["组合优化"]
-        assert result["sources"] == ["arxiv"]
-        assert result["storage"]["added"] == 1
-        assert result["results_count"] == 1
-        with factory() as session:
-            assert session.query(Report).one().title == paper.title
-        assert json.loads(json.dumps(result))["storage"]["errors"] == []
-    finally:
-        engine.dispose()
+        )
+    assert result["topics"] == ["组合优化"]
+    assert result["sources"] == ["arxiv"]
+    assert result["storage"]["added"] == 1
+    assert result["results_count"] == 1
+    with factory() as session:
+        assert session.query(Report).one().title == paper.title
+    assert json.loads(json.dumps(result))["storage"]["errors"] == []
 
 
 def test_weekly_renders_current_shared_template_without_model_rewrite(tmp_path):

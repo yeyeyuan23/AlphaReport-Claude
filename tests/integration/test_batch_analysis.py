@@ -5,12 +5,10 @@ import unittest
 from contextlib import ExitStack
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 from reportagent.models.schemas import AnalysisResult, Assessment, Methodology
 from reportagent.services import batch_analysis
+from tests.support.database import memory_database
 
 
 def complete_analysis():
@@ -25,11 +23,8 @@ def complete_analysis():
 
 class BatchAnalysisTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
-        self.engine = create_engine("sqlite:///:memory:")
-        Base.metadata.create_all(self.engine)
-        self.factory = sessionmaker(bind=self.engine)
+        self.factory = self.enterContext(memory_database())
         self.stack = ExitStack()
-        self.addCleanup(self.engine.dispose)
         self.addCleanup(self.stack.close)
         self.llm = MagicMock(calls=[])
         self.llm._client.close = AsyncMock()

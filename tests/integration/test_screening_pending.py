@@ -4,11 +4,9 @@ import asyncio
 import json
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from reportagent.db.repository import ReportRepository
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 from reportagent.services import paper_scoring as scoring
 
 ABSTRACT = (
@@ -74,10 +72,10 @@ def test_pending_partition_keeps_original_indexes_and_model_reported_insufficien
     assert "论文 #1" in prompt and "论文 #2" in prompt and "论文 #0" not in prompt
 
 
-def test_pending_persistence_retries_after_material_changes(monkeypatch):
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+def test_pending_persistence_retries_after_material_changes(
+    monkeypatch, memory_session_factory
+):
+    factory = memory_session_factory
     monkeypatch.setattr(scoring, "init_db", lambda: None)
     monkeypatch.setattr(scoring, "get_session_factory", lambda: factory)
     with factory() as session:
@@ -116,7 +114,6 @@ def test_pending_persistence_retries_after_material_changes(monkeypatch):
                 scoring_fingerprint=scoring.scoring_fingerprint()
             )
         ] == [1]
-    engine.dispose()
 
 
 def test_current_screening_requires_unchanged_rubric_and_material():
@@ -147,10 +144,10 @@ def test_direct_apply_cannot_promote_title_only_to_scored():
     assert stats["pending_needs_material"] == 1
 
 
-def test_pending_only_run_needs_no_model_credentials(monkeypatch):
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine, expire_on_commit=False)
+def test_pending_only_run_needs_no_model_credentials(
+    monkeypatch, memory_session_factory
+):
+    factory = memory_session_factory
     with factory() as session:
         session.add(
             Report(
@@ -167,4 +164,3 @@ def test_pending_only_run_needs_no_model_credentials(monkeypatch):
     with factory() as session:
         provenance = json.loads(session.get(Report, 1).selection_provenance_json)
         assert provenance["status"] == "pending_needs_material"
-    engine.dispose()

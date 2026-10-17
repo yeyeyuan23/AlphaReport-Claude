@@ -8,13 +8,11 @@ from threading import Event
 
 import httpx
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 from reportagent.bot import claude, sessions
 from reportagent.cli import classify as classify_cli
 from reportagent.services import batch_classification as classification
-from reportagent.models.database import Base, Report
+from reportagent.models.database import Report
 
 
 @pytest.mark.parametrize(
@@ -151,13 +149,11 @@ def test_old_resume_error_cannot_delete_newer_session_or_retry(
 
 
 def test_first_remote_pdf_and_cached_pdf_have_identical_inline_headers(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, expiring_memory_session_factory
 ):
     from reportagent.api import library
 
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine)
+    factory = expiring_memory_session_factory
     monkeypatch.setattr(library, "PROJECT_ROOT", tmp_path)
     payload = b"%PDF-1.4\nfixture"
     async_client = httpx.AsyncClient
@@ -169,29 +165,26 @@ def test_first_remote_pdf_and_cached_pdf_have_identical_inline_headers(
         "AsyncClient",
         lambda **kwargs: async_client(transport=transport, **kwargs),
     )
-    try:
-        with factory() as db:
-            report = Report(
-                title="paper",
-                source="arxiv",
-                source_url="https://arxiv.org/abs/1234.56789",
-                arxiv_id="1234.56789",
-                content_hash="fixture",
-            )
-            db.add(report)
-            db.commit()
-            first = library.get_report_pdf(report.id, db)
-            cached = library.get_report_pdf(report.id, db)
-            expected = f'inline; filename="report_{report.id}.pdf"'
-            assert first.headers["content-disposition"] == expected
-            assert cached.headers["content-disposition"] == expected
-            assert (
-                first.headers["content-type"]
-                == cached.headers["content-type"]
-                == "application/pdf"
-            )
-    finally:
-        engine.dispose()
+    with factory() as db:
+        report = Report(
+            title="paper",
+            source="arxiv",
+            source_url="https://arxiv.org/abs/1234.56789",
+            arxiv_id="1234.56789",
+            content_hash="fixture",
+        )
+        db.add(report)
+        db.commit()
+        first = library.get_report_pdf(report.id, db)
+        cached = library.get_report_pdf(report.id, db)
+        expected = f'inline; filename="report_{report.id}.pdf"'
+        assert first.headers["content-disposition"] == expected
+        assert cached.headers["content-disposition"] == expected
+        assert (
+            first.headers["content-type"]
+            == cached.headers["content-type"]
+            == "application/pdf"
+        )
 
 
 @pytest.mark.parametrize(
@@ -203,30 +196,23 @@ def test_first_remote_pdf_and_cached_pdf_have_identical_inline_headers(
     ],
 )
 def test_valid_selector_classifies_only_its_explicit_scope(
-    monkeypatch, options, expected_ids
+    monkeypatch, options, expected_ids, expiring_memory_session_factory
 ):
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    factory = sessionmaker(bind=engine)
+    factory = expiring_memory_session_factory
     monkeypatch.setattr(classification, "init_db", lambda: None)
     monkeypatch.setattr(classification, "get_session_factory", lambda: factory)
-    try:
-        with factory() as db:
-            db.add_all(
-                [
-                    Report(
-                        title=f"Factor model {i}", content_hash=str(i), source="arxiv"
-                    )
-                    for i in range(3)
-                ]
-            )
-            db.commit()
-        audit = asyncio.run(classification.classify_async(options))
-        assert audit["report_ids"] == expected_ids
-        assert audit["classified_ids"] == expected_ids
-        assert audit["selected"] == len(expected_ids)
-    finally:
-        engine.dispose()
+    with factory() as db:
+        db.add_all(
+            [
+                Report(title=f"Factor model {i}", content_hash=str(i), source="arxiv")
+                for i in range(3)
+            ]
+        )
+        db.commit()
+    audit = asyncio.run(classification.classify_async(options))
+    assert audit["report_ids"] == expected_ids
+    assert audit["classified_ids"] == expected_ids
+    assert audit["selected"] == len(expected_ids)
 
 
 def test_old_snapshot_cannot_save_after_repeated_clear_and_reopen(isolated_chat):
