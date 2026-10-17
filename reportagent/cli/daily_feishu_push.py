@@ -22,7 +22,9 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="预览模式，不实际推送")
     parser.add_argument("--output", type=str, default=None, help="将简报输出到文件")
     parser.add_argument(
-        "--report-ids", default="", help="显式指定库中论文 ID（逗号分隔）"
+        "--report-ids",
+        default="",
+        help="指定库中论文 ID（逗号分隔），仍须当日发表且日期明确到日",
     )
     parser.add_argument(
         "--max-reviews",

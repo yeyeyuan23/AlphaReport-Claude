@@ -1,4 +1,4 @@
-"""Daily updates follow ingestion; weekly coverage rolls with publication dates."""
+"""Daily and weekly reports use Beijing publication date windows."""
 
 from datetime import datetime, timezone
 
@@ -37,7 +37,7 @@ def test_weekly_backfill_offsets_the_rolling_window_by_seven_days():
         get_weekly_range(-1)
 
 
-def test_daily_uses_beijing_ingestion_day_but_excludes_unknown_publication(
+def test_daily_uses_publication_day_regardless_of_ingestion(
     monkeypatch, memory_session_factory
 ):
     factory = memory_session_factory
@@ -68,7 +68,7 @@ def test_daily_uses_beijing_ingestion_day_but_excludes_unknown_publication(
             )
         db.commit()
     rows, first, last = daily.get_todays_papers(report_date="2026-10-17")
-    assert {r["id"] for r in rows} == {1}
+    assert {r["id"] for r in rows} == {3, 4}
     assert (first, last) == ("2026-10-17", "2026-10-17")
     # A publication-based weekly report must not substitute ingestion dates.
     from reportagent.services.report_periods import get_weekly_range
@@ -91,7 +91,7 @@ def test_daily_empty_report_keeps_the_requested_report_date(
     )
 
 
-def test_relevance_refresh_matches_daily_ingestion_boundaries(
+def test_manual_created_date_scoring_respects_beijing_boundaries(
     monkeypatch, memory_session_factory
 ):
     import asyncio
@@ -138,3 +138,135 @@ def test_relevance_refresh_matches_daily_ingestion_boundaries(
         )
     )
     assert observed == [1]
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_daily_precise_publication_boundaries(
+    monkeypatch, memory_session_factory, explicit
+):
+    import json
+
+    factory = memory_session_factory
+    monkeypatch.setattr(daily, "init_db", lambda: None)
+    monkeypatch.setattr(daily, "get_session_factory", lambda: factory)
+    monkeypatch.setattr(daily, "screening_is_current", lambda row: True)
+    with factory() as db:
+        for rid, published, info in [
+            (1, "2026-10-16T16:00:00", None),
+            (2, "2026-10-17T15:59:59.999999", None),
+            (3, "2026-10-16T15:59:59.999999", None),
+            (4, "2026-10-17T16:00:00", None),
+            (5, None, {"precision": "year", "year": 2021}),
+            (6, None, {"precision": "month", "year": 2026, "month": 10}),
+            (
+                7,
+                "2026-10-17T00:00:00",
+                {"precision": "month", "year": 2026, "month": 10},
+            ),
+            (8, "2026-10-17T00:00:00", {"source": "pdf_creation_date"}),
+        ]:
+            db.add(
+                Report(
+                    id=rid,
+                    title=f"Paper {rid}",
+                    source="local_pdf",
+                    content_hash=str(rid),
+                    created_at=datetime(2020, 1, 1),
+                    published_date=datetime.fromisoformat(published)
+                    if published
+                    else None,
+                    publication_date_info_json=json.dumps(info) if info else None,
+                    selection_relevance=8,
+                )
+            )
+        db.commit()
+    rows, _, _ = daily.get_todays_papers(
+        list(range(1, 9)) if explicit else None, report_date="2026-10-17"
+    )
+    assert {r["id"] for r in rows} == {1, 2}
+    with factory() as db:
+        assert db.query(Report).count() == 8
+
+
+def test_relevance_refresh_uses_exact_publication_day(
+    monkeypatch, memory_session_factory
+):
+    import asyncio
+    import json
+    from types import SimpleNamespace
+    from reportagent.services import paper_scoring as scoring
+
+    factory = memory_session_factory
+    with factory() as db:
+        for rid, published, precision in [
+            (1, "2026-10-16T16:00:00", None),
+            (2, "2026-10-17T15:59:59.999999", None),
+            (3, "2026-10-16T15:59:59.999999", None),
+            (4, "2026-10-17T16:00:00", None),
+            (5, "2026-10-17T00:00:00", "year"),
+            (6, None, "month"),
+        ]:
+            db.add(
+                Report(
+                    id=rid,
+                    title=f"Paper {rid}",
+                    content_hash=str(rid),
+                    source="arxiv",
+                    abstract="We study portfolio allocation with transaction costs and rolling out-of-sample returns.",
+                    created_at=datetime(2020, 1, 1),
+                    published_date=datetime.fromisoformat(published)
+                    if published
+                    else None,
+                    publication_date_info_json=json.dumps({"precision": precision})
+                    if precision
+                    else None,
+                )
+            )
+        db.commit()
+    monkeypatch.setattr(scoring, "init_db", lambda: None)
+    monkeypatch.setattr(scoring, "get_session_factory", lambda: factory)
+    monkeypatch.setattr(
+        scoring,
+        "LLMClient",
+        lambda: SimpleNamespace(provider="offline", model="fixture"),
+    )
+    observed = []
+
+    async def assess(model, papers, **kwargs):
+        observed.extend(p.id for p in papers)
+        return [], []
+
+    monkeypatch.setattr(scoring, "score_papers_batch", assess)
+    asyncio.run(
+        scoring.score_reports(
+            scoring.ScoringOptions(
+                published_date="2026-10-17", max_papers=0, dry_run=True
+            )
+        )
+    )
+    assert set(observed) == {1, 2}
+
+
+@pytest.mark.parametrize("published", [None, datetime(2021, 1, 1)])
+def test_daily_refresh_drops_changed_publication_date(
+    monkeypatch, memory_session_factory, published
+):
+    factory = memory_session_factory
+    with factory() as db:
+        db.add(
+            Report(
+                id=1,
+                title="Changed",
+                source="local_pdf",
+                content_hash="one",
+                published_date=published,
+            )
+        )
+        db.commit()
+    monkeypatch.setattr(daily, "get_session_factory", lambda: factory)
+    assert (
+        daily._refresh_candidate_metadata(
+            [{"id": 1, "ui_url": "/library/1"}], report_date="2026-10-17"
+        )
+        == []
+    )

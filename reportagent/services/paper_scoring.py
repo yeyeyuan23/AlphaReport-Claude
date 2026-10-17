@@ -40,6 +40,7 @@ class ScoringOptions:
     all_unjudged: bool = False
     published_days: int | None = None
     created_date: str | None = None
+    published_date: str | None = None
     threshold: float | None = None
     batch_size: int = 10
     max_papers: int = 200
@@ -575,8 +576,22 @@ async def score_reports(options: ScoringOptions) -> None:
     limit = options.max_papers or None
     from reportagent.services.report_periods import get_daily_range
 
-    if options.created_date and (options.published_days or options.all_unjudged):
-        raise ValueError("created_date cannot be combined with other date scopes")
+    if (
+        sum(
+            bool(scope)
+            for scope in (
+                options.created_date,
+                options.published_date,
+                options.published_days,
+                options.all_unjudged,
+            )
+        )
+        > 1
+    ):
+        raise ValueError("Date scopes cannot be combined")
+    published_range = (
+        get_daily_range(options.published_date) if options.published_date else None
+    )
     created_range = (
         get_daily_range(options.created_date) if options.created_date else None
     )
@@ -601,7 +616,22 @@ async def score_reports(options: ScoringOptions) -> None:
             else _valid_score(options.threshold, "threshold")
         )
 
-        if created_range:
+        if published_range:
+            from reportagent.services.report_periods import is_daily_publication
+
+            start, end, _, _ = published_range
+            rows = repo.get_unjudged_reports(
+                published_since=start,
+                published_until=end,
+                limit=None,
+                scoring_fingerprint=fingerprint,
+            )
+            papers = [
+                row
+                for row in rows
+                if is_daily_publication(row, report_date=options.published_date)
+            ][:limit]
+        elif created_range:
             start, end, _, _ = created_range
             papers = repo.get_unjudged_reports(
                 since=start,

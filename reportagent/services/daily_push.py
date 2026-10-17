@@ -40,8 +40,8 @@ from reportagent.services.scheduled_collection import (
     read_latest_collection,
     collection_notice,
 )
-from reportagent.services.report_periods import get_daily_range
-from reportagent.services.document_metadata import has_publication_date, metadata_dict
+from reportagent.services.report_periods import get_daily_range, is_daily_publication
+from reportagent.services.document_metadata import metadata_dict
 
 load_dotenv()
 
@@ -75,7 +75,7 @@ PUSH_SETTINGS: dict = _load_push_settings()
 
 
 # ═══════════════════════════════════════════════════
-# Daily library additions
+# Daily publications
 # ═══════════════════════════════════════════════════
 
 
@@ -109,7 +109,9 @@ def _paper_metadata(row) -> dict:
     }
 
 
-def _refresh_candidate_metadata(candidates: list[dict]) -> list[dict]:
+def _refresh_candidate_metadata(
+    candidates: list[dict], *, report_date: str | None = None
+) -> list[dict]:
     """Refresh metadata and retain only assessments still saved against current evidence."""
     if not candidates:
         return []
@@ -127,17 +129,7 @@ def _refresh_candidate_metadata(candidates: list[dict]) -> list[dict]:
         refreshed = []
         for paper in candidates:
             row = current.get(paper["id"])
-            if row is not None and not has_publication_date(row):
-                continue
-            if row is None:
-                refreshed.append(
-                    {
-                        **paper,
-                        "evaluation": pending_review(
-                            paper, "论文记录已删除，请重新获取并评估。"
-                        ),
-                    }
-                )
+            if row is None or not is_daily_publication(row, report_date=report_date):
                 continue
             snapshot = {
                 field: getattr(row, field)
@@ -191,10 +183,10 @@ def get_todays_papers(
     *,
     report_date: str | None = None,
 ) -> tuple[list[dict], str, str]:
-    """Get today's newly ingested papers with current, eligible relevance scores.
+    """Get today's precisely dated publications with current relevance scores.
 
-    按北京时间当天的 created_at（首次入库时间），不限制原始发表日期。
-    发送历史不参与筛选；显式指定论文时跳过入库窗口和相关性过滤，但发表日期未知仍排除。
+    按北京时间当天的 published_date，日期必须明确到日。
+    发送历史不参与筛选；显式指定论文仅跳过相关性过滤，不能绕过发表日期窗口。
 
     Returns:
         (papers, date_label_start, date_label_end) — date labels for briefing title
@@ -208,30 +200,32 @@ def get_todays_papers(
 
         start, end, label, _ = get_daily_range(report_date)
         logger.info(
-            "Query daily additions: created_at %s ~ %s (%s Beijing), current relevance required",
+            "Query daily publications: published_date %s ~ %s (%s Beijing), current relevance required",
             start,
             end,
             label,
         )
 
-        q = session.query(Report)
+        q = session.query(Report).filter(
+            Report.published_date >= start, Report.published_date <= end
+        )
         if report_ids:
             q = q.filter(Report.id.in_(report_ids))
         else:
             q = q.filter(
-                Report.created_at >= start,
-                Report.created_at <= end,
                 Report.selection_relevance
                 >= PUSH_SETTINGS.get("llm_filter_threshold", 6.0),
             )
         q = q.order_by(desc(Report.selection_relevance), desc(Report.published_date))
-        reports = [row for row in q.all() if has_publication_date(row)]
+        reports = [
+            row for row in q.all() if is_daily_publication(row, report_date=label)
+        ]
         if not report_ids:
             reports = [r for r in reports if screening_is_current(r)]
 
         if not reports:
             logger.warning(
-                "No eligible new additions on %s Beijing. Sending empty brief.", label
+                "No eligible publications on %s Beijing. Sending empty brief.", label
             )
             return [], label, label
 
@@ -496,7 +490,7 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
                     sys.executable,
                     "-m",
                     "reportagent.cli.llm_filter",
-                    "--created-date",
+                    "--published-date",
                     report_date,
                     "--max-papers",
                     "0",
@@ -524,7 +518,7 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
         report_ids=ids or None, report_date=report_date
     )
     if ids and not papers:
-        raise ValueError("指定论文不存在或发表日期未知，不能进入日报")
+        raise ValueError("指定论文不存在、并非当日发表或日期未明确到日，不能进入日报")
     candidates = select_candidates(papers, len(papers), list(load_enabled_directions()))
     run["report_ids"] = [p["id"] for p in candidates]
     if not candidates and run["stages"]["relevance"]["status"] == "failed":
@@ -547,7 +541,7 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
     run["report_ids"] = [p["id"] for p in candidates]
     for p in candidates:
         p["evaluation"] = assessments.get(p["id"], pending_review(p, "全文评估未完成"))
-    candidates = _refresh_candidate_metadata(candidates)
+    candidates = _refresh_candidate_metadata(candidates, report_date=report_date)
     run["report_ids"] = [p["id"] for p in candidates]
     run["papers"] = candidates
 
@@ -563,9 +557,11 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
         if deferred:
             text += f"\n\n本次全文评估预算为 {max_reviews} 篇，另有 {deferred} 篇候选尚未评估；重跑可继续处理。"
         if ids:
-            text += "\n\n本次为指定论文评估，未按当日新增入库范围筛选。"
+            text += (
+                "\n\n本次为指定论文评估，仍限于北京时间当日发表且日期明确到日的论文。"
+            )
         if not papers:
-            text += "\n\n当日暂无通过当前相关性筛选的新增入库论文。"
+            text += "\n\n当日暂无发表日期明确到日、且通过当前相关性筛选的论文。"
         if run["warnings"]:
             text = (
                 "\n".join(f"> ⚠ {warning}" for warning in run["warnings"])

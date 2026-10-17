@@ -267,7 +267,7 @@ def test_daily_query_keeps_more_than_two_hundred_current_candidates(queue_librar
     assert len(daily.get_todays_papers()[0]) == 241
 
 
-def test_daily_relevance_refresh_requests_all_additions_for_its_report_date(
+def test_daily_relevance_refresh_requests_all_publications_for_its_report_date(
     queue_library, monkeypatch
 ):
     commands = []
@@ -280,6 +280,6 @@ def test_daily_relevance_refresh_requests_all_additions_for_its_report_date(
     result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True, max_reviews=1))
     command, kwargs = commands[0]
     assert command[command.index("--max-papers") + 1] == "0"
-    assert command[command.index("--created-date") + 1] == result["report_date"]
+    assert command[command.index("--published-date") + 1] == result["report_date"]
     assert "--published-days" not in command
     assert kwargs.get("timeout") is None

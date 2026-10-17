@@ -128,7 +128,7 @@ def test_inconclusive_reimport_preserves_supported_date_and_material_type(factor
 
 
 @pytest.mark.parametrize("explicit", [False, True])
-def test_unknown_dates_stay_in_library_but_not_daily(factory, explicit):
+def test_old_and_partial_dates_stay_in_library_but_not_daily(factory, explicit):
     with factory() as session:
         rows = [
             Report(
@@ -163,7 +163,7 @@ def test_unknown_dates_stay_in_library_but_not_daily(factory, explicit):
         papers, _, _ = daily_push.get_todays_papers(
             [1, 2, 3] if explicit else None, report_date="2026-10-17"
         )
-    assert {p["id"] for p in papers} == {1, 2}
+    assert papers == []
     with factory() as session:
         assert session.query(Report).count() == 3
 

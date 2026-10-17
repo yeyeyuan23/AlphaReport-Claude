@@ -68,6 +68,21 @@ def has_publication_date(paper) -> bool:
         return False
 
 
+def has_precise_publication_date(paper) -> bool:
+    """A daily publication needs a real day, not a guessed partial/file date."""
+    get = (
+        paper.get if isinstance(paper, dict) else lambda key: getattr(paper, key, None)
+    )
+    info = metadata_dict(
+        get("publication_date_info") or get("publication_date_info_json")
+    )
+    return (
+        bool(get("published_date"))
+        and info.get("precision") in {None, "day"}
+        and has_publication_date(paper)
+    )
+
+
 def merge_document_metadata(row, search_result) -> None:
     """Fill metadata without erasing supported values on inconclusive reparses."""
     raw = search_result.raw_metadata

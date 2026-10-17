@@ -66,7 +66,7 @@ CLI 和 `/api/v1/skills` 使用同一 registry，只读取配置的仓库技能�
   日期和身份，分类并按方向筛选；达标才入库并下载全文。缺摘要只允许复用库内同版本材料，
   仍不足则标为待补，不提前下载 PDF。返回整体 `status`、逐源 `source_statuses` 和入库统计，
   区分空结果、失败和部分成功。`local_pdf_import` 在启动时增量导入整个配置目录，
-  共用分类与 repository，使用文件指纹和进程锁避免重复导入；元数据版本变化时对未变文件只复查日期/类型，不重新分类。日期未知仅影响日报资格，不影响保留在库中；日期精度和证据、材料类型分别持久化，类型不等于来源；与手动采集共用不区分 PDF 扩展名大小写、只返回文件的目录扫描。
+  共用分类与 repository，使用文件指纹和进程锁避免重复导入；元数据版本变化时对未变文件只复查日期/类型，不重新分类。日期未知或仅明确到年/月时不具备日报资格，不影响保留在库中；日期精度和证据、材料类型分别持久化，类型不等于来源；与手动采集共用不区分 PDF 扩展名大小写、只返回文件的目录扫描。
   单篇保存和报告补全文同样遵守 repository 的日期、版本及派生状态合并规则；
   仅补材料且分类输入不变时保留当前分类与标签，不能用全文关键词重写摘要分类。
   导入与批量重分类共用分类材料解析：优先完整摘要，缺摘要时只读标明的 Introduction；
@@ -86,7 +86,7 @@ CLI 和 `/api/v1/skills` 使用同一 registry，只读取配置的仓库技能�
   材料、模型、提示词和相关性决定缓存是否有效。默认完整输入上限为 240,000 字符；
   缺全文或超限保持待核验。引文供查阅，逐字匹配不参与推荐或展示判断；
   文本块编号是提取偏移，不是 PDF 页码。模型评估不代表复现实验。
-- **日报**：`daily_push` 按北京时间当日 `created_at` 读取首次入库且发表日期已知的资料，刷新失效相关性，按方向轮流处理候选；
+- **日报**：`daily_push` 按北京时间当日 `published_date` 读取发表日期明确到日的资料，刷新失效相关性，按方向轮流处理候选；
   复用有效评估，默认评估全部符合条件且需更新的论文，
   缺全文项不占预算。随后按 `daily-report/briefing.md` 渲染，最多重点推荐 5 篇。
   来源覆盖读取最近定时采集记录，不能说成本次在线检查；过程锁和 `ReportRun` 记录本次运行。
@@ -95,7 +95,7 @@ CLI 和 `/api/v1/skills` 使用同一 registry，只读取配置的仓库技能�
 - **可选评估预算**：日/周报共用 `push_settings.max_reviews`，省略或 `null` 表示不限，
   正整数只计新全文评估；CLI `--max-reviews` 优先。预算由 `report_quality.resolve_review_budget`
   统一校验，报告说明超出预算的候选数量。日报的相关性刷新显式使用 `--max-papers 0`，
-  候选查询不设固定条数上限。`report_periods` 统一生成北京时间日期边界并转换为 UTC 查询；日报通过 `--created-date` 让评分与候选范围一致，标题为报告当天，每篇保留原始发表日期。整批筛选和机器人报告任务不设固定总时限；
+  候选查询不设固定条数上限。`report_periods` 统一生成北京时间日期边界并转换为 UTC 查询；日报通过 `--published-date` 让评分与候选范围一致，标题为报告当天，每篇保留原始发表日期。整批筛选和机器人报告任务不设固定总时限；
   单篇全文评估保留 240 秒时限，下载、解析和模型请求保留各自的超时保护。
 - **报告投递**：日/周报不采集新条目；已在库中的 arXiv 资料缺全文时可补取 PDF。
   日/周报每次执行都按本期资料生成内容，重复执行会再次发送。
@@ -162,7 +162,7 @@ Web 中两项定时任务独立配置，每天含周末执行：`daily_collectio
 .venv/bin/python -m reportagent.cli.analyze --topic factor_model --depth standard
 .venv/bin/python -m reportagent.cli.analyze --unanalyzed --depth quick
 # 摘要相关性初筛，不是全文质量评估；预览也会调用模型
-.venv/bin/python -m reportagent.cli.llm_filter --created-date 2026-10-17 --threshold 6 --batch-size 10 --dry-run
+.venv/bin/python -m reportagent.cli.llm_filter --published-date 2026-10-17 --threshold 6 --batch-size 10 --dry-run
 .venv/bin/python -m reportagent.cli.llm_direction_filter --report-ids 12,18 --dry-run --json
 # 从已保存且有效的全文评估投影卡片，不额外调用模型
 .venv/bin/python -m reportagent.cli.narrative_brief --report-id 12 --dry-run
@@ -200,7 +200,7 @@ Web 中两项定时任务独立配置，每天含周末执行：`daily_collectio
 ```
 
 `--force-review` 用于日/周报强制更新评估，`--max-reviews N` 覆盖共享的可选评估预算，
-默认不限。日报的 `--report-ids` 是显式检查已选论文，跳过入库日期窗口与摘要相关性候选限制，但仍排除发表日期未知的资料，
+默认不限。日报的 `--report-ids` 是显式检查已选论文，仅跳过摘要相关性候选限制，仍须在北京时间当天发表且日期明确到日，
 不用于自动采集。单篇产物文件名以实际版本为准，成功投递回执保留；产物中的旧评估不能覆盖库中当前有效的评估。
 
 ## 修改与验证

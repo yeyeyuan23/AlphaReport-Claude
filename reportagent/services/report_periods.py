@@ -32,3 +32,26 @@ def get_weekly_range(
     day = (now or datetime.now(REPORT_TIMEZONE)).astimezone(REPORT_TIMEZONE).date()
     last = day - timedelta(days=7 * weeks_ago)
     return _date_range(last - timedelta(days=6), last)
+
+
+def is_daily_publication(paper, *, report_date: str | None = None) -> bool:
+    """Use the same precise publication date rule before and after assessment."""
+    from reportagent.services.document_metadata import has_precise_publication_date
+
+    if not has_precise_publication_date(paper):
+        return False
+    published = (
+        paper.get("published_date") if isinstance(paper, dict) else paper.published_date
+    )
+    if isinstance(published, str):
+        try:
+            published = datetime.fromisoformat(published)
+        except ValueError:
+            return False
+    if not isinstance(published, datetime):
+        return False
+    # Database timestamps are UTC; SQLite returns them without tzinfo.
+    if published.tzinfo is None:
+        published = published.replace(tzinfo=timezone.utc)
+    start, end, _, _ = get_daily_range(report_date)
+    return start <= published <= end

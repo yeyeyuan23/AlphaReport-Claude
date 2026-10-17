@@ -436,6 +436,7 @@ class ReportRepository:
         published_since=None,
         scoring_fingerprint: str | None = None,
         created_until=None,
+        published_until=None,
     ) -> list[Report]:
         """Get reports that haven't been LLM-scored yet (selection_score == 0 and no reason)."""
         from datetime import datetime, timezone
@@ -452,7 +453,12 @@ class ReportRepository:
         if published_since:
             q = q.filter(
                 Report.published_date >= published_since,
-                Report.published_date <= datetime.now(timezone.utc),
+                Report.published_date
+                <= (
+                    published_until
+                    if published_until is not None
+                    else datetime.now(timezone.utc)
+                ),
             )
         q = q.order_by(desc(Report.created_at))
         if scoring_fingerprint is None:

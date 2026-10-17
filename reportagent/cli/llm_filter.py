@@ -26,6 +26,10 @@ def main():
         help="Retry unjudged papers published in this many days, regardless of ingestion date",
     )
     parser.add_argument(
+        "--published-date",
+        help="Score papers published on this Beijing date, with day precision (YYYY-MM-DD)",
+    )
+    parser.add_argument(
         "--created-date",
         help="Score papers first ingested on this Beijing date (YYYY-MM-DD)",
     )

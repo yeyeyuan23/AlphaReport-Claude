@@ -15,7 +15,7 @@
 
 `llm.thinking` 控制 Python Anthropic 兼容请求的思考模式；当前 DeepSeek 结构化流程设为
 `disabled`，避免分类预算被思考内容耗尽。单次调用可显式覆盖；OpenAI 路径不传此参数。
-`daily_collection.enabled` 和 `daily_report.enabled` 默认分别开启，调度器由 Web 后端承载；单独启动飞书机器人不会启动调度器。默认每天北京时间 08:00 多来源采集入库，09:00 从论文库生成日报，周末也执行。两项开关独立，`schedule_cron` 为 `HH:MM`；`daily_collection.lookback_days: 3` 从 UTC 当天往前 3 天零点起采集，用于回查可能延迟收录的来源条目，与报告范围独立。日报按北京时间当日 `created_at` 查询新增，周报按最近 7 个北京时间日期（含当天）的 `published_date` 查询；报告的日期边界统一转换成 UTC 后查库。日/周报不调用采集，不记录逐篇已推送标记。
+`daily_collection.enabled` 和 `daily_report.enabled` 默认分别开启，调度器由 Web 后端承载；单独启动飞书机器人不会启动调度器。默认每天北京时间 08:00 多来源采集入库，09:00 从论文库生成日报，周末也执行。两项开关独立，`schedule_cron` 为 `HH:MM`；`daily_collection.lookback_days: 3` 从 UTC 当天往前 3 天零点起采集，用于回查可能延迟收录的来源条目，与报告范围独立。日报按北京时间当日 `published_date` 查询发表日期明确到日的资料，与入库时间无关，周报按最近 7 个北京时间日期（含当天）的 `published_date` 查询；报告的日期边界统一转换成 UTC 后查库。日/周报不调用采集，不记录逐篇已推送标记。
 
 Web 的监听地址与端口由 `ALPHAREPORT_BIND_HOST`、`ALPHAREPORT_PORT` 环境变量控制。
 部署检查与运行时共用 `feishu.app_id_env`、`feishu.app_secret_env` 和 `llm.api_key_env` 的凭据配置；更换模型服务时不额外要求 DeepSeek 专属密钥。

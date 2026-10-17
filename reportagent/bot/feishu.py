@@ -204,7 +204,7 @@ def handle_cmd(text, chat_id, chat_type):
         return (
             "📊 AlphaReport 指令\n\n"
             "/report <arXiv编号或链接>：分析单篇论文并推送到当前私聊\n"
-            "/daily：评估当日新增入库论文并生成日报\n"
+            "/daily：评估当日发表论文并生成日报\n"
             "/weekly：汇总最近 7 天（北京时间，含当天）的库中资料\n\n"
             "/stats：查看研报库统计\n"
             "/search <关键词>：搜索研报，最多显示 5 篇\n"
@@ -241,7 +241,7 @@ def handle_cmd(text, chat_id, chat_type):
         except Exception:
             _report_lock.release()
             raise
-        return "开始生成日报：使用库中北京时间当日新增入库的资料，刷新相关性并评估符合条件的论文，完成后推送到当前私聊。"
+        return "开始生成日报：使用库中北京时间当日发表且日期明确到日的资料，刷新相关性并评估符合条件的论文，完成后推送到当前私聊。"
 
     if command == "/report":
         if chat_type != "p2p":

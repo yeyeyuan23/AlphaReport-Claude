@@ -10,10 +10,10 @@ description: 根据完整摘要评估论文与已启用研究方向的相关性�
 
 用户问哪些论文值得读时，先查询并展示当前有效的相关性与已有全文评估；需要刷新时调用同一评分 CLI，不把摘要相关性冒充研究质量，也不把评分结果当成发送授权。
 
-从仓库根目录预览北京时间指定日期新增入库、尚未评分或评分已过期的论文：
+从仓库根目录预览北京时间指定日期发表、日期明确到日且尚未评分或评分已过期的论文（日报使用同一范围）：
 
 ```bash
-.venv/bin/python -m reportagent.cli.llm_filter --created-date 2026-10-17 --dry-run
+.venv/bin/python -m reportagent.cli.llm_filter --published-date 2026-10-17 --dry-run
 ```
 
 `reportagent.cli.llm_direction_filter` 是同一评分服务的方向明细入口，共用上述提示词、验证、材料指纹与 selection 字段；明细保存在 selection_provenance.direction_scores。

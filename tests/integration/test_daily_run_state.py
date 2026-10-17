@@ -177,7 +177,7 @@ def test_empty_daily_sends_a_completion_card_to_each_recipient(
     result = daily.run_daily_push(daily.DailyPushOptions(receive_ids="A,B,A"))
     assert [item[0] for item in sent] == ["A", "B"]
     assert all(
-        not item[2] and "暂无通过当前相关性筛选的新增入库论文" in item[1]
+        not item[2] and "暂无发表日期明确到日、且通过当前相关性筛选的论文" in item[1]
         for item in sent
     )
     assert result["status"] == "empty"
@@ -207,7 +207,7 @@ def test_empty_preview_has_an_explicit_result_without_sending(
     monkeypatch.setattr(daily, "send_feishu_card", lambda *args: sent.append(args))
     result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
     assert result["status"] == "preview"
-    assert "暂无通过当前相关性筛选的新增入库论文" in result["briefing"]
+    assert "暂无发表日期明确到日、且通过当前相关性筛选的论文" in result["briefing"]
     assert sent == [] and result["deliveries"] == {}
 
 
@@ -455,7 +455,7 @@ def test_configured_review_budget_limits_candidates_and_explicit_option_override
                 title="Second",
                 source="arxiv",
                 content_hash="two",
-                published_date=datetime(2024, 2, 3),
+                published_date=datetime.now(timezone.utc),
             )
         )
         session.commit()
