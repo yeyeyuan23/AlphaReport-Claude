@@ -19,6 +19,12 @@ DEFAULT_TOPICS = "量化策略,因子模型,高频交易,风险模型,执行算�
 
 def _collection_error_label(error: str) -> str:
     lowered = error.lower()
+    if lowered.startswith("announcement"):
+        if "outside available recent lists" in lowered:
+            return "公告列表未覆盖目标日期"
+        if "abstract" in lowered:
+            return "部分公告的摘要获取失败"
+        return "公告列表获取或完整性检查失败"
     if "exceeds size limit" in lowered:
         return "PDF 超过当时的下载大小上限"
     if "timeout" in lowered:

@@ -171,7 +171,7 @@ class ArxivSource(BaseSource):
         return await self._do_search(query, criteria)
 
     async def search_announcements(self, criteria: UserCriteria) -> list[SearchResult]:
-        """Read the latest official announcement batches before relevance screening.
+        """Read dated official announcement lists before relevance screening.
 
         Relevance selection belongs to the caller; metadata-only collection sets
         download_pdfs=False so only accepted papers are subsequently hydrated.
@@ -188,7 +188,7 @@ class ArxivSource(BaseSource):
                 rate_limit_seconds=self.rate_limit_seconds,
             )
         except Exception as error:
-            self.last_search.record_error(error, "RSS search; coverage incomplete")
+            self.last_search.record_error(error, "announcements; coverage incomplete")
         results = deduplicate_results(partial_results)
         limit = criteria.max_results_per_source
         if limit is not None and len(results) > limit:
@@ -196,7 +196,7 @@ class ArxivSource(BaseSource):
                 SourceParseError(
                     "announcement result limit truncates requested coverage"
                 ),
-                "RSS search",
+                "announcements",
             )
             results = results[:limit]
         if self.download_pdfs and results:

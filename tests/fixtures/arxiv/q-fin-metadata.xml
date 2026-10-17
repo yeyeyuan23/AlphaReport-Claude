@@ -1,0 +1,401 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/Nct54oLhVbS5lkWEaNiAVydZoXg</id>
+  <title>arXiv Query: search_query=&amp;id_list=2610.21867,2610.21846,2610.21841,2610.21659,2610.21540,2610.21510,2610.21491,2610.21447,2610.21442,2610.21196,2610.21145,2610.21057,2610.22144,2610.22043,2610.21081,2610.20920,2609.34004&amp;start=0&amp;max_results=100</title>
+  <updated>2026-10-17T07:32:50Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=&amp;start=0&amp;max_results=100&amp;id_list=2610.21867,2610.21846,2610.21841,2610.21659,2610.21540,2610.21510,2610.21491,2610.21447,2610.21442,2610.21196,2610.21145,2610.21057,2610.22144,2610.22043,2610.21081,2610.20920,2609.34004" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>100</opensearch:itemsPerPage>
+  <opensearch:totalResults>17</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2610.21867v1</id>
+    <title>Algorithmic Collusion Without Deterrence: Auditing the Punishment Mechanism in Q-Learning Pricing Agents</title>
+    <updated>2026-10-15T13:39:41Z</updated>
+    <link href="https://arxiv.org/abs/2610.21867v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.21867v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Independent tabular Q-learning agents repricing in a simulated Bertrand duopoly converge to supracompetitive prices, and the seminal evidence attributes this to a learned reward-punishment scheme: undercut your rival and it retaliates, so deviation never pays. This mechanistic reading is what turns high prices into a cartel, and into a regulatory target. We replicate the environment of Calvano et al. (2020) and confirm their impulse-response pattern within co-trained pairs. We then audit the pattern on frozen policies, with learning off, and find that on its own it does not identify a mechanism: the return is over-determined rather than selective. In nine of ten converged pairs (914 of 1,024) a single attractor's basin is the entire state space, so every perturbation returns whatever provoked it, and a forced price increase triggers the same retaliatory pattern as an undercut. What co-training produces is a narrow, dyad-specific basin of attraction: re-match frozen agents from independent runs, as Calvano et al. did with learning on, and coordination collapses by 80% with nothing carried across. The deterrence claim is incomplete on its own terms: the one-period undercut of Calvano et al.'s impulse-response test is unprofitable, which we confirm in 92% of pairs, but the optimal deviation, computed by dynamic programming against each partner's frozen strategy, profits by 17.5% on average. The scheme deters only the deviation no optimizer would choose; collusion survives because deviation is never tried, not because it would not pay. Supracompetitive prices are robust; the punishment mechanism read into them does not survive these tests, which changes what the standard test of algorithmic collusion establishes, and what pairing-disruption remedies can be expected to do.</summary>
+    <category term="q-fin.CP" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T13:39:41Z</published>
+    <arxiv:comment>9 pages, 9 figures</arxiv:comment>
+    <arxiv:primary_category term="q-fin.CP"/>
+    <arxiv:journal_ref>7th ACM International Conference on AI in Finance (ICAIF '26), Milan, November 2026</arxiv:journal_ref>
+    <author>
+      <name>Kaue Lopes de Moraes</name>
+    </author>
+    <author>
+      <name>Rodrigo De-Losso</name>
+    </author>
+    <arxiv:doi>10.1145/3858063.3858865</arxiv:doi>
+    <link rel="related" href="https://doi.org/10.1145/3858063.3858865" title="doi"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.22144v1</id>
+    <title>Extending the Oracle Approximating Shrinkage to General Distributions</title>
+    <updated>2026-10-15T16:15:47Z</updated>
+    <link href="https://arxiv.org/abs/2610.22144v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.22144v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>The Oracle Approximating Shrinkage (OAS) estimator provides a closed-form, data-driven shrinkage intensity for regularizing sample covariance matrices toward a scaled identity target, but its derivation assumes Gaussian data. In practice, financial returns, neural signals, and many other high-dimensional datasets exhibit heavy tails and non-zero kurtosis, violating this assumption. We extend OAS to any distribution with finite fourth moments by incorporating a correction term $α$ built from the fourth-order joint cumulants of the data. The correction vanishes under Gaussianity, recovering the OAS formula as a special case; it admits a consistent $O(np)$ sample estimator and satisfies $ρ\in [0, 1]$ exactly for both the population cumulant and its sample analogue. Simulations and an equity-returns study confirm that the correction closes the gap between OAS and the Ledoit-Wolf estimator under non-Gaussian data, with OAS-Extended performing comparably across all tested settings. The contribution is a principled correction for OAS practitioners facing heavy-tailed data; structurally, it is distinct from prior work extending Ledoit-Wolf to elliptical distributions, which optimizes against a fixed oracle target and yields a different closed-form formula.</summary>
+    <category term="stat.ME" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="q-fin.MF" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T16:15:47Z</published>
+    <arxiv:primary_category term="stat.ME"/>
+    <author>
+      <name>Michael J. Lewis</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.22043v1</id>
+    <title>Momentum, Commentary Tone, and Earnings Surprise in LLM Financial Forecasts</title>
+    <updated>2026-10-15T15:14:20Z</updated>
+    <link href="https://arxiv.org/abs/2610.22043v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.22043v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Which inputs drive a language model's financial forecast? We construct synthetic earnings announcements that independently reverse 20-day momentum, non-informational commentary tone, and whether fixed actual EPS beats a manipulated consensus. Six instruction/chat checkpoint conversions from four families (0.49-7.61B base parameters) receive 2,016 prompts each under a direct-answer Q8_0 protocol. The design includes 24 numerical blocks, six commentary pairs, profits and losses, rising and falling annual EPS, and two surprise sizes. Both A/B answer assignments and U/D cover all 384 primary scenarios per conversion. We estimate matched changes in conditional answer-prefix scores, not calibrated market probabilities. Across these checkpoints, the primary EPS contrast ranges from -0.19 to 86.80 percentage points. The magnitude of the primary signed tone contrast exceeds that of EPS in 5 of six models, and momentum exceeds it in 5. Natural-word numerical diagnostic accuracy ranges from 51.0 to 95.8 percent. Answer-encoding, wording, context, and conversion controls qualify these results. The experiment measures observable input reliance and numerical recognition; it establishes neither an internal reasoning mechanism nor realized return predictability. Public benchmark prompts, recorded scores, and an interactive recorded-results explorer accompany the study.</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="q-fin.GN" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T15:14:20Z</published>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Alina Khaybullina</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.21442v1</id>
+    <title>Fundamental Theorem of Discrete Asset Pricing</title>
+    <updated>2026-10-15T07:49:21Z</updated>
+    <link href="https://arxiv.org/abs/2610.21442v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.21442v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Motivated by discrete price quotes in continuous time, we seek a fundamental theorem based on no arbitrage rather than a condition on limiting trading opportunities. We consider a vector of discounted prices taking values in a locally finite subset of $R^d$ in continuous time. For a locally bounded càdlàg price, we prove that no arbitrage, no free lunch with vanishing risk, no free lunch, and the existence of an equivalent local martingale measure are equivalent. An elementary finite-dimensional reduction of portfolios yields a common pathwise bound on admissible wealth. This bound reduces closedness to convex averaging in a weighted Hilbert space, after which the Kreps-Yan theorem applies. Trading gains are finite Stieltjes sums, and the proof uses no Itô integration.</summary>
+    <category term="q-fin.MF" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T07:49:21Z</published>
+    <arxiv:primary_category term="q-fin.MF"/>
+    <author>
+      <name>Masaaki Fukasawa</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.21145v1</id>
+    <title>Pricing American Commodity Options Under the Schwartz Two-Factor Model Using the Alternating Direction Explicit (ADE) Method</title>
+    <updated>2026-10-15T03:00:50Z</updated>
+    <link href="https://arxiv.org/abs/2610.21145v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.21145v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>This project investigates the valuation of American commodity options using the Schwartz two-factor model. We employ the double-sweep Alternating Direction Explicit (ADE) method, an unconditionally stable (for diffusion) finite difference scheme that provides the efficiency of explicit marching with the stability typically reserved for implicit methods, and compare it with the single-sweep alternating variant of Saul'yev. We derive the governing partial differential equation (PDE) and transform the semi-infinite domain into a rectangular computational domain. Furthermore, we apply Fichera theory to determine boundary conditions at the limits of the spot price. Finally, we implement the solver in C++, validating the results first against the closed-form solution of the PDE and Monte Carlo as a European option, then apply the American early exercise constraint and benchmark against Longstaff-Schwartz Monte Carlo to analyze numerical accuracy and convergence. The framework is then extended, following feedback from a commodities trader to exercise on futures prices and use seasonal parameters.</summary>
+    <category term="q-fin.CP" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T03:00:50Z</published>
+    <arxiv:comment>46 pages, 5 tables</arxiv:comment>
+    <arxiv:primary_category term="q-fin.CP"/>
+    <author>
+      <name>Sanjith Prabhu</name>
+    </author>
+    <author>
+      <name>Daniel J. Duffy</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.21540v1</id>
+    <title>Pricing the Unprovable: Ambiguity, Turnstile Runs, and the Verifiability Discount in Crypto Protocols</title>
+    <updated>2026-10-15T09:06:12Z</updated>
+    <link href="https://arxiv.org/abs/2610.21540v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.21540v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Privacy-preserving protocols can repair a vulnerability without establishing whether it was exploited beforehand, even when no theft is reported and aggregate supply is protected. We call the potential value reduction from this gap the verifiability discount. A turnstile model shows how early withdrawal can shift a possible shortfall to remaining holders and why credible evidence can become more valuable as exposure grows. We introduce VDISC, a reproducible framework that records reported loss, exposed value, public evidence, returns, and pool flows separately. It combines Orchard's staged disclosures with reconstructed on-chain flows, earlier Zcash cases, and a 40-event security panel. Orchard follows the predicted direction: market responses were muted after repair and supply assurance, while the largest negative return and aggregate shielded-pool net outflow aligned with the acknowledgment that past abuse could not be ruled out. These patterns are directional, not causal. Across events, market-cap-normalized reported loss and unresolved exposure overlap among the 38 events with a public loss figure (Pearson 0.86, Spearman 0.56), partly because exposure is often coded from the loss itself, so returns alone cannot distinguish reported loss from unresolved history. The findings motivate three candidate design priorities: produce privacy-compatible evidence about past states, limit the state exposed by a single flaw, and disclose residual uncertainty explicitly.</summary>
+    <category term="q-fin.TR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="q-fin.GN" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="q-fin.RM" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T09:06:12Z</published>
+    <arxiv:comment>17 pages, 3 figures, 4 tables. Accepted at MARBLE 2026 (Mathematical Research for Blockchain Economy); to appear in Lecture Notes in Operations Research (Springer). Author version with post-submission corrections; not the Version of Record</arxiv:comment>
+    <arxiv:primary_category term="q-fin.TR"/>
+    <author>
+      <name>Doohwi Cha</name>
+    </author>
+    <author>
+      <name>Hanhee Kim</name>
+    </author>
+    <author>
+      <name>Hyeonjun Yeo</name>
+    </author>
+    <author>
+      <name>Minsuk Sung</name>
+    </author>
+    <author>
+      <name>Minjae Lee</name>
+    </author>
+    <author>
+      <name>Seunghan Son</name>
+    </author>
+    <author>
+      <name>Donghwa Seo</name>
+    </author>
+    <author>
+      <name>Juyeong Lee</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.20920v1</id>
+    <title>$q_x$-Bass Martingales: Optimality, Existence and Convergence</title>
+    <updated>2026-10-14T20:51:14Z</updated>
+    <link href="https://arxiv.org/abs/2610.20920v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.20920v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We introduce the class of $q_x$-Bass martingales, extending the notion of $q$-Bass martingales. These are martingale couplings with prescribed marginals whose transition kernels are closest to a given family of reference kernels $(q_x)_{x \in \mathbb R^d}$ in the sense of a suitable weak optimal transport problem. We show that $q_x$-Bass martingales are optimizers of this problem and establish a strong duality result. Building on this duality, we introduce an algorithm for their computation and, under compactness assumptions on the prescribed marginals, prove its convergence, thereby establishing existence. We then specialize to one-dimensional marginals and show that the algorithm reduces to a fixed-point iteration.</summary>
+    <category term="math.PR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="q-fin.MF" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-14T20:51:14Z</published>
+    <arxiv:comment>27 pages</arxiv:comment>
+    <arxiv:primary_category term="math.PR"/>
+    <author>
+      <name>Antonio Marini</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.21196v1</id>
+    <title>The end-of-month option in futures contracts and the Gittins index of holding the underlying</title>
+    <updated>2026-10-15T03:56:43Z</updated>
+    <link href="https://arxiv.org/abs/2610.21196v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.21196v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>The end-of-month option allows the short in a futures contract to choose when to deliver during a window in which the delivery price is fixed. We characterize optimal delivery through a universal index obtained from the Bank--El Karoui representation theorem. In the semimartingale setting, this is the Gittins index of holding the underlying and collecting its convenience yield, and the futures price is the retirement reward for which the value of this project equals the spot price. This characterization yields price bounds and a criterion for immediate delivery. Dinkelbach's iteration reduces the price computation to a sequence of standard optimal stopping problems, with an explicit contraction bound. We apply the theory to geometric Brownian motion and the Gibson--Schwartz model with stochastic convenience yield. For geometric Brownian motion, we characterize when the futures price equals spot and derive a square-root boundary asymptotic near expiry. For the Gibson--Schwartz model, we establish monotonicity in the yield and characterize the critical yield below which the price equals spot. Numerical results illustrate the price iteration and delivery regions.</summary>
+    <category term="q-fin.MF" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T03:56:43Z</published>
+    <arxiv:comment>28 pages, 4 figures, 2 tables. JEL: G13, C61. Code and numerical results: https://github.com/ebayr/eom-gittins</arxiv:comment>
+    <arxiv:primary_category term="q-fin.MF"/>
+    <author>
+      <name>Erhan Bayraktar</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.21081v1</id>
+    <title>StochLOB: Heavy-Tailed Score Matching for Robust Limit Order Book Trend Prediction</title>
+    <updated>2026-10-15T01:33:30Z</updated>
+    <link href="https://arxiv.org/abs/2610.21081v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.21081v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Score-based diffusion methods usually perturb data with Brownian Gaussian noise, corresponding to a light-tailed forward stochastic differential equation (SDE). For market time series this SDE can be a poor abstraction: limit order book (LOB) order flow is heavy-tailed, bursty, and occasionally jump-like. We study STOCHLOB, a training-only score-matching framework that changes the forward diffusion corruption law while leaving the deployed predictor deterministic. Instead of Brownian-only Gaussian corruption, the noising process uses two non-Gaussian SDE-inspired alternatives: jump-Lévy noise through a compound-Poisson variance mixture, and clipped $α$-stable noise through a positive-stable Gaussian scale mixture. These corruptions inject finite jumps and heavy-tailed residuals into training without requiring reverse-time diffusion sampling at inference. The resulting score target has a useful interpretation: its radial factor $h_t(r)$ is the posterior expected corruption precision, so large residuals are weighted according to the latent corruption scale that most plausibly generated them. On chronologically held-out Coinbase LOB data, the proposed variants remain competitive on uncorrupted BTC and altcoin test horizons and improve several realized tail-window stress diagnostics. An exploratory Feishu A-share transfer study further tests whether the probability outputs remain usable under transaction costs and trading-rule constraints. Code and configuration files are available at https://github.com/ArshiAbolghasemi/Penny.</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="q-fin.TR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="stat.ML" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T01:33:30Z</published>
+    <arxiv:comment>32 pages, 5 figures. NeurIPS 2026 Workshop: AI for Stochastic Dynamics</arxiv:comment>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Arshia Abolghasemi</name>
+    </author>
+    <author>
+      <name>Seyed Reza Tavakoli</name>
+    </author>
+    <author>
+      <name>Parsa Naderi</name>
+    </author>
+    <author>
+      <name>Nazanin Mirzaei</name>
+    </author>
+    <author>
+      <name>Behrad Jahani</name>
+    </author>
+    <author>
+      <name>Saba Yousefzadeh</name>
+    </author>
+    <author>
+      <name>Tahereh Javaheri</name>
+    </author>
+    <author>
+      <name>Mohammad Hosein Rohban</name>
+    </author>
+    <author>
+      <name>Gholamali Aminian</name>
+    </author>
+    <author>
+      <name>Ali Habibnia</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.21841v1</id>
+    <title>Feeling the generalised rough SABR boundary</title>
+    <updated>2026-10-15T13:20:05Z</updated>
+    <link href="https://arxiv.org/abs/2610.21841v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.21841v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We provide an in-depth analysis of a generalised rough version of the SABR volatility model, widely used in the financial industry. We specifically focus on its behaviour at the origin, whether it can reach it and how fast it may do so.</summary>
+    <category term="q-fin.MF" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="math.PR" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T13:20:05Z</published>
+    <arxiv:comment>17 pages</arxiv:comment>
+    <arxiv:primary_category term="q-fin.MF"/>
+    <author>
+      <name>Masaaki Fukasawa</name>
+    </author>
+    <author>
+      <name>Antoine Jacquier</name>
+    </author>
+    <author>
+      <name>Mugad Oumgari</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.21659v1</id>
+    <title>When Does "Post-Call" Begin? An Availability Contract for Earnings-Call NLP Benchmarks</title>
+    <updated>2026-10-15T10:40:06Z</updated>
+    <link href="https://arxiv.org/abs/2610.21659v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.21659v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Corporate financial disclosures often unfold over time, with announcements, prepared remarks, and discussion spanning multiple high-frequency return intervals. Financial NLP benchmarks can therefore suffer from a within-event timing mismatch when the prediction target begins before the textual or audio input used by a model could be complete. Chronological train--test splits do not prevent this mismatch, because it occurs inside individual events rather than across samples. We introduce an Availability Contract, which requires a benchmark to state the input boundary, evidence for input availability, the outcome start, and the claims supported by that evidence. We apply this framework to 552 earnings calls from 24 firms. For each call, we hold the return endpoint fixed and compare the previous close, a documentary call-start proxy, and a completion proxy based on reconstructed audio end plus a stipulated processing allowance. At this baseline, moving from the call-start proxy to the completion proxy flips return signs for 9.4% of calls. Holding completion-clock cutpoints fixed, 28.3% change quintile. In an independent release-session analysis of a public earnings-call volatility benchmark, shifting before-market target windows forward by one trading session raises three-day mean squared error by 18.1-21.4% across four frozen prediction streams, while their point rankings remain unchanged. Together, the results show that labels and losses can depend materially on the declared outcome clock even when model rankings appear stable. The Availability Contract makes this assumption explicit and ties post-input claims to the available timing evidence.</summary>
+    <category term="q-fin.CP" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T10:40:06Z</published>
+    <arxiv:comment>ICAIF 2026</arxiv:comment>
+    <arxiv:primary_category term="q-fin.CP"/>
+    <author>
+      <name>Xiaoyu Ma</name>
+    </author>
+    <author>
+      <name>Kelvin J. L. Koa</name>
+    </author>
+    <author>
+      <name>Yuncong Liu</name>
+    </author>
+    <author>
+      <name>Ke-Wei Huang</name>
+    </author>
+    <arxiv:doi>10.1145/3858063.3858902</arxiv:doi>
+    <link rel="related" href="https://doi.org/10.1145/3858063.3858902" title="doi"/>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.21510v1</id>
+    <title>How Much Screening Buys a Second? Speed, Selection, and the Maker's Spread</title>
+    <updated>2026-10-15T08:45:19Z</updated>
+    <link href="https://arxiv.org/abs/2610.21510v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.21510v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We study the spread a liquidity provider needs to break even against counterparties that can exploit a stale quote, and we place two defenses on a single scale: repricing sooner and screening informed flow. A break-even condition pins down the exact screening rate at which a slower maker matches a faster unscreened venue: the selection that buys back the extra staleness. The result requires only an integrable price innovation and therefore holds under jumps, atoms, and infinite variance. Predictable drift is a centering problem: it widens a spot-centered quote, but its cost vanishes once the quote is recentered on the expected reference. In four USDC-WETH pools benchmarked against Binance ETH-USDT from June to August 2026, the one-second benchmark innovation is sharply non-Gaussian: 73% of seconds show no price change. Cutting cadence from twelve seconds to one sheds 84.5% of the expected shock, so a twelve-second maker must screen at least 84.5% of informed flow to match a one-second venue, far above the 71.1% that a Gaussian model implies. In trending markets, the stale pool is picked off at execution: with-trend fills obtain an effective spread 11.1 bps lower than against-trend fills, with the same sign in all four pools.</summary>
+    <category term="q-fin.TR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="q-fin.MF" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T08:45:19Z</published>
+    <arxiv:primary_category term="q-fin.TR"/>
+    <author>
+      <name>Aleksei Adadurov</name>
+    </author>
+    <author>
+      <name>Eduard Airapetian</name>
+    </author>
+    <author>
+      <name>Anton Chtepine</name>
+    </author>
+    <author>
+      <name>Antero Eloranta</name>
+    </author>
+    <author>
+      <name>Boris Pletenev</name>
+    </author>
+    <author>
+      <name>Andrei Sebyakin</name>
+    </author>
+    <author>
+      <name>Arsenii Valitov</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.21057v1</id>
+    <title>Loss-versus-rebalancing with external proportional transaction costs</title>
+    <updated>2026-10-15T01:00:15Z</updated>
+    <link href="https://arxiv.org/abs/2610.21057v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.21057v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We study liquidity provision in automated market makers when trading in the external market incurs proportional transaction costs. We consider both separately collected fees and fees retained in reserves. The benchmark is a self-financing strategy holding the same total risky inventory and trading at the external bid and ask. Under continuous external prices and pure arbitrage, the pool and benchmark have identical liquidation wealth whenever the pool fee or the external spread is positive. Thus loss-versus-rebalancing relative to this transaction-cost benchmark is zero, even without a pool fee if the external spread is positive. We then construct retained-fee utility-indifference pools that implement admissible decreasing inventory schedules, and geometric mean pools that implement feasible constant no-trade boundaries for portfolio weights. These results offer an investment interpretation of liquidity provision: by choosing the pool design, a liquidity provider can specify a trading strategy whose rebalancing is carried out by arbitrageurs.</summary>
+    <category term="q-fin.MF" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="q-fin.PM" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T01:00:15Z</published>
+    <arxiv:primary_category term="q-fin.MF"/>
+    <author>
+      <name>Masaaki Fukasawa</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2609.34004v2</id>
+    <title>RICE-Alpha: Reliability-Informed Correction with Event Graphs for LLM-Agent Stock Forecasting</title>
+    <updated>2026-09-30T14:44:17Z</updated>
+    <link href="https://arxiv.org/abs/2609.34004v2" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2609.34004v2" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Equity-relevant news evolves through temporally dependent corporate events, making historical information useful only when event continuity, information availability, and transition reliability are modeled. Existing LLM-based financial agents incorporate historical evidence, yet they provide limited support for preserving issuer-specific chronology under point-in-time constraints and for identifying when historical transitions contribute information beyond the current forecast. We present RICE-Alpha (Reliability-Informed Correction with Event Graphs), a point-in-time stock-scoring framework that separates a history-aware multi-view Base Alpha from a reliability-calibrated residual correction derived from historical event continuation. A Multi-Tier Memory Layer grounds news interpretation in temporally eligible issuer-specific history, while a Typed Event Agent constructs event states whose successor relations are formed within issuers and pooled across firms only after valid local pairing. Matured transitions are calibrated by their empirical reliability, and the resulting graph signal is residualized against the Base Alpha and technical view to obtain the RICE Delta. On daily Nasdaq-100 and Hang Seng Index panels from 2024 to 2026, RICE-Alpha achieves the strongest results among the evaluated LLM-based agents and momentum across four predictive and four portfolio-level metrics. Its ICIR more than doubles that of the strongest baseline, while net Sharpe ratios reach 1.656 and 1.725 in the U.S. and Hong Kong, respectively. U.S. ablations further show significant reductions in IC and RankIC after Holm adjustment when major components are removed. These results indicate that historical event continuation adds incremental information when it is temporally grounded, reliability-calibrated, and introduced as a residual correction to a multi-view forecast.</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="q-fin.CP" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="q-fin.GN" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-09-27T23:03:31Z</published>
+    <arxiv:comment>15 pages, 4 figures, 4 tables. v2: Corrected corresponding author to Xiang Hu and added Tong Liu's email; scientific content unchanged</arxiv:comment>
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Tong Liu</name>
+    </author>
+    <author>
+      <name>Lanmiao Liu</name>
+    </author>
+    <author>
+      <name>Xiang Hu</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.21491v1</id>
+    <title>NEST: Stale-Robust Tokenized-Stock Measurement for a Crypto-Treasury LETF Stack</title>
+    <updated>2026-10-15T08:28:59Z</updated>
+    <link href="https://arxiv.org/abs/2610.21491v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.21491v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Tokenized equities trade while listed markets are closed, so their marks could improve off-hours measurement along layered exposures that link Bitcoin, crypto-treasury stocks, and leveraged ETFs. A token return and the next opening gap, however, share the price move from the previous close to the token mark, so part of their apparent fit is mechanical. We develop NEST, a stale-robust protocol that separates this shared-history fit from conditional measurement value. A shared-history identity and a variance-clock bound show how much fit timing alone can generate. The partial determination index (PDI), the squared partial correlation between token and gap given public controls, measures what remains, and a finite-sample frontier expresses the partial-F decision in PDI units. Product, provenance, timestamp, and execution audits decide whether an informative mark is admissible. For MSTRx, a tracker certificate on MicroStrategy (MSTR), a token-only $R^2$ of 0.916 shrinks to a modest increment once Bitcoin, mark age, and a pre-09:00 MSTR premarket proxy are controlled: the token explains 15.7% of the remaining gap variation (1% frontier 0.031), and 14.0% to 17.0% under stricter clock variants, including one in which every token mark precedes 09:00. A trade-level reconstruction on Gate gives 25.2%; NVDAX and AAPLX clear their frontiers, whereas TSLAX does not. An admitted mark updates, rather than replaces, BTC-unit exposure diagnostics for the BTC-MSTR-LETF chain.</summary>
+    <category term="q-fin.TR" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CR" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T08:28:59Z</published>
+    <arxiv:comment>20 pages, 3 figures, 7 tables. Extended version of a paper accepted for publication in the proceedings of MARBLE 2026 (Lecture Notes in Operations Research, Springer Nature)</arxiv:comment>
+    <arxiv:primary_category term="q-fin.TR"/>
+    <author>
+      <name>Doohwi Cha</name>
+    </author>
+    <author>
+      <name>Minsuk Sung</name>
+    </author>
+    <author>
+      <name>Minjae Lee</name>
+    </author>
+    <author>
+      <name>Hyeonjun Yeo</name>
+    </author>
+    <author>
+      <name>Hanhee Kim</name>
+    </author>
+    <author>
+      <name>Seunghan Son</name>
+    </author>
+    <author>
+      <name>Donghwa Seo</name>
+    </author>
+    <author>
+      <name>Juyeong Lee</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.21447v1</id>
+    <title>Long-Horizon Investment with Delayed Information in a Mean-Reverting Market</title>
+    <updated>2026-10-15T07:52:35Z</updated>
+    <link href="https://arxiv.org/abs/2610.21447v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.21447v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>We study long-term investment in an Ornstein-Uhlenbeck diffusion model with exponential utility. We solve the finite-horizon problem explicitly and show that information delay qualitatively alters long-horizon behavior. Under full information, the certainty equivalent generated by mean reversion grows quadratically with the investment horizon. With any fixed positive delay, it grows only linearly, at an asymptotic rate that we compute explicitly. We derive an explicit causal representation of the optimal delayed portfolio and show that projecting the full-information strategy onto delayed information can fail dramatically: the resulting exponential loss becomes infinite for sufficiently long horizons. Numerical examples illustrate the economic impact of information delay.</summary>
+    <category term="q-fin.MF" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T07:52:35Z</published>
+    <arxiv:primary_category term="q-fin.MF"/>
+    <author>
+      <name>Yan Dolinsky</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.21846v1</id>
+    <title>Where Backtests and Live Trading Part Ways: Six Defects from One Intraday System</title>
+    <updated>2026-10-15T13:24:52Z</updated>
+    <link href="https://arxiv.org/abs/2610.21846v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.21846v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>Backtests of intraday strategies can drift away from what the live system actually does; in our case, the drift never showed in summary statistics. We report six defects found while running one intraday US equity system live and comparing its live days with their backtest replay. Three came from data: a default feed that carried a small fraction of real opening volume, historical prices adjusted for dividends that live orders never see, and data the live system downloaded but the backtest never did. Two came from code: a sizing step that exceeded a limit the live account enforces, and UTC timestamps read as New York time. One came from configuration: settings that were switched on but never reached the code that places orders. For each we give the symptom, the size of the error, the cause and the test or control that now guards against it. All six sat where two paths that should agree had drifted apart. We close with a ten-point checklist. We make no claim about whether the system is profitable.</summary>
+    <category term="q-fin.ST" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="q-fin.TR" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-15T13:24:52Z</published>
+    <arxiv:comment>8 pages. Also posted on SSRN, DOI 10.2139/ssrn.7517378. The paper makes no claim about whether the system is profitable</arxiv:comment>
+    <arxiv:primary_category term="q-fin.ST"/>
+    <author>
+      <name>Alex Vidovich</name>
+    </author>
+    <author>
+      <name>Zivana Zerjal</name>
+    </author>
+  </entry>
+</feed>

@@ -1,265 +1,228 @@
-"""Official arXiv RSS announcements; submission dates are deliberately not inferred.
-
-RSS exposes the latest announcement batch, not a historical search API. Every
-category is requested separately to avoid the combined-feed 2000 item ceiling.
-See https://info.arxiv.org/help/rss_specifications.html and /help/rss.html.
-"""
-
-from __future__ import annotations
+"""Discover public announcements in dated official lists; fetch abstracts by ID."""
 
 import asyncio
-from datetime import datetime, timedelta
-from email.utils import parsedate_to_datetime
-from html import unescape
+import logging
 import re
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from xml.etree import ElementTree as ET
 
 import httpx
 
-from reportagent.models.schemas import SearchResult, SourceType, UserCriteria
-from reportagent.sources.base import SearchDiagnostics, SourceParseError
-from reportagent.sources.date_window import (
-    candidate_in_window,
-    in_criteria_window,
-    utc_datetime,
+from reportagent.sources.arxiv_catalog import (
+    parse_recent_index,
+    parse_batch_page,
+    requested_days,
 )
+from reportagent.sources.base import SourceParseError
 
 
-ANNOUNCEMENT_CATEGORIES = (
-    "q-fin.CP",
-    "q-fin.EC",
-    "q-fin.GN",
-    "q-fin.MF",
-    "q-fin.PM",
-    "q-fin.PR",
-    "q-fin.RM",
-    "q-fin.ST",
-    "q-fin.TR",
-    "cs.LG",
-    "stat.ML",
-    "cs.CL",
-    "cs.AI",
-    "math.OC",
-)
-ARXIV_NS = "{http://arxiv.org/schemas/atom}"
-DC_NS = "{http://purl.org/dc/elements/1.1/}"
-IDENTIFIER = r"(?:\d{4}\.\d{4,5}|[a-z][a-z.\-]*/\d{7})v[1-9]\d*"
+# The q-fin archive includes all nine q-fin subcategories and their cross-lists.
+ANNOUNCEMENT_CATEGORIES = ("q-fin", "cs.LG", "stat.ML", "cs.CL", "cs.AI", "math.OC")
+logger = logging.getLogger(__name__)
 
 
-_TEXT_TOKEN = re.compile(
-    r"(?P<math>(?<!\\)\$\$.*?(?<!\\)\$\$|(?<!\\)\$.*?(?<!\\)\$"
-    r"|\\\(.*?\\\)|\\\[.*?\\\])"
-    r"|</?(?P<tag>p|br|div|a|b|strong|em|i|span|sub|sup)(?=[\s/>])"
-    r"(?:[^<>\"']|\"[^\"]*\"|'[^']*')*>",
-    re.IGNORECASE | re.DOTALL,
-)
+class AnnouncementHTTP:
+    """Serialize arXiv requests, with bounded retry of transient network failures."""
 
+    def __init__(self, client, interval):
+        self.client, self.interval, self.started = client, interval, False
 
-def _text(value: str) -> str:
-    # ElementTree has already decoded XML entities. Official plain-text fields
-    # must not enter a tolerant HTML parser: inequalities can look like unfinished
-    # tags and swallow the rest of an abstract. Strip only complete, recognized
-    # formatting wrappers, protecting LaTeX even when it contains tag-like text.
-    has_markup = False
-
-    def strip_wrapper(match: re.Match) -> str:
-        nonlocal has_markup
-        if match.group("math") is not None:
-            return match.group()
-        has_markup = True
-        return " " if match.group("tag").lower() in {"p", "br", "div"} else ""
-
-    text = _TEXT_TOKEN.sub(strip_wrapper, value)
-    # An HTML payload has one extra entity layer. Decode it only after removing
-    # wrappers, so escaped mathematical comparisons never become markup.
-    if has_markup:
-        text = unescape(text)
-    return " ".join(text.split())
-
-
-def _rss_date(value: str | None) -> datetime:
-    try:
-        stamp = parsedate_to_datetime(value or "")
-        if stamp.tzinfo is None:
-            raise ValueError
-        return utc_datetime(stamp)
-    except (ValueError, TypeError, OverflowError) as error:
-        raise SourceParseError(
-            "RSS missing valid timezone-aware announcement pubDate"
-        ) from error
-
-
-def _parse_item(item: ET.Element, feed_url: str, batch_pubdate: str) -> SearchResult:
-    title = _text(item.findtext("title") or "")
-    description = _text(item.findtext("description") or "")
-    link = (item.findtext("link") or "").strip()
-    identifier = re.search(r"(?:^|\s)arXiv:(" + IDENTIFIER + r")\b", description)
-    guid = (item.findtext("guid") or "").strip()
-    announce_type = (item.findtext(ARXIV_NS + "announce_type") or "").strip()
-    description_type = re.search(r"\bAnnounce Type:\s*(\S+)", description)
-    abstract = re.search(r"\bAbstract:\s*(.+)", description)
-    categories = [
-        value.text.strip()
-        for value in item.findall("category")
-        if value.text and value.text.strip()
-    ]
-    if not title or not identifier or not abstract or not categories:
-        raise SourceParseError(
-            "RSS item missing title, versioned identifier, categories or abstract"
-        )
-    paper_id = identifier.group(1)
-    if guid != "oai:arXiv.org:" + paper_id:
-        raise SourceParseError("RSS item inconsistent or missing versioned guid")
-    bare_id = re.sub(r"v\d+$", "", paper_id)
-    if link not in {
-        f"{scheme}://arxiv.org/abs/{value}"
-        for scheme in ("http", "https")
-        for value in (paper_id, bare_id)
-    }:
-        raise SourceParseError("RSS item missing or inconsistent arXiv abstract link")
-    if (
-        announce_type not in {"new", "cross", "replace", "replace-cross"}
-        or not description_type
-        or description_type.group(1) != announce_type
-    ):
-        raise SourceParseError("RSS item missing or inconsistent announcement type")
-    pubdate = (item.findtext("pubDate") or "").strip()
-    announced = _rss_date(pubdate)
-    creators = item.findall(DC_NS + "creator")
-    authors = [
-        author.strip()
-        for creator in creators
-        for author in _text(creator.text or "").split(",")
-        if author.strip()
-    ]
-    return SearchResult(
-        title=title,
-        authors=authors,
-        abstract=abstract.group(1).strip(),
-        abstract_only=True,
-        source=SourceType.ARXIV,
-        source_url=f"https://arxiv.org/abs/{paper_id}",
-        arxiv_id=paper_id,
-        doi=item.findtext(ARXIV_NS + "DOI"),
-        published_date=None,
-        announced_at=announced,
-        raw_metadata={
-            "categories": categories,
-            "primary_category": categories[0],
-            "pdf_url": f"https://arxiv.org/pdf/{paper_id}",
-            "announcement_info": {
-                "source": "arxiv_rss",
-                "pubDate": pubdate,
-                "feed_url": feed_url,
-                "batch_pubDate": batch_pubdate,
-                "announce_type": announce_type,
-            },
-        },
-    )
-
-
-def parse_announcement_feed(
-    content: bytes,
-    *,
-    feed_url: str,
-    criteria: UserCriteria,
-    diagnostics: SearchDiagnostics,
-    stage: str,
-) -> list[SearchResult]:
-    """Keep valid siblings while reporting any unprovable coverage or invalid item."""
-    if b"<!DOCTYPE" in content.upper():
-        raise SourceParseError("unexpected XML document type")
-    try:
-        root = ET.fromstring(content)
-    except ET.ParseError as error:
-        raise SourceParseError("malformed RSS XML") from error
-    channel = root.find("channel")
-    if root.tag != "rss" or root.get("version") != "2.0" or channel is None:
-        raise SourceParseError("non-RSS 2.0 announcement response")
-    pubdate = (channel.findtext("pubDate") or "").strip()
-    batch = _rss_date(pubdate)
-    # lastBuildDate is a generation timestamp and cannot establish announcement
-    # coverage, including when a stale batch has just been regenerated.
-    start, end = criteria.date_from, criteria.date_to
-    if (
-        not start
-        or not end
-        or utc_datetime(end) - utc_datetime(start) > timedelta(days=1)
-        or not in_criteria_window(batch, criteria)
-    ):
-        diagnostics.record_error(
-            SourceParseError(
-                "RSS latest batch cannot establish complete requested window; historical backfill unavailable"
-            ),
-            stage,
-        )
-    items = channel.findall("item")
-    diagnostics.fetched += len(items)
-    if len(items) >= 2000:
-        diagnostics.record_error(
-            SourceParseError("RSS feed reached 2000 items; possible upstream cutoff"),
-            stage,
-        )
-    results: list[SearchResult] = []
-    seen: set[str] = set()
-    valid_items = 0
-    for item in items:
-        try:
-            result = _parse_item(item, feed_url, pubdate)
-            valid_items += 1
-            if result.announced_at != batch:
-                diagnostics.record_error(
-                    SourceParseError(
-                        "RSS item announcement differs from channel batch; coverage incomplete"
-                    ),
-                    stage + " item",
-                )
-            if result.arxiv_id in seen:
-                raise SourceParseError(
-                    "RSS repeated item within category; coverage incomplete"
-                )
-            seen.add(result.arxiv_id)
-            if result.raw_metadata["announcement_info"]["announce_type"] not in {
-                "new",
-                "cross",
-            }:
-                continue
-            if candidate_in_window(result, criteria):
-                results.append(result)
-        except Exception as error:
-            diagnostics.record_error(error, stage + " item")
-    if valid_items or not items:
-        diagnostics.successful_requests += 1
-    return results
-
-
-async def fetch_announcements(
-    criteria: UserCriteria,
-    *,
-    diagnostics: SearchDiagnostics,
-    partial_results: list[SearchResult],
-    rate_limit_seconds: float,
-) -> list[SearchResult]:
-    """Fetch independently; one failed category never discards successful siblings."""
-    timeout = httpx.Timeout(30.0, connect=15.0)
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-        for index, category in enumerate(ANNOUNCEMENT_CATEGORIES):
-            if index and rate_limit_seconds:
-                await asyncio.sleep(rate_limit_seconds)
-            url = f"https://rss.arxiv.org/rss/{category}"
-            stage = f"RSS {category}"
+    async def get(self, url, **kwargs):
+        for attempt in range(3):
+            if self.started and self.interval:
+                await asyncio.sleep(self.interval)
+            self.started = True
             try:
-                response = await client.get(url)
+                response = await self.client.get(url, **kwargs)
                 response.raise_for_status()
-                partial_results.extend(
-                    parse_announcement_feed(
-                        response.content,
-                        feed_url=url,
-                        criteria=criteria,
-                        diagnostics=diagnostics,
-                        stage=stage,
+                return response
+            except (httpx.TransportError, httpx.HTTPStatusError) as error:
+                status = (
+                    error.response.status_code
+                    if isinstance(error, httpx.HTTPStatusError)
+                    else None
+                )
+                if attempt == 2 or (
+                    status is not None and status not in {429, 500, 502, 503, 504}
+                ):
+                    raise
+                await asyncio.sleep(_retry_delay(error, attempt))
+
+
+def _retry_delay(error, attempt):
+    delay = 3 * 2**attempt
+    if isinstance(error, httpx.HTTPStatusError):
+        value = error.response.headers.get("Retry-After", "")
+        try:
+            after = (
+                float(value)
+                if value.isdigit()
+                else (
+                    parsedate_to_datetime(value) - datetime.now(timezone.utc)
+                ).total_seconds()
+            )
+            delay = max(delay, after)
+        except (ValueError, TypeError, OverflowError):
+            pass
+    return min(delay, 60)
+
+
+async def _category_announcements(http, category, days, diagnostics):
+    url = f"https://arxiv.org/list/{category}/recent"
+    # This minimal page supplies all five date offsets, not a top-25 candidate cap.
+    response = await http.get(url, params={"skip": 0, "show": 25})
+    batches = parse_recent_index(response.content, category)
+    diagnostics.successful_requests += 1
+    entries = []
+    for day in days:
+        if day < batches[-1].day or day > batches[0].day:
+            diagnostics.record_error(
+                SourceParseError(
+                    "requested announcement day outside available recent lists; coverage incomplete"
+                ),
+                f"announcements {category}",
+            )
+            continue
+        batch = next((b for b in batches if b.day == day), None)
+        if batch and batch.count:
+            try:
+                entries.extend(
+                    await _batch_entries(
+                        http, url, category, batch, batches, diagnostics
                     )
                 )
             except Exception as error:
-                diagnostics.record_error(error, stage)
+                diagnostics.record_error(error, f"announcements {category} {day}")
+    return entries
+
+
+async def _batch_entries(http, url, category, batch, snapshot, diagnostics):
+    entries, seen = [], set()
+    skip = batch.offset
+    while skip < batch.offset + batch.count:
+        try:
+            response = await http.get(url, params={"skip": skip, "show": 2000})
+            if parse_recent_index(response.content, category) != snapshot:
+                raise SourceParseError(
+                    "announcement index changed during pagination; retry required"
+                )
+            rows = parse_batch_page(response.content, batch, skip, 2000)
+            if any(identifier in seen for identifier, _ in rows):
+                raise SourceParseError(
+                    "announcement pagination repeated paper identities"
+                )
+        except Exception as error:
+            diagnostics.record_error(error, f"announcements {category} {batch.day}")
+            break
+        seen.update(identifier for identifier, _ in rows)
+        diagnostics.fetched += len(rows)
+        diagnostics.successful_requests += 1
+        entries.extend(
+            (identifier, batch, category, kind, str(response.url))
+            for identifier, kind in rows
+        )
+        skip += len(rows)
+    return entries
+
+
+async def fetch_announcements(
+    criteria, *, diagnostics, partial_results, rate_limit_seconds
+):
+    days = list(requested_days(criteria))
+    timeout = httpx.Timeout(30.0, connect=15.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        http = AnnouncementHTTP(client, rate_limit_seconds)
+        found = {}
+        for category in ANNOUNCEMENT_CATEGORIES:
+            try:
+                rows = await _category_announcements(http, category, days, diagnostics)
+                for entry in rows:
+                    previous = found.get(entry[0])
+                    if previous is None or previous[1].day < entry[1].day:
+                        found[entry[0]] = entry
+            except Exception as error:
+                diagnostics.record_error(error, f"announcements {category}")
+        await _fetch_abstracts(http, list(found.values()), partial_results, diagnostics)
     return partial_results
+
+
+async def _fetch_abstracts(http, entries, results, diagnostics):
+    from reportagent.sources.arxiv_source import ArxivSource
+    from reportagent.sources.arxiv_metadata import read_abstract_page
+
+    for offset in range(0, len(entries), 100):
+        chunk = entries[offset : offset + 100]
+        expected = {entry[0]: entry for entry in chunk}
+        papers = {}
+        try:
+            response = await http.get(
+                "https://export.arxiv.org/api/query",
+                params={
+                    "id_list": ",".join(expected),
+                    "max_results": len(expected),
+                },
+            )
+            papers = _parse_abstract_batch(
+                response.content, expected, ArxivSource._parse_atom_entry
+            )
+        except Exception as error:
+            logger.info(
+                "arXiv abstract batch unavailable (%s); using official abstract pages",
+                type(error).__name__,
+            )
+        for identifier, entry in expected.items():
+            try:
+                paper = papers.get(identifier) or await read_abstract_page(
+                    http, identifier
+                )
+                results.append(_with_announcement(paper, entry))
+            except Exception as error:
+                diagnostics.record_error(error, f"announcement abstract {identifier}")
+
+
+def _parse_abstract_batch(content, expected, parse_entry):
+    atom = "{http://www.w3.org/2005/Atom}"
+    if b"<!DOCTYPE" in content.upper():
+        raise SourceParseError("unexpected abstract response document type")
+    root = ET.fromstring(content)
+    if root.tag != atom + "feed":
+        raise SourceParseError("non-Atom abstract response")
+    papers = {}
+    for entry in root.findall(atom + "entry"):
+        try:
+            paper = parse_entry(entry)
+            identifier = re.sub(r"v\d+$", "", paper.arxiv_id or "")
+            if (
+                identifier in expected
+                and re.search(r"v[1-9]\d*$", paper.arxiv_id)
+                and paper.abstract.strip()
+                and paper.authors
+            ):
+                papers[identifier] = paper
+        except (ValueError, TypeError):
+            continue
+    return papers
+
+
+def _with_announcement(paper, entry):
+    identifier, batch, category, kind, url = entry
+    return paper.model_copy(
+        update={
+            "announced_at": batch.released_at,
+            "raw_metadata": {
+                **paper.raw_metadata,
+                "announcement_info": {
+                    "source": "arxiv_dated_listing",
+                    "listing_date": batch.day.isoformat(),
+                    "category": category,
+                    "announce_type": kind,
+                    "listing_url": url,
+                    "release_rule": "previous calendar day 20:00 America/New_York",
+                    "schedule_url": "https://info.arxiv.org/help/availability.html#announcement-schedule",
+                    "metadata_version": paper.arxiv_id,
+                    "source_id": identifier,
+                },
+            },
+        }
+    )

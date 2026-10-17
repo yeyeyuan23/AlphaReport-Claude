@@ -1,32 +1,25 @@
-"""Announcement dates must come from RSS evidence rather than first submission."""
+"""Replay real dated arXiv lists captured after Saturday's RSS rollover."""
 
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
+from pathlib import Path
 
 import httpx
 import pytest
 
 from reportagent.models.schemas import UserCriteria
+from reportagent.sources import arxiv_announcements as announcements
+from reportagent.sources.arxiv_catalog import (
+    AnnouncementBatch,
+    parse_recent_index,
+    parse_batch_page,
+    requested_days,
+)
+from reportagent.sources.arxiv_metadata import read_abstract_page
 from reportagent.sources.arxiv_source import ArxivSource
-from tests.support.arxiv_announcement_fixtures import BATCH, rss_feed, rss_item
+from reportagent.sources.base import SourceParseError, SearchDiagnostics
 
-
-EXPECTED_CATEGORIES = {
-    "q-fin.CP",
-    "q-fin.EC",
-    "q-fin.GN",
-    "q-fin.MF",
-    "q-fin.PM",
-    "q-fin.PR",
-    "q-fin.RM",
-    "q-fin.ST",
-    "q-fin.TR",
-    "cs.LG",
-    "stat.ML",
-    "cs.CL",
-    "cs.AI",
-    "math.OC",
-}
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "arxiv"
 
 
 def criteria(**updates):
@@ -43,6 +36,10 @@ def criteria(**updates):
     )
 
 
+def recorded(name):
+    return (FIXTURES / name).read_bytes()
+
+
 def install_http(monkeypatch, respond):
     client = httpx.AsyncClient
     monkeypatch.setattr(
@@ -50,214 +47,140 @@ def install_http(monkeypatch, respond):
         "AsyncClient",
         lambda **kw: client(transport=httpx.MockTransport(respond), **kw),
     )
+    monkeypatch.setattr(announcements, "ANNOUNCEMENT_CATEGORIES", ("q-fin",))
 
 
-def search(monkeypatch, items, *, broad=True, settings=None):
-    install_http(monkeypatch, lambda request: httpx.Response(200, text=rss_feed(items)))
-    source = ArxivSource(rate_limit_seconds=0, download_pdfs=False)
-    rows = asyncio.run(
-        (source.search_broad if broad else source.search)(settings or criteria())
-    )
-    return rows, source.last_search
-
-
-@pytest.mark.parametrize("broad", [False, True])
-def test_all_announcements_survive_without_top15_cap_and_duplicate_categories(
-    monkeypatch, broad
-):
-    rows, diagnostics = search(
-        monkeypatch,
-        "".join(rss_item(f"2610.{n:05d}v1") for n in range(1, 26)),
-        broad=broad,
-    )
-    assert len(rows) == 25
-    assert diagnostics.fetched == 350
-    assert diagnostics.successful_requests == 14
-    assert diagnostics.errors == []
-
-
-def test_announcement_uses_item_pubdate_and_preserves_version_without_inventing_original_date(
-    monkeypatch,
-):
-    rows, _ = search(monkeypatch, rss_item("2510.00001v1"))
-    row = rows[0]
-    assert row.announced_at == datetime(2026, 10, 16, 4, tzinfo=timezone.utc)
-    assert row.published_date is None
-    assert row.arxiv_id == "2510.00001v1"
-    assert row.authors == ["Alice Author", "Bob Writer"]
-    assert row.abstract == "We estimate financial market risk from returns."
-    assert row.raw_metadata["pdf_url"] == "https://arxiv.org/pdf/2510.00001v1"
-    assert row.raw_metadata["announcement_info"]["source"] == "arxiv_rss"
-    assert row.raw_metadata["announcement_info"]["pubDate"] == BATCH
-    assert row.raw_metadata["announcement_info"]["feed_url"].startswith(
-        "https://rss.arxiv.org/rss/"
-    )
-
-
-def test_half_open_beijing_window_and_default_update_exclusion(monkeypatch):
-    items = "".join(
-        [
-            rss_item("2610.00001v1", stamp="Fri, 16 Oct 2026 00:00:00 +0000"),
-            rss_item("2610.00002v1", stamp="Sat, 17 Oct 2026 00:00:00 +0000"),
-            rss_item("2610.00003v1", stamp="Thu, 15 Oct 2026 23:59:59 +0000"),
-            rss_item("2510.00004v2", announce_type="replace"),
-            rss_item("2510.00005v2", announce_type="replace-cross"),
-            rss_item("2510.00006v1", announce_type="cross"),
-        ]
-    )
-    rows, _ = search(monkeypatch, items)
-    assert [row.arxiv_id for row in rows] == ["2610.00001v1", "2510.00006v1"]
-
-
-def test_each_category_is_independent_and_metadata_mode_does_not_download(monkeypatch):
-    requested = []
+def test_weekend_rerun_reads_complete_previous_public_batch(monkeypatch):
+    urls = []
 
     def respond(request):
-        requested.append(str(request.url))
-        assert request.url.host == "rss.arxiv.org"
-        category = request.url.path.removeprefix("/rss/")
-        index = sorted(EXPECTED_CATEGORIES).index(category)
-        return httpx.Response(200, text=rss_feed(rss_item(f"2610.{index:05d}v1")))
-
-    install_http(monkeypatch, respond)
-    source = ArxivSource(rate_limit_seconds=0, download_pdfs=False)
-    rows = asyncio.run(source.search(criteria()))
-    assert len(rows) == 14
-    assert {url.rsplit("/", 1)[1] for url in requested} == EXPECTED_CATEGORIES
-    assert len(requested) == 14
-
-
-@pytest.mark.parametrize(
-    "bad",
-    [
-        "<html>secret</html>",
-        "<rss><channel>",
-        rss_feed(rss_item(stamp="invalid")),
-        rss_feed(rss_item().replace("<pubDate>" + BATCH + "</pubDate>", "")),
-    ],
-)
-def test_malformed_feed_or_item_preserves_other_categories_and_marks_incomplete(
-    monkeypatch, bad
-):
-    def respond(request):
-        return httpx.Response(
-            200,
-            text=bad if request.url.path.endswith("q-fin.RM") else rss_feed(rss_item()),
-        )
+        urls.append(str(request.url))
+        if request.url.host == "arxiv.org":
+            return httpx.Response(200, content=recorded("q-fin-recent.html"))
+        assert len(request.url.params["id_list"].split(",")) == 17
+        return httpx.Response(200, content=recorded("q-fin-metadata.xml"))
 
     install_http(monkeypatch, respond)
     source = ArxivSource(rate_limit_seconds=0, download_pdfs=False)
     rows = asyncio.run(source.search_broad(criteria()))
-    assert len(rows) == 1
-    assert source.last_search.errors
-    assert "secret" not in str(source.last_search.errors)
-    assert source.last_search.successful_requests >= 13
+    assert len(rows) == 17
+    assert all(
+        r.announced_at == datetime(2026, 10, 16, tzinfo=timezone.utc) for r in rows
+    )
+    assert all(r.published_date < r.announced_at for r in rows)
+    assert all(r.abstract_only and r.abstract for r in rows)
+    assert any(r.arxiv_id == "2609.34004v2" for r in rows)
+    assert source.last_search.errors == []
+    assert source.last_search.fetched == 17
+    assert not any("rss.arxiv" in url or "/pdf/" in url for url in urls)
 
 
-def test_network_failure_preserves_other_categories_and_never_falls_back_to_submission(
-    monkeypatch,
-):
-    def respond(request):
-        assert request.url.host == "rss.arxiv.org"
-        if request.url.path.endswith("cs.LG"):
-            raise httpx.ConnectError(
-                "https://example.test?token=do-not-log", request=request
+def test_real_index_locates_prior_day_without_scanning_history():
+    batches = parse_recent_index(recorded("q-fin-recent.html"), "q-fin")
+    assert [(b.day, b.offset, b.count) for b in batches[:2]] == [
+        (date(2026, 10, 16), 0, 17),
+        (date(2026, 10, 15), 17, 9),
+    ]
+    rows = parse_batch_page(recorded("q-fin-recent.html"), batches[0], 0, 2000)
+    assert len(rows) == 17
+    assert sum(kind == "cross" for _, kind in rows) == 5
+
+
+def test_partial_real_page_cannot_claim_complete_coverage():
+    body = recorded("cs-lg-first-page.html")
+    batches = parse_recent_index(body, "cs.LG")
+    assert batches[0].count == 306
+    assert len(parse_batch_page(body, batches[0], 0, 25)) == 25
+    with pytest.raises(SourceParseError, match="count/date"):
+        parse_batch_page(body, batches[0], 0, 2000)
+
+
+def test_unavailable_history_is_not_complete_empty(monkeypatch):
+    install_http(
+        monkeypatch,
+        lambda r: httpx.Response(200, content=recorded("q-fin-recent.html")),
+    )
+    source = ArxivSource(rate_limit_seconds=0, download_pdfs=False)
+    rows = asyncio.run(
+        source.search(
+            criteria(
+                date_from=datetime(2026, 9, 1, tzinfo=timezone.utc),
+                date_to=datetime(2026, 9, 2, tzinfo=timezone.utc),
             )
-        return httpx.Response(200, text=rss_feed(rss_item()))
+        )
+    )
+    assert rows == []
+    assert "outside available recent lists" in str(source.last_search.errors)
+
+
+def test_weekend_empty_still_checks_actual_list(monkeypatch):
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, content=recorded("q-fin-recent.html"))
 
     install_http(monkeypatch, respond)
     source = ArxivSource(rate_limit_seconds=0, download_pdfs=False)
-    rows = asyncio.run(source.search(criteria()))
-    assert len(rows) == 1
-    assert source.last_search.successful_requests == 13
-    assert "ConnectError" in str(source.last_search.errors)
-    assert "do-not-log" not in str(source.last_search.errors)
-
-
-@pytest.mark.parametrize(
-    "batch", ["Thu, 15 Oct 2026 04:00:00 +0000", "Sat, 17 Oct 2026 04:00:00 +0000"]
-)
-def test_latest_batch_outside_window_is_incomplete_even_when_lastbuild_is_current(
-    monkeypatch, batch
-):
-    install_http(
-        monkeypatch, lambda request: httpx.Response(200, text=rss_feed(batch=batch))
+    rows = asyncio.run(
+        source.search(
+            criteria(
+                date_from=datetime(2026, 10, 17, tzinfo=timezone.utc),
+                date_to=datetime(2026, 10, 18, tzinfo=timezone.utc),
+            )
+        )
     )
-    source = ArxivSource(rate_limit_seconds=0, download_pdfs=False)
-    assert asyncio.run(source.search(criteria())) == []
-    assert source.last_search.errors
-    assert "latest batch" in str(source.last_search.errors).lower()
+    assert rows == [] and source.last_search.errors == []
+    assert len(calls) == source.last_search.successful_requests == 1
 
 
-def test_wide_historical_window_is_explicitly_incomplete(monkeypatch):
-    rows, diagnostics = search(
-        monkeypatch,
-        rss_item(),
-        settings=criteria(date_from=datetime(2026, 10, 1, tzinfo=timezone.utc)),
+def test_half_open_window_and_daylight_saving():
+    assert list(requested_days(criteria())) == [date(2026, 10, 16)]
+    assert AnnouncementBatch(date(2026, 10, 16), 0, 0).released_at.hour == 0
+    assert AnnouncementBatch(date(2026, 11, 2), 0, 0).released_at.hour == 1
+    assert list(
+        requested_days(
+            criteria(date_to=datetime(2026, 10, 16, 0, 0, 1, tzinfo=timezone.utc))
+        )
+    ) == [date(2026, 10, 16)]
+
+
+def test_abstract_fallback_preserves_submission_date_separately():
+    class HTTP:
+        async def get(self, url):
+            assert url == "https://arxiv.org/abs/2610.21867v1"
+            return httpx.Response(200, content=recorded("2610.21867v1.html"))
+
+    paper = asyncio.run(read_abstract_page(HTTP(), "2610.21867v1"))
+    assert paper.arxiv_id == "2610.21867v1" and paper.abstract_only
+    assert paper.published_date == datetime(
+        2026, 10, 15, 13, 39, 41, tzinfo=timezone.utc
     )
-    assert len(rows) == 1
-    assert "latest batch" in str(diagnostics.errors).lower()
+    assert paper.announced_at is None
+    assert "Q-learning" in paper.abstract
 
 
-def test_2000_entry_feed_records_possible_cutoff_without_dropping_valid_items(
-    monkeypatch,
-):
-    items = "".join(rss_item(f"2610.{n:05d}v1") for n in range(2000))
-    rows, diagnostics = search(monkeypatch, items)
-    assert len(rows) == 2000
-    assert "2000" in str(diagnostics.errors)
-
-
-def test_duplicate_within_feed_is_reported_but_cross_category_duplicates_are_normal(
-    monkeypatch,
-):
-    rows, diagnostics = search(monkeypatch, rss_item() + rss_item())
-    assert len(rows) == 1
-    assert "repeated" in str(diagnostics.errors).lower()
-
-
-def test_valid_empty_current_feed_is_complete_empty(monkeypatch):
-    rows, diagnostics = search(monkeypatch, "")
-    assert rows == []
-    assert diagnostics.errors == []
-    assert diagnostics.successful_requests == 14
-
-
-def test_explicit_finite_limit_is_observable_as_incomplete(monkeypatch):
-    rows, diagnostics = search(
-        monkeypatch,
-        "".join(rss_item(f"2610.{n:05d}v1") for n in range(4)),
-        settings=criteria(max_results_per_source=2),
+def test_query_failure_uses_official_abstract_page():
+    entry = (
+        "2610.21867",
+        AnnouncementBatch(date(2026, 10, 16), 0, 1),
+        "q-fin",
+        "new",
+        "https://arxiv.org/list/q-fin/recent",
     )
-    assert len(rows) == 2
-    assert "limit" in str(diagnostics.errors)
 
+    class HTTP:
+        async def get(self, url, **kwargs):
+            if "export.arxiv" in url:
+                raise httpx.ConnectError("query unavailable")
+            return httpx.Response(200, content=recorded("2610.21867v1.html"))
 
-@pytest.mark.parametrize(
-    "mutate",
-    [
-        lambda item: item.replace("2510.00001v1 Announce", "2510.00001 Announce"),
-        lambda item: item.replace(
-            "oai:arXiv.org:2510.00001v1", "oai:arXiv.org:2510.99999v1"
-        ),
-        lambda item: item.replace(
-            "https://arxiv.org/abs/2510.00001", "https://untrusted.test/abs/2510.00001"
-        ),
-        lambda item: item.replace("<arxiv:announce_type>new</arxiv:announce_type>", ""),
-        lambda item: item.replace("Announce Type: new", "Announce Type: replace"),
-        lambda item: item.replace(
-            "Abstract: We estimate financial market risk from returns.", ""
-        ),
-    ],
-)
-def test_malformed_identity_or_announcement_metadata_does_not_hide_valid_sibling(
-    monkeypatch, mutate
-):
-    rows, diagnostics = search(
-        monkeypatch, mutate(rss_item()) + rss_item("2610.00002v1")
+    results, diagnostics = [], SearchDiagnostics()
+    asyncio.run(announcements._fetch_abstracts(HTTP(), [entry], results, diagnostics))
+    assert len(results) == 1 and diagnostics.errors == []
+    assert (
+        results[0].raw_metadata["announcement_info"]["source"] == "arxiv_dated_listing"
     )
-    assert [row.arxiv_id for row in rows] == ["2610.00002v1"]
-    assert diagnostics.errors
 
 
 def test_publication_mode_unlimited_still_pages_submitted_date_api(monkeypatch):
@@ -304,114 +227,3 @@ def test_publication_mode_unlimited_still_pages_submitted_date_api(monkeypatch):
     assert len(rows) == 103
     assert offsets == [0, 100]
     assert source.last_search.errors == []
-
-
-def test_current_channel_with_only_stale_items_cannot_claim_complete_empty(monkeypatch):
-    rows, diagnostics = search(
-        monkeypatch, rss_item(stamp="Thu, 15 Oct 2026 04:00:00 +0000")
-    )
-    assert rows == []
-    assert "batch" in str(diagnostics.errors).lower()
-
-
-def test_all_failed_feeds_have_no_success_and_only_safe_diagnostics(monkeypatch):
-    install_http(
-        monkeypatch,
-        lambda request: httpx.Response(503, text="private-token-do-not-log"),
-    )
-    source = ArxivSource(rate_limit_seconds=0, download_pdfs=False)
-    assert asyncio.run(source.search_broad(criteria())) == []
-    assert source.last_search.successful_requests == 0
-    assert len(source.last_search.errors) == 14
-    assert "HTTP 503" in str(source.last_search.errors)
-    assert "private-token-do-not-log" not in str(source.last_search.errors)
-
-
-def test_announcement_categories_have_no_aggregate_timeout(monkeypatch):
-    # Each category can be slow but successful. A blanket wait_for around all
-    # categories would abort later categories despite their individual budgets.
-    # Reject that blanket wrapper directly without making the test wait minutes.
-    import reportagent.sources.arxiv_source as arxiv_module
-
-    async def reject_aggregate_timeout(awaitable, timeout):
-        awaitable.close()
-        raise TimeoutError("aggregate RSS timeout would omit remaining categories")
-
-    monkeypatch.setattr(arxiv_module.asyncio, "wait_for", reject_aggregate_timeout)
-    rows, diagnostics = search(monkeypatch, rss_item())
-    assert len(rows) == 1
-    assert diagnostics.successful_requests == 14
-    assert diagnostics.errors == []
-
-
-def test_announcement_cancellation_propagates_after_a_successful_category(monkeypatch):
-    requested = []
-
-    def respond(request):
-        requested.append(request.url.path)
-        if len(requested) == 2:
-            raise asyncio.CancelledError
-        return httpx.Response(200, text=rss_feed(rss_item()))
-
-    install_http(monkeypatch, respond)
-    source = ArxivSource(rate_limit_seconds=0, download_pdfs=False)
-    with pytest.raises(asyncio.CancelledError):
-        asyncio.run(source.search(criteria()))
-    assert source.last_search.successful_requests == 1
-    assert source.last_search.errors == []
-    assert len(requested) == 2
-
-
-@pytest.mark.parametrize(
-    "text",
-    [
-        "We study risk when $0<p<1$ and prove that the portfolio is stable.",
-        "Bounds $p<i>q$ and $x<y$ leave the complete conclusion intact.",
-        "Display bounds $$p<i>q$$ leave the complete conclusion intact.",
-        r"We compare \(0<p<1\) and \[x<y\] with the original model.",
-        r"We compare \(p<i>q\) and \[x<b>y\] with the original model.",
-        "Literal &lt; and &notin; stay literal after XML decoding; x<y.",
-    ],
-)
-def test_plain_rss_text_preserves_math_and_xml_decoded_content(monkeypatch, text):
-    rows, diagnostics = search(monkeypatch, rss_item(title=text, abstract=text))
-    assert len(rows) == 1
-    assert rows[0].title == text
-    assert rows[0].abstract == text
-    assert diagnostics.errors == []
-
-
-def test_encoded_html_wrappers_preserve_math_and_paragraph_boundaries(monkeypatch):
-    # rss_item XML-escapes this HTML, like an RSS description with encoded markup.
-    abstract = (
-        '<p class="summary">Risk &amp; return when $0<p<1$.</p>'
-        "<div>With $p<i>q$ and <em>complete</em> evidence.<br>Still intact.</div>"
-    )
-    rows, diagnostics = search(monkeypatch, rss_item(abstract=abstract))
-    assert rows[0].abstract == (
-        "Risk & return when $0<p<1$. With $p<i>q$ and complete evidence. Still intact."
-    )
-    assert diagnostics.errors == []
-
-
-def test_encoded_html_entities_are_decoded_after_markup_removal(monkeypatch):
-    rows, diagnostics = search(
-        monkeypatch,
-        rss_item(abstract="<p>We prove $0&lt;p&lt;1$ &amp; retain the conclusion.</p>"),
-    )
-    assert rows[0].abstract == "We prove $0<p<1$ & retain the conclusion."
-    assert diagnostics.errors == []
-
-
-def test_encoded_html_wrappers_leave_plain_comparisons_and_unknown_tags(monkeypatch):
-    rows, diagnostics = search(
-        monkeypatch,
-        rss_item(
-            abstract='<p>For x<y, <a href="https://arxiv.org/?a=1&amp;b=2">'
-            "the result</a> keeps <unknown> notation.</p>Tail remains."
-        ),
-    )
-    assert rows[0].abstract == (
-        "For x<y, the result keeps <unknown> notation. Tail remains."
-    )
-    assert diagnostics.errors == []

@@ -68,7 +68,7 @@ def test_announcements_survive_hydration_and_drive_both_reports(
         announced_at=start + timedelta(hours=1),
         raw_metadata={
             "announcement_info": {
-                "source": "arxiv_rss",
+                "source": "arxiv_dated_listing",
                 "evidence": "Fri, 16 Oct 2026 01:00:00 +0000",
             }
         },
@@ -218,7 +218,10 @@ def test_later_cross_announcement_updates_window_without_changing_original_date(
         published_date=datetime(2021, 1, 1),
         announced_at=start - timedelta(days=1),
         raw_metadata={
-            "announcement_info": {"source": "arxiv_rss", "announce_type": "new"}
+            "announcement_info": {
+                "source": "arxiv_dated_listing",
+                "announce_type": "new",
+            }
         },
     )
     with memory_session_factory() as db:
@@ -231,7 +234,7 @@ def test_later_cross_announcement_updates_window_without_changing_original_date(
                 "announced_at": start + timedelta(hours=1),
                 "raw_metadata": {
                     "announcement_info": {
-                        "source": "arxiv_rss",
+                        "source": "arxiv_dated_listing",
                         "announce_type": "cross",
                     }
                 },
