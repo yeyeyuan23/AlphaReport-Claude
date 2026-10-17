@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import Markdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -45,37 +45,8 @@ function KnowledgeCardContent({ reportId }: { reportId: number }) {
   const [error, setError] = useState<string | null>(null);
   const requestId = useRef<object | null>(null);
 
-  const fetchCard = async (force: boolean = false) => {
-    const id = {};
-    requestId.current = id;
-    try {
-      if (force) {
-        setRegenerating(true);
-      } else {
-        setLoading(true);
-      }
-      setError(null);
-      const res = await getKnowledgeCard(reportId, force);
-      if (requestId.current !== id) return;
-      if (res.success && res.data) {
-        setData(res.data as KnowledgeCardType);
-      } else {
-        setError((res as { error?: string }).error || 'Failed to load knowledge card');
-      }
-    } catch (e) {
-      if (requestId.current === id) setError((e as Error).message);
-    } finally {
-      if (requestId.current === id) {
-        setLoading(false);
-        setRegenerating(false);
-      }
-    }
-  };
-
-  useEffect(() => {
-    const id = {};
-    requestId.current = id;
-    getKnowledgeCard(reportId)
+  const receiveCard = useCallback((request: ReturnType<typeof getKnowledgeCard>, id: object) => {
+    return request
       .then((res) => {
         if (requestId.current !== id) return;
         if (res.success && res.data) {
@@ -83,18 +54,34 @@ function KnowledgeCardContent({ reportId }: { reportId: number }) {
         } else {
           setError((res as { error?: string }).error || 'Failed to load knowledge card');
         }
-        setLoading(false);
       })
       .catch((e: Error) => {
+        if (requestId.current === id) setError(e.message);
+      })
+      .finally(() => {
         if (requestId.current === id) {
-          setError(e.message);
           setLoading(false);
+          setRegenerating(false);
         }
       });
+  }, []);
+
+  const refreshCard = () => {
+    const id = {};
+    requestId.current = id;
+    setRegenerating(true);
+    setError(null);
+    void receiveCard(getKnowledgeCard(reportId, true), id);
+  };
+
+  useEffect(() => {
+    const id = {};
+    requestId.current = id;
+    void receiveCard(getKnowledgeCard(reportId), id);
     return () => {
       requestId.current = null;
     };
-  }, [reportId]);
+  }, [reportId, receiveCard]);
 
   if (loading && !data) {
     return (
@@ -146,7 +133,7 @@ function KnowledgeCardContent({ reportId }: { reportId: number }) {
             variant="ghost"
             size="sm"
             className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
-            onClick={() => fetchCard(true)}
+            onClick={refreshCard}
             disabled={regenerating}
           >
             {regenerating ? '刷新中...' : '刷新展示'}

@@ -103,6 +103,21 @@ describe('KnowledgeCard request states', () => {
     expect(fetch).toHaveBeenCalledTimes(3);
   });
 
+  it('reports an unsuccessful refresh response and stops regenerating', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(success('Original summary'))
+        .mockResolvedValueOnce(json({ success: false, error: 'Refresh unavailable' })),
+    );
+    const { container } = render(<KnowledgeCard reportId={1} />);
+    fireEvent.click(await screen.findByRole('button', { name: '刷新展示' }));
+    expect(await screen.findByText('Refresh unavailable')).toBeVisible();
+    expect(container.querySelector('[data-slot="skeleton"]')).not.toBeInTheDocument();
+    expect(screen.queryByText('刷新中...')).not.toBeInTheDocument();
+  });
+
   it('shows refresh errors and recovers after remounting the same report', async () => {
     const fetch = vi
       .fn()
