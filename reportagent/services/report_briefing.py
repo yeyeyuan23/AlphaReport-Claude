@@ -21,16 +21,32 @@ from reportagent.services.report_quality import (
 
 
 def _publication_date(paper: dict) -> str:
+    from datetime import datetime, timezone
+    from reportagent.services.report_periods import REPORT_TIMEZONE
+
+    lines = []
+    if paper.get("announced_at"):
+        stamp = datetime.fromisoformat(str(paper["announced_at"]))
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=timezone.utc)
+        lines.append(
+            f"来源公告时间：{stamp.astimezone(REPORT_TIMEZONE):%Y-%m-%d %H:%M}（北京时间）"
+        )
+    label = "原始提交日期（UTC）" if paper.get("source") == "arxiv" else "原始发表日期"
     if paper.get("published_date"):
-        return f"原始发表日期：{str(paper['published_date'])[:10]}"
-    info = metadata_dict(paper.get("publication_date_info"))
-    if has_publication_date(paper):
-        if info.get("precision") == "year":
-            return f"原始发表日期：{info['year']}（仅年份）"
-        if info.get("precision") == "month":
-            return f"原始发表日期：{info['year']}-{info['month']:02d}（仅年月）"
-        return f"原始发表日期：{info['year']}-{info['month']:02d}-{info['day']:02d}"
-    return "原始发表日期：未知"
+        lines.append(f"{label}：{str(paper['published_date'])[:10]}")
+    else:
+        info = metadata_dict(paper.get("publication_date_info"))
+        if has_publication_date(paper):
+            if info.get("precision") == "year":
+                lines.append(f"{label}：{info['year']}（仅年份）")
+            elif info.get("precision") == "month":
+                lines.append(f"{label}：{info['year']}-{info['month']:02d}（仅年月）")
+            else:
+                lines.append(
+                    f"{label}：{info['year']}-{info['month']:02d}-{info['day']:02d}"
+                )
+    return "\n".join(lines) or f"{label}：未知"
 
 
 def _links(paper: dict) -> str:
@@ -271,7 +287,7 @@ def render_briefing(
         ):
             overview += " 部分来源采集失败或不完整，最新资料覆盖可能不完整。"
     if publication_window:
-        overview = f"发表时间范围：{publication_window}\n\n" + overview
+        overview = f"公开发布时间范围：{publication_window}\n\n" + overview
     return (
         skill_resource(template_skill, "briefing.md")
         .read_text(encoding="utf-8")

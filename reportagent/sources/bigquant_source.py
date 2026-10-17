@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 from typing import Optional
 from urllib.parse import urljoin
+from zoneinfo import ZoneInfo
 
 import httpx
 from bs4 import BeautifulSoup
@@ -15,7 +16,7 @@ from bs4 import BeautifulSoup
 from reportagent.models.schemas import UserCriteria, SearchResult, SourceType
 from reportagent.sources.base import BaseSource, SourceParseError, canonical_url
 from reportagent.utils.topic_expansion import expand_topics
-from reportagent.sources.date_window import in_date_window
+from reportagent.sources.date_window import in_date_window, utc_datetime
 from reportagent.sources.base import usable_full_text
 from reportagent.sources.content_fetch import (
     MAX_HTML_BYTES,
@@ -57,10 +58,34 @@ def _parse_publication_date(value) -> Optional[datetime]:
 
 
 def _publication_date(
-    soup: BeautifulSoup, article, page_url: str = ""
+    soup: BeautifulSoup,
+    article,
+    page_url: str = "",
+    *,
+    own_page_only: bool = False,
+    evidence: dict | None = None,
 ) -> tuple[Optional[datetime], Optional[str]]:
-    """Prefer the cited original report; never use page modification or sample dates."""
-    text = article.get_text(" ", strip=True) if article else ""
+    """Read original-report evidence, or explicitly the source page's own date."""
+
+    def parse(value):
+        if not own_page_only:
+            return _parse_publication_date(value)
+        if not isinstance(value, str):
+            return None
+        try:
+            value = value.strip()
+            # Date-only evidence remains a publication date; it does not
+            # establish when this source announced the page during that day.
+            if not re.match(r"^\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}", value):
+                return None
+            stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+            return stamp.astimezone(timezone.utc)
+        except ValueError:
+            return None
+
+    text = article.get_text(" ", strip=True) if article and not own_page_only else ""
     text = re.split(r"参考文献|引用文献|\bReferences\b", text, maxsplit=1, flags=re.I)[
         0
     ]
@@ -74,7 +99,7 @@ def _publication_date(
     for pattern in patterns:
         for match in re.finditer(pattern, text):
             original_date_found = True
-            stamp = _parse_publication_date(match["date"])
+            stamp = parse(match["date"])
             if stamp is not None:
                 return stamp, "original_report_text"
     if original_date_found:
@@ -88,10 +113,14 @@ def _publication_date(
         "article:published_time",
         "datePublished",
     ):
+        if own_page_only and name.startswith("citation_"):
+            continue
         for tag in soup.find_all("meta"):
             if (tag.get("name") or tag.get("property") or "").lower() == name.lower():
-                stamp = _parse_publication_date(tag.get("content"))
+                stamp = parse(tag.get("content"))
                 if stamp is not None:
+                    if evidence is not None:
+                        evidence["evidence"] = tag.get("content")
                     return stamp, f"meta:{name}"
 
     # Only read an Article/WebPage object's own datePublished, not dates from its
@@ -138,17 +167,33 @@ def _publication_date(
                 )
             ):
                 continue
-            stamp = _parse_publication_date(item.get("datePublished"))
+            stamp = parse(item.get("datePublished"))
             if stamp is not None:
-                candidates.append((bool(identifiers and page_url), stamp))
+                candidates.append(
+                    (bool(identifiers and page_url), stamp, item.get("datePublished"))
+                )
     if candidates:
-        matching_page = [stamp for identified, stamp in candidates if identified]
-        dates = set(matching_page or [stamp for _, stamp in candidates])
+        matching_page = [stamp for identified, stamp, _ in candidates if identified]
+        dates = set(matching_page or [stamp for _, stamp, _ in candidates])
         if len(dates) == 1:
-            return dates.pop(), "jsonld:datePublished"
+            stamp = dates.pop()
+            if evidence is not None:
+                evidence["evidence"] = next(
+                    raw for _, candidate, raw in candidates if candidate == stamp
+                )
+            return stamp, "jsonld:datePublished"
 
     for tag in article.find_all("time") if article else []:
         scope = tag.find_parent(attrs={"itemscope": True})
+        if (
+            own_page_only
+            and scope
+            and page_url
+            and isinstance(scope.get("itemid"), str)
+            and canonical_url(urljoin(page_url, scope["itemid"]))
+            != canonical_url(page_url)
+        ):
+            continue
         if (
             scope
             and scope.get("itemtype")
@@ -159,10 +204,12 @@ def _publication_date(
         ):
             continue
         if "datePublished" in (tag.get("itemprop") or "").split():
-            stamp = _parse_publication_date(
-                tag.get("datetime") or tag.get_text(strip=True)
-            )
+            stamp = parse(tag.get("datetime") or tag.get_text(strip=True))
             if stamp is not None:
+                if evidence is not None:
+                    evidence["evidence"] = tag.get("datetime") or tag.get_text(
+                        strip=True
+                    )
                 return stamp, "time:datePublished"
     return None, None
 
@@ -216,7 +263,9 @@ class BigQuantSource(BaseSource):
         seen_paths: set[str] = set()
 
         async with httpx.AsyncClient(timeout=20.0) as client:
-            for page_no in range(1, self.max_listing_pages + 1):
+            page_no = 1
+            unlimited = criteria.max_results_per_source is None
+            while unlimited or page_no <= self.max_listing_pages:
                 try:
                     entries = await self._fetch_listing_page(client, page_no)
                 except Exception as e:
@@ -231,6 +280,7 @@ class BigQuantSource(BaseSource):
                 if not entries:
                     break
 
+                new_paths = 0
                 for title, doc_path in entries:
                     key = canonical_url(
                         f"{BASE_URL}{doc_path}"
@@ -240,13 +290,30 @@ class BigQuantSource(BaseSource):
                     if key in seen_paths:
                         continue
                     seen_paths.add(key)
-                    score = self._score(title.lower(), terms)
-                    if score > 0 or not terms:
+                    new_paths += 1
+                    score = (
+                        0
+                        if criteria.date_basis == "announcement"
+                        else self._score(title.lower(), terms)
+                    )
+                    if criteria.date_basis == "announcement" or score > 0 or not terms:
                         candidates.append((title, doc_path, score))
 
+                if not new_paths:
+                    self.last_search.record_error(
+                        SourceParseError("listing pagination made no progress"),
+                        f"listing page {page_no}",
+                    )
+                    break
+                if not unlimited and page_no >= self.max_listing_pages:
+                    # A bounded manual search intentionally samples its configured
+                    # page count. Scheduled unlimited searches never take this branch.
+                    break
                 await asyncio.sleep(self.rate_limit_seconds)
+                page_no += 1
 
-            candidates.sort(key=lambda x: x[2], reverse=True)
+            if criteria.date_basis != "announcement":
+                candidates.sort(key=lambda x: x[2], reverse=True)
             results: list[SearchResult] = []
             for title, doc_path, _ in candidates:
                 try:
@@ -256,10 +323,15 @@ class BigQuantSource(BaseSource):
                         doc_path,
                         date_from=criteria.date_from,
                         date_to=criteria.date_to,
+                        date_basis=criteria.date_basis,
+                        date_to_exclusive=criteria.date_to_exclusive,
                     )
                     if sr:
                         results.append(sr)
-                    if len(results) >= criteria.max_results_per_source:
+                    if (
+                        criteria.max_results_per_source is not None
+                        and len(results) >= criteria.max_results_per_source
+                    ):
                         break
                     await asyncio.sleep(self.rate_limit_seconds)
                 except Exception as e:
@@ -316,6 +388,8 @@ class BigQuantSource(BaseSource):
         *,
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
+        date_basis: str = "publication",
+        date_to_exclusive: bool = False,
         download_pdfs: bool | None = None,
         pdf_directory: Path | None = None,
     ) -> Optional[SearchResult]:
@@ -346,10 +420,30 @@ class BigQuantSource(BaseSource):
             raise SourceParseError("unrecognized HTML article or missing title")
 
         published_date, date_source = _publication_date(soup, article, url)
+        announcement_info = {"evidence": None}
+        announced_at, announcement_source = _publication_date(
+            soup, article, url, own_page_only=True, evidence=announcement_info
+        )
+        announcement_info["source"] = announcement_source
+        eligibility_date = (
+            announced_at if date_basis == "announcement" else published_date
+        )
+        if date_basis == "announcement" and announced_at is None:
+            self.last_search.record_error(
+                SourceParseError("announcement date unavailable"), "article date"
+            )
+            return None
         # Determine eligibility from page evidence before downloading attachments.
         # With no date bounds, explicit single-report reads can still hydrate an
         # undated paper; a dated collection must exclude unknown publication dates.
-        if not in_date_window(published_date, date_from, date_to):
+        if not in_date_window(eligibility_date, date_from, date_to):
+            return None
+        if (
+            date_to_exclusive
+            and date_to
+            and eligibility_date
+            and utc_datetime(eligibility_date) >= utc_datetime(date_to)
+        ):
             return None
 
         text = article_text(article)
@@ -365,11 +459,13 @@ class BigQuantSource(BaseSource):
             source=SourceType.BIGQUANT,
             source_url=url,
             published_date=published_date,
+            announced_at=announced_at,
             raw_metadata={
                 "doc_path": doc_path,
                 "pdf_link": links[0] if links else None,
                 "pdf_links": links,
                 "published_date_source": date_source,
+                "announcement_info": announcement_info,
                 "content_kind": "html" if text else "metadata_only",
                 "text_scope": "html_article" if text else "metadata_only",
             },

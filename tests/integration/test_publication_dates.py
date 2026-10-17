@@ -247,7 +247,9 @@ def test_reposted_old_report_is_not_included_in_this_publication_week(library):
         papers = weekly_report.get_weekly_papers(
             datetime(2022, 8, 1), datetime(2022, 8, 8)
         )
-        assert [p["id"] for p in papers] == [rid]
+        # Original cited dates remain in the library but are not evidence of
+        # when this BigQuant page became public.
+        assert papers == []
 
 
 def test_invalid_optional_jsonld_type_does_not_drop_the_article():

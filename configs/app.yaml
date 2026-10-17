@@ -76,8 +76,7 @@ daily_collection:
   timezone: "Asia/Shanghai"
   schedule_cron: "08:00"  # 每天，含周末；只采集、分类和入库
   sources: [arxiv, eastmoney, bigquant]
-  lookback_days: 3  # 从 UTC 当天往前 3 天零点起采集，回查来源延迟；独立于报告日期范围
-  max_per_source: 15
+  # 自动采集固定使用日报08:00截止点之前24小时的来源公告，不设候选数量上限。
 
 daily_report:
   enabled: true  # Web 运行时，每天从论文库生成并发送日报

@@ -33,6 +33,7 @@ def test_full_library_acceptance_rescores_old_and_already_scored_rows(
                         selection_relevance=9,
                         is_selected=True,
                         published_date=datetime(2000, 1, 1),
+                        announced_at=datetime(2000, 1, 1),
                     )
                     for i in range(207)
                 ]
@@ -102,6 +103,7 @@ def test_weekly_preview_uses_publication_boundaries_and_cannot_deliver(
                         content_hash=str(i),
                         source="arxiv",
                         published_date=stamp,
+                        announced_at=stamp,
                         created_at=datetime(2026, 10, 16),
                     )
                 )

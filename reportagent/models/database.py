@@ -50,6 +50,8 @@ class Report(Base):
     doi = Column(String(200), index=True)
     arxiv_id = Column(String(50), index=True)
     published_date = Column(DateTime)
+    announced_at = Column(DateTime, index=True)
+    announcement_info_json = Column(Text)
     publication_date_info_json = Column(Text)
     material_type = Column(String(20), default="unknown")
     material_type_info_json = Column(Text)

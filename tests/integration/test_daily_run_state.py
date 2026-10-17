@@ -74,6 +74,7 @@ def insert_paper(factory):
             source_url="https://arxiv.org/abs/2610.00001v1",
             arxiv_id="2610.00001v1",
             published_date=get_daily_range()[0] + timedelta(hours=1),
+            announced_at=get_daily_range()[0] + timedelta(hours=1),
             selection_score=8,
             selection_relevance=8,
             selection_direction="portfolio",
@@ -178,7 +179,7 @@ def test_empty_daily_sends_a_completion_card_to_each_recipient(
     result = daily.run_daily_push(daily.DailyPushOptions(receive_ids="A,B,A"))
     assert [item[0] for item in sent] == ["A", "B"]
     assert all(
-        not item[2] and "暂无发表日期明确到日、且通过当前相关性筛选的论文" in item[1]
+        not item[2] and "暂无有来源公开时间证据、且通过当前相关性筛选的论文" in item[1]
         for item in sent
     )
     assert result["status"] == "empty"
@@ -208,7 +209,7 @@ def test_empty_preview_has_an_explicit_result_without_sending(
     monkeypatch.setattr(daily, "send_feishu_card", lambda *args: sent.append(args))
     result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
     assert result["status"] == "preview"
-    assert "暂无发表日期明确到日、且通过当前相关性筛选的论文" in result["briefing"]
+    assert "暂无有来源公开时间证据、且通过当前相关性筛选的论文" in result["briefing"]
     assert sent == [] and result["deliveries"] == {}
 
 
@@ -457,6 +458,7 @@ def test_configured_review_budget_limits_candidates_and_explicit_option_override
                 source="arxiv",
                 content_hash="two",
                 published_date=get_daily_range()[0] + timedelta(hours=1),
+                announced_at=get_daily_range()[0] + timedelta(hours=1),
             )
         )
         session.commit()
@@ -567,5 +569,5 @@ def test_daily_artifact_shows_the_exact_publication_window(offline_daily):
         "end_exclusive": True,
     }
     text = Path(result["artifact_path"]).read_text()
-    assert "发表时间范围：" in text
+    assert "公开发布时间范围：" in text
     assert "08:00" in text and "北京时间，含起点、不含截止点" in text

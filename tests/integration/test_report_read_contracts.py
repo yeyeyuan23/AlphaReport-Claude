@@ -40,6 +40,8 @@ BASE_FIELDS = {
     "updated_at",
 }
 CURRENT_FIELDS = {
+    "announced_at",
+    "announcement_info",
     "publication_date_info",
     "material_type",
     "material_type_info",

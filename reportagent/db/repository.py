@@ -437,6 +437,7 @@ class ReportRepository:
         scoring_fingerprint: str | None = None,
         created_until=None,
         published_until=None,
+        report_window=None,
     ) -> list[Report]:
         """Get reports that haven't been LLM-scored yet (selection_score == 0 and no reason)."""
         from datetime import datetime, timezone
@@ -456,11 +457,21 @@ class ReportRepository:
                 q = q.filter(Report.published_date < published_until)
             else:
                 q = q.filter(Report.published_date <= datetime.now(timezone.utc))
+        if report_window:
+            from reportagent.services.report_periods import publication_column
+
+            start, end = report_window
+            q = q.filter(publication_column() >= start, publication_column() < end)
         q = q.order_by(desc(Report.created_at))
         if scoring_fingerprint is None:
             return q.limit(limit).all()
         results = []
         for row in q.yield_per(200):
+            if report_window:
+                from reportagent.services.report_periods import is_publication_in_range
+
+                if not is_publication_in_range(row, *report_window):
+                    continue
             try:
                 provenance = json.loads(row.selection_provenance_json or "{}")
             except (TypeError, ValueError):

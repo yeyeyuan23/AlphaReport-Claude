@@ -63,6 +63,9 @@ def test_daily_uses_publication_day_regardless_of_ingestion(
                     published_date=datetime.fromisoformat(published)
                     if published
                     else None,
+                    announced_at=datetime.fromisoformat(published)
+                    if published
+                    else None,
                     selection_relevance=8,
                 )
             )
@@ -175,6 +178,9 @@ def test_daily_precise_publication_boundaries(
                     published_date=datetime.fromisoformat(published)
                     if published
                     else None,
+                    announced_at=datetime.fromisoformat(published)
+                    if published and info is None
+                    else None,
                     publication_date_info_json=json.dumps(info) if info else None,
                     selection_relevance=8,
                 )
@@ -216,6 +222,9 @@ def test_relevance_refresh_uses_exact_publication_day(
                     created_at=datetime(2020, 1, 1),
                     published_date=datetime.fromisoformat(published)
                     if published
+                    else None,
+                    announced_at=datetime.fromisoformat(published)
+                    if published and precision is None
                     else None,
                     publication_date_info_json=json.dumps({"precision": precision})
                     if precision
@@ -312,6 +321,7 @@ def test_weekly_publication_query_excludes_cutoff_and_partial_dates(
                     source="arxiv",
                     content_hash=str(rid),
                     published_date=published,
+                    announced_at=published if info is None else None,
                     publication_date_info_json=json.dumps(info) if info else None,
                 )
             )
@@ -331,5 +341,5 @@ def test_weekly_body_displays_the_actual_168_hour_window():
     text = weekly.generate_weekly_report(
         [], first, last, publication_window=format_publication_window(start, end)
     )
-    assert "发表时间范围：2026-10-10 08:00 ~ 2026-10-17 08:00" in text
+    assert "公开发布时间范围：2026-10-10 08:00 ~ 2026-10-17 08:00" in text
     assert "北京时间，含起点、不含截止点" in text

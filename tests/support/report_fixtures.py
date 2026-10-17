@@ -65,6 +65,12 @@ def paper(**extra):
         "selection_reason": "与组合优化有关",
         **extra,
     }
+    if (
+        "published_date" in extra
+        and "announced_at" not in extra
+        and result["source"] == "arxiv"
+    ):
+        result["announced_at"] = extra["published_date"]
     if "material_type" not in extra:
         result["material_type"] = {
             "arxiv": "academic",

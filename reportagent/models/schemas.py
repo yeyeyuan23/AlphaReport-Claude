@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Optional, Literal
 
 from pydantic import BaseModel, Field
 
@@ -65,7 +65,9 @@ class UserCriteria(BaseModel):
     keywords: list[str] = Field(default_factory=list)
     date_from: Optional[datetime] = None
     date_to: Optional[datetime] = None
-    max_results_per_source: int = Field(default=20, ge=1, le=100)
+    max_results_per_source: int | None = Field(default=20, ge=1, le=100)
+    date_basis: Literal["publication", "announcement"] = "publication"
+    date_to_exclusive: bool = False
     journals: list[str] = Field(default_factory=list)
     brokers: list[str] = Field(default_factory=list)
     local_pdf_path: Optional[str] = None
@@ -82,6 +84,7 @@ class SearchResult(BaseModel):
     doi: Optional[str] = None
     arxiv_id: Optional[str] = None
     published_date: Optional[datetime] = None
+    announced_at: Optional[datetime] = None
     pdf_path: Optional[str] = None
     raw_metadata: dict = Field(default_factory=dict)
     tables_json: Optional[str] = None

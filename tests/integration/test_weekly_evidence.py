@@ -92,6 +92,7 @@ def test_week_query_covers_more_than_100_and_retains_full_abstract(library):
                     content_hash=str(i),
                     abstract="完整摘要" * 300,
                     published_date=datetime(2026, 10, 9),
+                    announced_at=datetime(2026, 10, 9),
                 )
                 for i in range(207)
             ]
@@ -152,6 +153,7 @@ def test_no_llm_preview_does_not_call_models_or_send(library, tmp_path, monkeypa
                 source="arxiv",
                 content_hash="one",
                 published_date=datetime(2026, 10, 9),
+                announced_at=datetime(2026, 10, 9),
             )
         )
         session.commit()
@@ -188,6 +190,7 @@ def test_native_weekly_prepares_shared_evidence_instead_of_claude(
                 source="arxiv",
                 content_hash="one",
                 published_date=datetime(2026, 10, 9),
+                announced_at=datetime(2026, 10, 9),
             )
         )
         session.commit()
@@ -220,6 +223,7 @@ def test_weekly_review_budget_advances_past_current_cached_papers(library, monke
                 rid=rid,
                 title=f"Portfolio study {rid}",
                 published_date=datetime(2026, 10, 9),
+                announced_at=datetime(2026, 10, 9),
             )
             stored = {
                 k: v for k, v in values.items() if k in Report.__table__.columns.keys()

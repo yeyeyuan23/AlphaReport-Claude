@@ -29,6 +29,7 @@ from reportagent.services.report_periods import (
     get_weekly_range,
     is_publication_in_range,
     format_publication_window,
+    publication_column,
 )
 
 load_dotenv()
@@ -69,8 +70,8 @@ def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
         from sqlalchemy import desc
 
         q = session.query(Report).filter(
-            Report.published_date >= week_start,
-            Report.published_date < week_end,
+            publication_column() >= week_start,
+            publication_column() < week_end,
         )
         q = q.order_by(desc(Report.published_date), Report.id)
         reports = [
@@ -88,6 +89,12 @@ def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
                     "full_text": r.full_text or "",
                     "source": r.source or "",
                     "material_type": r.material_type or "unknown",
+                    "announced_at": r.announced_at.isoformat()
+                    if r.announced_at
+                    else "",
+                    "announcement_info": json.loads(r.announcement_info_json)
+                    if r.announcement_info_json
+                    else {},
                     "publication_date_info": json.loads(r.publication_date_info_json)
                     if r.publication_date_info_json
                     else {},

@@ -54,7 +54,13 @@ class CollectionOptions:
 
 
 async def classify_for_storage(
-    sr, classifier, llm_classifier, errors, *, model_unavailable: bool = False
+    sr,
+    classifier,
+    llm_classifier,
+    errors,
+    *,
+    model_unavailable: bool = False,
+    check_domain: bool = True,
 ):
     """Apply the shared domain gate and classification fallback before persistence."""
     title = sr.title or ""
@@ -62,7 +68,7 @@ async def classify_for_storage(
     error_kind = None
     if not title.strip():
         raise SourceParseError("report missing title")
-    if not is_quant_finance(title, abstract):
+    if check_domain and not is_quant_finance(title, abstract):
         return None
     if llm_classifier:
         try:
@@ -262,6 +268,28 @@ async def collect_reports(
                     if cancelled():
                         break
                     try:
+                        if online and criteria.date_basis == "announcement":
+                            from reportagent.services.report_periods import (
+                                publication_time,
+                            )
+                            from reportagent.sources.date_window import utc_datetime
+
+                            stamp = publication_time(sr)
+                            if stamp is None:
+                                errors.append(
+                                    "announcement date unavailable; metadata not stored and PDF not downloaded"
+                                )
+                                continue
+                            if criteria.date_from and stamp < utc_datetime(
+                                criteria.date_from
+                            ):
+                                continue
+                            if criteria.date_to and (
+                                stamp >= utc_datetime(criteria.date_to)
+                                if criteria.date_to_exclusive
+                                else stamp > utc_datetime(criteria.date_to)
+                            ):
+                                continue
                         if online:
                             from reportagent.services.collection_screening import (
                                 reuse_screening_material,
@@ -282,6 +310,18 @@ async def collect_reports(
                                     "screening material unavailable; not rejected as irrelevant and not stored"
                                 )
                                 continue
+                        if online and criteria.date_basis == "announcement":
+                            # No lexical/domain gate may hide candidates from the
+                            # configured relevance model; classify accepted papers later.
+                            classified_results.append(
+                                ClassifiedReport(
+                                    search_result=sr,
+                                    classification=ClassificationResult(
+                                        method="unverified"
+                                    ),
+                                )
+                            )
+                            continue
                         progress("classifying", f"Classifying {source_name} metadata")
                         classified = await classify_for_storage(
                             sr,
@@ -326,6 +366,21 @@ async def collect_reports(
                     if cancelled():
                         break
                     try:
+                        if online and criteria.date_basis == "announcement":
+                            progress(
+                                "classifying",
+                                f"Classifying accepted {source_name} metadata",
+                            )
+                            item = await classify_for_storage(
+                                item.search_result,
+                                classifier,
+                                llm_classifier,
+                                errors,
+                                model_unavailable=model_unavailable,
+                                check_domain=False,
+                            )
+                            if cancelled():
+                                break
                         if online:
                             action, rid, item = store_selected(
                                 item,

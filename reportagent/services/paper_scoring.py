@@ -624,8 +624,7 @@ async def score_reports(options: ScoringOptions) -> None:
 
             start, end, _, _ = published_range
             rows = repo.get_unjudged_reports(
-                published_since=start,
-                published_until=end,
+                report_window=(start, end),
                 limit=None,
                 scoring_fingerprint=fingerprint,
             )

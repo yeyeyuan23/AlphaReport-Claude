@@ -43,6 +43,10 @@ def _report_to_dict(r) -> dict:
         "doi": r.doi,
         "arxiv_id": r.arxiv_id,
         "published_date": r.published_date.isoformat() if r.published_date else None,
+        "announced_at": r.announced_at.isoformat() if r.announced_at else None,
+        "announcement_info": json.loads(r.announcement_info_json)
+        if r.announcement_info_json
+        else {},
         "publication_date_info": json.loads(r.publication_date_info_json)
         if r.publication_date_info_json
         else {},

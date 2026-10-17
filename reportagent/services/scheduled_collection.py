@@ -122,7 +122,9 @@ def _save(path: Path, result: dict):
 
 
 def run_scheduled_collection() -> dict:
-    from reportagent.services.collection import CollectionOptions, collect_reports
+    from reportagent.services.collection import collect_reports
+    from reportagent.models.schemas import UserCriteria, SourceType
+    from reportagent.services.report_periods import get_daily_range
 
     config = get_config("daily_collection", default={})
     directory = PROJECT_ROOT / "data/collections"
@@ -140,19 +142,29 @@ def run_scheduled_collection() -> dict:
         }
         try:
             sources = config.get("sources", ["arxiv", "eastmoney", "bigquant"])
-            options = CollectionOptions(
-                topics=config.get("topics", DEFAULT_TOPICS),
-                sources=",".join(sources),
-                days=config.get("lookback_days", 3),
-                max_results=config.get("max_per_source", 15),
-                no_analysis=True,
-                broad=True,
+            start, end, report_date, _ = get_daily_range()
+            result["publication_window"] = {
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "end_exclusive": True,
+            }
+            result["report_date"] = report_date
+            criteria = UserCriteria(
+                topics=[
+                    topic.strip()
+                    for topic in config.get("topics", DEFAULT_TOPICS).split(",")
+                    if topic.strip()
+                ],
+                sources=[SourceType(name) for name in sources],
+                date_from=start,
+                date_to=end,
+                date_basis="announcement",
+                date_to_exclusive=True,
+                max_results_per_source=None,
             )
-
-            async def collect():
-                return await asyncio.wait_for(collect_reports(options), timeout=900)
-
-            response = asyncio.run(collect())
+            response = asyncio.run(
+                collect_reports(criteria, no_analysis=True, broad=True)
+            )
             if not isinstance(response, dict) or response.get("status") not in {
                 "ok",
                 "partial",

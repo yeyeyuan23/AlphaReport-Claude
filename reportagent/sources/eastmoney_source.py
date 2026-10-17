@@ -4,7 +4,9 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import re
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 import httpx
 from bs4 import BeautifulSoup
@@ -16,7 +18,7 @@ from reportagent.sources.base import (
     deduplicate_results,
     usable_full_text,
 )
-from reportagent.sources.date_window import in_date_window
+from reportagent.sources.date_window import in_date_window, utc_datetime
 from reportagent.sources.content_fetch import (
     MAX_HTML_BYTES,
     article_text,
@@ -173,7 +175,9 @@ class EastMoneySource(BaseSource):
                         qt,
                         date_from,
                         date_to,
-                        FETCH_PAGE_SIZE * FETCH_PAGES_PER_QTYPE,
+                        None
+                        if criteria.max_results_per_source is None
+                        else FETCH_PAGE_SIZE * FETCH_PAGES_PER_QTYPE,
                     )
                     all_results.extend(results)
                     await asyncio.sleep(self.rate_limit_seconds)
@@ -182,14 +186,37 @@ class EastMoneySource(BaseSource):
                         "EastMoney %s", self.last_search.record_error(e, f"qType {qt}")
                     )
 
-        dated = [
-            row
-            for row in deduplicate_results(all_results)
-            if in_date_window(row.published_date, criteria.date_from, criteria.date_to)
-        ]
-        filtered = self._filter_by_keywords(dated, criteria)
+        dated = []
+        for row in deduplicate_results(all_results):
+            stamp = (
+                row.announced_at
+                if criteria.date_basis == "announcement"
+                else row.published_date
+            )
+            if criteria.date_basis == "announcement" and stamp is None:
+                self.last_search.record_error(
+                    SourceParseError("announcement date unavailable"), "report date"
+                )
+                continue
+            if not in_date_window(stamp, criteria.date_from, criteria.date_to):
+                continue
+            if (
+                criteria.date_to_exclusive
+                and criteria.date_to
+                and stamp
+                and utc_datetime(stamp) >= utc_datetime(criteria.date_to)
+            ):
+                continue
+            dated.append(row)
+        # Announcement collection delegates relevance to the shared abstract
+        # assessment; titles and report categories must not discard candidates.
+        filtered = (
+            dated
+            if criteria.date_basis == "announcement"
+            else self._filter_by_keywords(dated, criteria)
+        )
         logger.info(
-            "EastMoney: fetched %d, filtered to %d quant-related",
+            "EastMoney: fetched %d, retained %d eligible candidates",
             len(all_results),
             len(filtered),
         )
@@ -319,16 +346,25 @@ class EastMoneySource(BaseSource):
         q_type: int,
         date_from: str,
         date_to: str,
-        max_results: int,
+        max_results: int | None,
     ) -> list[SearchResult]:
         results: list[SearchResult] = []
-        page_size = min(max_results, FETCH_PAGE_SIZE)
-        total_pages = min(
-            (max_results + page_size - 1) // page_size,
-            FETCH_PAGES_PER_QTYPE,
+        page_size = (
+            min(max_results, FETCH_PAGE_SIZE) if max_results else FETCH_PAGE_SIZE
+        )
+        page_cap = (
+            None
+            if max_results is None
+            else min(
+                (max_results + page_size - 1) // page_size,
+                FETCH_PAGES_PER_QTYPE,
+            )
         )
 
-        for page_no in range(1, total_pages + 1):
+        page_no = 1
+        seen_codes: set[str] = set()
+        expected_pages = None
+        while True:
             params = {
                 "industryCode": "*",
                 "pageSize": page_size,
@@ -352,9 +388,21 @@ class EastMoneySource(BaseSource):
                 if not isinstance(data, dict) or not isinstance(data.get("data"), list):
                     raise SourceParseError("invalid JSON report-list schema")
                 items = data["data"]
-                pages = data.get("TotalPage", 1)
+                pages = data.get("TotalPage")
                 if not isinstance(pages, int) or isinstance(pages, bool) or pages < 0:
                     raise SourceParseError("invalid JSON pagination")
+                if expected_pages is not None and pages != expected_pages:
+                    self.last_search.record_error(
+                        SourceParseError("pagination total changed during enumeration"),
+                        f"qType {q_type} page {page_no}",
+                    )
+                expected_pages = max(expected_pages or 0, pages)
+                if not items and pages > 0:
+                    raise SourceParseError(
+                        "unexpected empty page before pagination exhaustion"
+                    )
+                if items and pages < page_no:
+                    raise SourceParseError("inconsistent JSON pagination")
             except Exception as error:
                 logger.warning(
                     "EastMoney %s",
@@ -366,6 +414,7 @@ class EastMoneySource(BaseSource):
 
             self.last_search.fetched += len(items)
             parsed_count = 0
+            new_codes = 0
             for item in items:
                 try:
                     if not isinstance(item, dict):
@@ -375,20 +424,44 @@ class EastMoneySource(BaseSource):
                         raise SourceParseError(
                             "report item missing title or identifier"
                         )
-                    results.append(sr)
                     parsed_count += 1
+                    code = sr.source_url
+                    if code not in seen_codes:
+                        seen_codes.add(code)
+                        new_codes += 1
+                        results.append(sr)
                 except Exception as error:
                     self.last_search.record_error(
                         error, f"qType {q_type} page {page_no} item"
                     )
             if parsed_count or not items:
                 self.last_search.successful_requests += 1
-            if len(results) >= max_results:
+            if items and not new_codes:
+                self.last_search.record_error(
+                    SourceParseError("pagination made no progress"),
+                    f"qType {q_type} page {page_no}",
+                )
+                break
+            if max_results is not None and len(results) >= max_results:
+                if page_no < expected_pages:
+                    self.last_search.record_error(
+                        SourceParseError(
+                            "pagination stopped at configured result limit"
+                        ),
+                        f"qType {q_type} page {page_no}",
+                    )
                 return results[:max_results]
-            if not items or page_no >= pages:
+            if not items or page_no >= expected_pages:
+                break
+            if page_cap is not None and page_no >= page_cap:
+                self.last_search.record_error(
+                    SourceParseError("pagination stopped at configured page limit"),
+                    f"qType {q_type} page {page_no}",
+                )
                 break
 
             await asyncio.sleep(self.rate_limit_seconds)
+            page_no += 1
 
         return results
 
@@ -408,10 +481,24 @@ class EastMoneySource(BaseSource):
 
         pub_date_str = item.get("publishDate", "")
         pub_date = None
+        announced_at = None
         if pub_date_str:
             try:
                 pub_date = datetime.strptime(pub_date_str[:10], "%Y-%m-%d")
             except ValueError:
+                pass
+            try:
+                # A calendar date cannot locate an announcement within an
+                # intraday window. Require a clock supplied by the source.
+                if not re.match(r"^\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}", pub_date_str):
+                    raise ValueError("publishDate has no announcement time")
+                stamp = datetime.fromisoformat(pub_date_str.replace("Z", "+00:00"))
+                announced_at = (
+                    stamp.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+                    if stamp.tzinfo is None
+                    else stamp
+                ).astimezone(timezone.utc)
+            except (ValueError, TypeError):
                 pass
 
         stock_name = item.get("stockName", "")
@@ -434,7 +521,12 @@ class EastMoneySource(BaseSource):
             source=SourceType.EASTMONEY,
             source_url=source_url,
             published_date=pub_date,
+            announced_at=announced_at,
             raw_metadata={
+                "announcement_info": {
+                    "source": "publishDate" if announced_at else None,
+                    "evidence": pub_date_str or None,
+                },
                 "info_code": info_code,
                 "org_name": org_name,
                 "org_code": item.get("orgCode", ""),
@@ -453,6 +545,8 @@ class EastMoneySource(BaseSource):
         )
 
     def _resolve_qtypes(self, criteria: UserCriteria) -> list[int]:
+        if criteria.date_basis == "announcement":
+            return sorted(REPORT_TYPE_LABELS)
         q_types: set[int] = set()
         expanded = expand_topics(criteria.topics, criteria.keywords, lang="zh")
 
@@ -468,6 +562,16 @@ class EastMoneySource(BaseSource):
         return sorted(q_types)
 
     def _resolve_dates(self, criteria: UserCriteria) -> tuple[str, str]:
+        # The list API accepts calendar days in the site's own timezone. Exact
+        # intraday bounds are applied to publishDate after metadata enumeration.
+        if criteria.date_basis == "announcement":
+            site_zone = ZoneInfo("Asia/Shanghai")
+            end = utc_datetime(criteria.date_to or datetime.now(timezone.utc))
+            start = utc_datetime(criteria.date_from or end - timedelta(days=180))
+            return (
+                start.astimezone(site_zone).strftime("%Y-%m-%d"),
+                end.astimezone(site_zone).strftime("%Y-%m-%d"),
+            )
         if criteria.date_to:
             date_to = criteria.date_to.strftime("%Y-%m-%d")
         else:

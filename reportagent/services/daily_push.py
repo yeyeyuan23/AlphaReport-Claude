@@ -44,6 +44,7 @@ from reportagent.services.report_periods import (
     get_daily_range,
     is_daily_publication,
     format_publication_window,
+    publication_column,
 )
 from reportagent.services.document_metadata import metadata_dict
 
@@ -102,6 +103,8 @@ def _paper_metadata(row) -> dict:
             )
         },
         "published_date": row.published_date.isoformat() if row.published_date else "",
+        "announced_at": row.announced_at.isoformat() if row.announced_at else "",
+        "announcement_info": metadata_dict(row.announcement_info_json),
         "publication_date_info": metadata_dict(row.publication_date_info_json),
         "material_type": row.material_type or "unknown",
         "has_full_text": row.has_full_text,
@@ -189,7 +192,7 @@ def get_todays_papers(
 ) -> tuple[list[dict], str, str]:
     """Get precisely dated publications in the 24-hour collection cutoff window.
 
-    按发表时间取报告当天北京时间 08:00 前 24 小时，日期必须明确到日。
+    按发表时间取报告当天北京时间 08:00 前 24 小时，在线资料必须有来源公告时间。
     发送历史不参与筛选；显式指定论文仅跳过相关性过滤，不能绕过报告时间窗口。
 
     Returns:
@@ -211,7 +214,7 @@ def get_todays_papers(
         )
 
         q = session.query(Report).filter(
-            Report.published_date >= start, Report.published_date < end
+            publication_column() >= start, publication_column() < end
         )
         if report_ids:
             q = q.filter(Report.id.in_(report_ids))
@@ -528,7 +531,7 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
     )
     if ids and not papers:
         raise ValueError(
-            "指定论文不存在、不在日报发表时间窗口内或日期未明确到日，不能进入日报"
+            "指定论文不存在、不在日报公开发布时间窗口内或缺少来源时间证据，不能进入日报"
         )
     candidates = select_candidates(papers, len(papers), list(load_enabled_directions()))
     run["report_ids"] = [p["id"] for p in candidates]
@@ -569,9 +572,9 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
         if deferred:
             text += f"\n\n本次全文评估预算为 {max_reviews} 篇，另有 {deferred} 篇候选尚未评估；重跑可继续处理。"
         if ids:
-            text += "\n\n本次为指定论文评估，仍限于报告当天北京时间 08:00 前 24 小时发表且日期明确到日的论文。"
+            text += "\n\n本次为指定论文评估，仍限于报告当天北京时间 08:00 前 24 小时公开发布且有来源时间证据的论文。"
         if not papers:
-            text += "\n\n本期 24 小时窗口内暂无发表日期明确到日、且通过当前相关性筛选的论文。"
+            text += "\n\n本期 24 小时窗口内暂无有来源公开时间证据、且通过当前相关性筛选的论文。"
         if run["warnings"]:
             text = (
                 "\n".join(f"> ⚠ {warning}" for warning in run["warnings"])

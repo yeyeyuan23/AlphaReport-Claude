@@ -217,7 +217,3 @@ push_settings:
   llm_filter_threshold: 6.0
   # LLM 每批处理论文数
   llm_batch_size: 10
-  # 全量拉取模式（true=拉取所有q-fin论文，false=仅关键词搜索）
-  broad_collection: true
-  # collect.py 每个源最大拉取数（broad模式下建议调大）
-  max_per_source_broad: 50

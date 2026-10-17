@@ -112,7 +112,7 @@ def run_weekly_job(chat_id):
         if not get_weekly_papers(start, end):
             send_chat(
                 chat_id,
-                f"当天北京时间08:00前168小时（{first} 至 {last}）库中暂无符合发表日期的资料，可先采集后再试。\n\n"
+                f"当天北京时间08:00前168小时（{first} 至 {last}）库中暂无符合公告时间窗口的资料，可先采集后再试。\n\n"
                 f"[研报库首页]({get_library_url()})",
             )
             return
@@ -204,7 +204,7 @@ def handle_cmd(text, chat_id, chat_type):
         return (
             "📊 AlphaReport 指令\n\n"
             "/report <arXiv编号或链接>：分析单篇论文并推送到当前私聊\n"
-            "/daily：汇总当天北京时间08:00前24小时发表的论文\n"
+            "/daily：汇总当天北京时间08:00前24小时公开发布的论文\n"
             "/weekly：汇总当天北京时间08:00前168小时的库中资料\n\n"
             "/stats：查看研报库统计\n"
             "/search <关键词>：搜索研报，最多显示 5 篇\n"
@@ -241,7 +241,7 @@ def handle_cmd(text, chat_id, chat_type):
         except Exception:
             _report_lock.release()
             raise
-        return "开始生成日报：使用库中当天北京时间08:00前24小时发表且日期明确到日的资料，刷新相关性并评估符合条件的论文，完成后推送到当前私聊。"
+        return "开始生成日报：使用库中当天北京时间08:00前24小时公开发布且有来源时间证据的资料，刷新相关性并评估符合条件的论文，完成后推送到当前私聊。"
 
     if command == "/report":
         if chat_type != "p2p":

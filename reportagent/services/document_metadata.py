@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 METADATA_VERSION = 1
 MATERIAL_TYPES = {"academic", "broker", "community", "other", "unknown"}
@@ -86,6 +86,24 @@ def has_precise_publication_date(paper) -> bool:
 def merge_document_metadata(row, search_result) -> None:
     """Fill metadata without erasing supported values on inconclusive reparses."""
     raw = search_result.raw_metadata
+    # Source announcements are separate from original submission/publication dates.
+    # Hydration/reimports without this evidence must not erase an observed announcement.
+    if search_result.announced_at is not None:
+        stamp = search_result.announced_at
+        stamp = (
+            stamp.astimezone(timezone.utc).replace(tzinfo=None)
+            if stamp.tzinfo
+            else stamp
+        )
+        current = row.announced_at
+        if current is not None and current.tzinfo:
+            current = current.astimezone(timezone.utc).replace(tzinfo=None)
+        if current is None or stamp > current:
+            row.announced_at = stamp
+            info = raw.get("announcement_info")
+            row.announcement_info_json = (
+                json.dumps(info, ensure_ascii=False) if info else None
+            )
     old = metadata_dict(row.publication_date_info_json)
     new = metadata_dict(raw.get("publication_date_info"))
     legacy = old.get("source") in {

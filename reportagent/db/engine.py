@@ -49,6 +49,8 @@ def init_db():
     # Idempotent: inspect PRAGMA table_info first, skip columns that already exist.
     _new_columns = [
         ("source_item_id", "VARCHAR(1100)"),
+        ("announced_at", "DATETIME"),
+        ("announcement_info_json", "TEXT"),
         ("knowledge_card_json", "TEXT"),
         ("selection_score", "FLOAT DEFAULT 0.0"),
         ("selection_reason", "TEXT"),
@@ -88,6 +90,9 @@ def init_db():
 
         conn.exec_driver_sql(
             "CREATE INDEX IF NOT EXISTS ix_reports_source_item_id ON reports (source_item_id)"
+        )
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_reports_announced_at ON reports (announced_at)"
         )
 
         # Backfill only known typed adapters; a PDF's transport says nothing about its content.

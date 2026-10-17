@@ -62,29 +62,54 @@ def format_publication_window(start: datetime, end: datetime) -> str:
     return f"{start.astimezone(REPORT_TIMEZONE):%Y-%m-%d %H:%M} ~ {end.astimezone(REPORT_TIMEZONE):%Y-%m-%d %H:%M}（北京时间，含起点、不含截止点）"
 
 
-def is_publication_in_range(paper, start: datetime, end: datetime) -> bool:
-    """Reject partial/file dates and apply the shared half-open publication window."""
+def publication_time(paper) -> datetime | None:
+    """Prefer source announcement evidence; never use arXiv submission or a repost's original date."""
     from reportagent.services.document_metadata import has_precise_publication_date
 
-    if not has_precise_publication_date(paper):
-        return False
-    published = (
-        paper.get("published_date") if isinstance(paper, dict) else paper.published_date
+    get = (
+        paper.get if isinstance(paper, dict) else lambda key: getattr(paper, key, None)
     )
-    if isinstance(published, str):
+    stamp = get("announced_at")
+    if not stamp:
+        if get("source") in {
+            "arxiv",
+            "bigquant",
+            "eastmoney",
+        } or not has_precise_publication_date(paper):
+            return None
+        stamp = get("published_date")
+    if isinstance(stamp, str):
         try:
-            published = datetime.fromisoformat(published)
+            stamp = datetime.fromisoformat(stamp)
         except ValueError:
-            return False
-    if not isinstance(published, datetime):
+            return None
+    if not isinstance(stamp, datetime):
+        return None
+    return (
+        stamp.replace(tzinfo=timezone.utc)
+        if stamp.tzinfo is None
+        else stamp.astimezone(timezone.utc)
+    )
+
+
+def publication_column():
+    """Coarse SQL window; publication_time applies source-specific evidence rules."""
+    from sqlalchemy import func
+    from reportagent.models.database import Report
+
+    return func.coalesce(Report.announced_at, Report.published_date)
+
+
+def is_publication_in_range(paper, start: datetime, end: datetime) -> bool:
+    """Use one announcement/publication eligibility rule for collection and delivery."""
+    stamp = publication_time(paper)
+    if stamp is None:
         return False
-    if published.tzinfo is None:
-        published = published.replace(tzinfo=timezone.utc)
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
     if end.tzinfo is None:
         end = end.replace(tzinfo=timezone.utc)
-    return start <= published < end
+    return start <= stamp < end
 
 
 def is_daily_publication(paper, *, report_date: str | None = None) -> bool:

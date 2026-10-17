@@ -15,7 +15,7 @@
 
 `llm.thinking` 控制 Python Anthropic 兼容请求的思考模式；当前 DeepSeek 结构化流程设为
 `disabled`，避免分类预算被思考内容耗尽。单次调用可显式覆盖；OpenAI 路径不传此参数。
-`daily_collection.enabled` 和 `daily_report.enabled` 默认分别开启，调度器由 Web 后端承载；单独启动飞书机器人不会启动调度器。默认每天北京时间 08:00 多来源采集入库，09:00 从论文库生成日报，周末也执行。两项开关独立，`schedule_cron` 为 `HH:MM`；`daily_collection.lookback_days: 3` 从 UTC 当天往前 3 天零点起采集，用于回查可能延迟收录的来源条目，与报告范围独立。日/周报固定以报告当天北京时间 08:00 为截止点，分别查询此前 24/168 小时内发表且日期明确到日的资料，按 `published_date` 筛选，与入库时间无关；包含起点、不含截止点，边界统一转换成 UTC 后查库。修改任务执行时间不会自动改变这个报告截止点。日/周报不调用采集，不记录逐篇已推送标记。
+`daily_collection.enabled` 和 `daily_report.enabled` 默认分别开启，调度器由 Web 后端承载；单独启动飞书机器人不会启动调度器。默认每天北京时间 08:00 多来源采集入库，09:00 从论文库生成日报，周末也执行。两项开关独立，`schedule_cron` 为 `HH:MM`。自动采集与日报共用报告当天北京时间 08:00 前 24 小时的公告窗口，`max_results_per_source=None` 表示完整枚举；不再配置候选数量或独立3天回查窗口。周报查询同一截止点前 168 小时的库中公告。均包含起点、不含截止点，与入库时间无关；修改任务执行时间不会自动改变 08:00 报告截止点。在线报告按独立持久化的 `announced_at` 筛选，原始 `published_date` 不改写；缺少精确公告时间的来源提示证据不足。arXiv RSS 仅有最近批次，过期或无法覆盖所需窗口时记录部分完成。日/周报不调用采集，不记录逐篇已推送标记。
 
 Web 的监听地址与端口由 `ALPHAREPORT_BIND_HOST`、`ALPHAREPORT_PORT` 环境变量控制。
 部署检查与运行时共用 `feishu.app_id_env`、`feishu.app_secret_env` 和 `llm.api_key_env` 的凭据配置；更换模型服务时不额外要求 DeepSeek 专属密钥。

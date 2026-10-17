@@ -109,6 +109,8 @@ class ArxivSource(BaseSource):
 
     async def search(self, criteria: UserCriteria) -> list[SearchResult]:
         """Standard keyword-based search (existing behavior)."""
+        if criteria.date_basis == "announcement":
+            return await self.search_announcements(criteria)
         self._start_search()
         query = self._build_query(criteria)
         if not query:
@@ -124,6 +126,8 @@ class ArxivSource(BaseSource):
 
         Reference: QuantPaper/LLMQuant monitors q-fin.* + cs.LG + cs.AI + stat.ML + math.OC
         """
+        if criteria.date_basis == "announcement":
+            return await self.search_announcements(criteria)
         self._start_search()
         # All 9 q-fin subcategories
         qfin_cats = [
@@ -165,6 +169,39 @@ class ArxivSource(BaseSource):
         query = f"({cat_query}) OR ({cross_query})"
         logger.info("Broad search query: %s", query[:200])
         return await self._do_search(query, criteria)
+
+    async def search_announcements(self, criteria: UserCriteria) -> list[SearchResult]:
+        """Read the latest official announcement batches before relevance screening.
+
+        Relevance selection belongs to the caller; metadata-only collection sets
+        download_pdfs=False so only accepted papers are subsequently hydrated.
+        """
+        from reportagent.sources.arxiv_announcements import fetch_announcements
+
+        self._start_search()
+        partial_results: list[SearchResult] = []
+        try:
+            await fetch_announcements(
+                criteria,
+                diagnostics=self.last_search,
+                partial_results=partial_results,
+                rate_limit_seconds=self.rate_limit_seconds,
+            )
+        except Exception as error:
+            self.last_search.record_error(error, "RSS search; coverage incomplete")
+        results = deduplicate_results(partial_results)
+        limit = criteria.max_results_per_source
+        if limit is not None and len(results) > limit:
+            self.last_search.record_error(
+                SourceParseError(
+                    "announcement result limit truncates requested coverage"
+                ),
+                "RSS search",
+            )
+            results = results[:limit]
+        if self.download_pdfs and results:
+            results = await self._download_and_parse_pdfs(results)
+        return results
 
     async def _do_search(
         self, query: str, criteria: UserCriteria
@@ -394,7 +431,7 @@ class ArxivSource(BaseSource):
     def _execute_search(
         self,
         query: str,
-        max_results: int,
+        max_results: int | None,
         sort_by_date: bool = False,
         partial_results: list[SearchResult] | None = None,
         stop: Event | None = None,
@@ -409,14 +446,16 @@ class ArxivSource(BaseSource):
         # Parse actual responses here: the SDK silently skips some malformed entries
         # but raises on others, losing their valid siblings and hiding raw counts.
         with httpx.Client(timeout=30.0, follow_redirects=True) as client:
-            while offset < max_results and not stop.is_set():
+            while (max_results is None or offset < max_results) and not stop.is_set():
                 try:
                     response = client.get(
                         "https://export.arxiv.org/api/query",
                         params={
                             "search_query": query,
                             "start": offset,
-                            "max_results": min(100, max_results - offset),
+                            "max_results": min(100, max_results - offset)
+                            if max_results is not None
+                            else 100,
                             "sortBy": "submittedDate" if sort_by_date else "relevance",
                             "sortOrder": "descending",
                         },
@@ -453,7 +492,11 @@ class ArxivSource(BaseSource):
                     # Advance by raw entries, including invalid ones, so a bad item
                     # cannot shift subsequent pages or cause an endless retry loop.
                     offset += len(entries)
-                    if not entries or offset >= int(total) or offset >= max_results:
+                    if (
+                        not entries
+                        or offset >= int(total)
+                        or (max_results is not None and offset >= max_results)
+                    ):
                         break
                     stop.wait(self.rate_limit_seconds)
                 except Exception as error:

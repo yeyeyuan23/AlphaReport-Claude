@@ -40,6 +40,8 @@ def stored_snapshot(row):
         "abstract",
         "arxiv_id",
         "source_url",
+        "announced_at",
+        "announcement_info_json",
         "source_item_id",
         "doi",
         "full_text",

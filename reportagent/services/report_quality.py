@@ -325,6 +325,8 @@ async def review_report_ids(
         "selection_provenance_json",
         "source_url",
         "published_date",
+        "announced_at",
+        "announcement_info_json",
         "pdf_path",
         "tables_json",
         "equations_json",

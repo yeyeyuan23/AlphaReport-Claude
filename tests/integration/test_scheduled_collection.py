@@ -31,10 +31,15 @@ def test_scheduled_collection_saves_source_results_without_generating_reports(
         }
     ]
 
-    async def collect(options):
-        assert options.sources == "arxiv,eastmoney,bigquant"
-        assert options.no_analysis is True and options.broad is True
-        assert options.days == 3 and options.max_results == 15
+    async def collect(options, **kwargs):
+        assert [source.value for source in options.sources] == [
+            "arxiv",
+            "eastmoney",
+            "bigquant",
+        ]
+        assert kwargs == {"no_analysis": True, "broad": True}
+        assert options.max_results_per_source is None
+        assert options.date_basis == "announcement" and options.date_to_exclusive
         if outcome == "exception":
             raise RuntimeError("temporary source failure")
         return {"status": outcome, "source_statuses": statuses, "storage": {"added": 0}}
