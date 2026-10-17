@@ -17,10 +17,7 @@ from reportagent.models.schemas import (
     ClassifiedReport,
     ClassificationResult,
 )
-from reportagent.sources.arxiv_source import ArxivSource
-from reportagent.sources.eastmoney_source import EastMoneySource
-from reportagent.sources.bigquant_source import BigQuantSource
-from reportagent.sources.local_pdf import LocalPDFSource
+from reportagent.sources import factory as source_factory
 from reportagent.sources.base import (
     SearchDiagnostics,
     SourceParseError,
@@ -37,7 +34,6 @@ from reportagent.classifiers.quant_filter import is_quant_finance
 from reportagent.llm.client import LLMClient
 from reportagent.db.engine import init_db, get_session_factory
 from reportagent.db.repository import ReportRepository
-from reportagent.utils.config import get_config
 
 logger = logging.getLogger("collect")
 
@@ -89,20 +85,8 @@ async def classify_for_storage(sr, classifier, llm_classifier, errors):
 
 
 def build_sources(source_names: list[str]) -> list:
-    sources = []
-    for name in source_names:
-        if name == "arxiv":
-            sources.append(ArxivSource())
-        elif name == "eastmoney":
-            sources.append(EastMoneySource())
-        elif name == "bigquant":
-            sources.append(BigQuantSource())
-        elif name == "local_pdf":
-            lib_path = get_config(
-                "sources", "local_pdf", "library_path", default="data/pdf_library"
-            )
-            sources.append(LocalPDFSource(str(Path(lib_path))))
-    return sources
+    """Compatibility adapter for explicitly selected collection sources."""
+    return source_factory.build_sources(source_names)
 
 
 async def collect_reports(options: CollectionOptions) -> dict:
