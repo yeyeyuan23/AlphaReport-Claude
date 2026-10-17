@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import json
+from time import monotonic
 
 from reportagent.classifiers.taxonomy import load_taxonomy
 from reportagent.classifiers.provenance import input_fingerprint
@@ -31,15 +32,72 @@ class ClassificationEvidenceError(ValueError):
     """The model supplied no attributable labels; rule guesses are not a repair."""
 
 
+class ClassificationValidationError(ValueError):
+    """A bounded description of a model response field, safe for diagnostics."""
+
+    def __init__(self, field: str, expected: str, actual):
+        value = json.dumps(actual, ensure_ascii=False, default=lambda _: "<object>")
+        super().__init__(f"{field}: expected {expected}; received {value[:300]}")
+
+
+def classification_error_detail(error: Exception) -> str:
+    # Arbitrary SDK exceptions may include credentials or transport URLs.
+    if isinstance(error, (ClassificationValidationError, ClassificationEvidenceError)):
+        return f"{type(error).__name__}: {error}"
+    return type(error).__name__
+
+
 class LLMClassifier:
     def __init__(self, llm_client: LLMClient):
         self.llm_client = llm_client
 
     async def classify(self, title: str, text: str) -> ClassificationResult:
+        started = monotonic()
+        messages = self._messages(title, text)
+        logger.info(
+            "Classification start title=%r input_sha256=%s model=%s",
+            title[:160],
+            input_fingerprint(title, text),
+            getattr(self.llm_client, "model", "unknown"),
+        )
+        try:
+            result = await self.llm_client.chat_json(messages)
+            result, parsed = await self._parse_with_schema_repair(
+                messages, result, title, text
+            )
+            if parsed.provenance["rejected_labels"]:
+                parsed = await self._repair_quotes(
+                    messages, result, parsed, title, text
+                )
+            logger.info(
+                "Classification completed title=%r input_sha256=%s elapsed_s=%.3f labels=%s",
+                title[:160],
+                input_fingerprint(title, text),
+                monotonic() - started,
+                sorted(parsed.provenance["labels"]),
+            )
+            return parsed
+        except Exception as error:
+            logger.warning(
+                "Classification failed title=%r input_sha256=%s elapsed_s=%.3f: %s",
+                title[:160],
+                input_fingerprint(title, text),
+                monotonic() - started,
+                classification_error_detail(error),
+            )
+            raise
+
+    def _messages(self, title: str, text: str) -> list[dict]:
         taxonomy = load_taxonomy()
         taxonomy_desc = self._format_taxonomy(taxonomy)
 
+        allowed = {
+            field: [entry.value for entry in enum] for field, enum in _ENUM_MAP.items()
+        }
         prompt = (
+            "以下是返回字段与允许值的完整映射，必须原样使用机器值，不得自造同义词（如 high_freq）：\n"
+            + json.dumps(allowed, ensure_ascii=False)
+            + "\n\n"
             f"## 分类维度与可选值\n{taxonomy_desc}\n\n"
             f"## 研报标题\n{title}\n\n"
             f"## 研报分类材料（原文摘要，缺失时使用注明来源的引言）\n{text}\n\n"
@@ -58,68 +116,103 @@ class LLMClassifier:
             "缺少直接证据的标签不要返回。引文不得改写、翻译或拼接。\n"
         )
 
-        try:
-            messages = [
+        return [
+            {
+                "role": "system",
+                "content": skill_resource(
+                    "daily-quant-scan", "classification.md"
+                ).read_text(encoding="utf-8"),
+            },
+            {"role": "user", "content": prompt},
+        ]
+
+    async def _request_repair(self, messages, result, instruction):
+        return await self.llm_client.chat_json(
+            messages
+            + [
                 {
-                    "role": "system",
-                    "content": skill_resource(
-                        "daily-quant-scan", "classification.md"
-                    ).read_text(encoding="utf-8"),
+                    "role": "assistant",
+                    "content": json.dumps(result, ensure_ascii=False),
                 },
-                {"role": "user", "content": prompt},
+                {"role": "user", "content": instruction},
             ]
-            result = await self.llm_client.chat_json(messages)
-            parsed = self._parse_result(result, title, text)
-            rejected = parsed.provenance["rejected_labels"]
-            if rejected:
-                # One bounded repair, with the original source still in context.
-                # Never loosen matching or accept a hallucinated quote on retry.
-                parsed.provenance.update(
-                    repair_attempted=True, initial_rejected_labels=rejected
+        )
+
+    async def _parse_with_schema_repair(self, messages, result, title, text):
+        try:
+            return result, self._parse_result(result, title, text)
+        except ClassificationValidationError as error:
+            detail = classification_error_detail(error)
+            logger.warning(
+                "Classification schema repair title=%r input_sha256=%s: %s",
+                title[:160],
+                input_fingerprint(title, text),
+                detail,
+            )
+        # Only response shape/taxonomy errors get one correction. Never turn an
+        # SDK error into a format repair or relax the original evidence checks.
+        corrected = await self._request_repair(
+            messages,
+            result,
+            "分类 JSON 未通过字段校验："
+            + detail
+            + "。请对照原始字段与允许值返回完整 JSON。枚举必须原样使用，不能自造同义词；"
+            "只保留原文直接支持的标签及连续引文。没有合适类别就留空。",
+        )
+        parsed = self._parse_result(corrected, title, text)
+        parsed.provenance.update(
+            schema_repair_status="completed", initial_schema_error=detail
+        )
+        return corrected, parsed
+
+    async def _repair_quotes(self, messages, result, parsed, title, text):
+        rejected = parsed.provenance["rejected_labels"]
+        parsed.provenance.update(
+            repair_attempted=True, initial_rejected_labels=rejected
+        )
+        try:
+            repaired = await self._request_repair(
+                messages,
+                result,
+                "以下标签的引文无法在指定来源中准确定位，或不含实质内容："
+                + json.dumps(rejected, ensure_ascii=False)
+                + "。请返回完整分类 JSON。仅修正证据为真实的连续原文（保留断行、连字符和大小写），"
+                "或删除确无支持的标签；不得新增标签。优先选择足够支持判断的简短引文。",
+            )
+            corrected = self._parse_result(repaired, title, text)
+            original = {
+                f"{field}.{value}"
+                for field in (*_ENUM_MAP, "custom_tags")
+                for value in result[field]
+            }
+            if not set(corrected.provenance["labels"]).issubset(original):
+                raise ClassificationValidationError(
+                    "quote_repair.labels",
+                    "a subset of original labels",
+                    sorted(corrected.provenance["labels"]),
                 )
-                try:
-                    repaired = await self.llm_client.chat_json(
-                        messages
-                        + [
-                            {
-                                "role": "assistant",
-                                "content": json.dumps(result, ensure_ascii=False),
-                            },
-                            {
-                                "role": "user",
-                                "content": "以下标签的引文无法在指定来源中准确定位，或不含实质内容："
-                                + json.dumps(rejected, ensure_ascii=False)
-                                + "。请返回完整分类 JSON。仅修正证据为真实的连续原文（保留断行、连字符和大小写），"
-                                "或删除确无支持的标签；不得新增标签。优先选择足够支持判断的简短引文。",
-                            },
-                        ]
-                    )
-                    corrected = self._parse_result(repaired, title, text)
-                    # A quote repair cannot introduce unrelated new labels.
-                    original = {
-                        f"{field}.{value}"
-                        for field in (*_ENUM_MAP, "custom_tags")
-                        for value in result[field]
-                    }
-                    if not set(corrected.provenance["labels"]).issubset(original):
-                        raise ValueError("Quote repair introduced new labels")
-                    corrected.provenance.update(
-                        repair_attempted=True,
-                        initial_rejected_labels=rejected,
-                        repair_status="partial"
-                        if corrected.provenance["rejected_labels"]
-                        else "completed",
-                    )
-                    parsed = corrected
-                except Exception as error:
-                    logger.warning(
-                        "Classification quote repair failed: %s", type(error).__name__
-                    )
-                    parsed.provenance["repair_status"] = "failed"
+            corrected.provenance.update(
+                **{
+                    key: value
+                    for key, value in parsed.provenance.items()
+                    if key in {"schema_repair_status", "initial_schema_error"}
+                },
+                repair_attempted=True,
+                initial_rejected_labels=rejected,
+                repair_status="partial"
+                if corrected.provenance["rejected_labels"]
+                else "completed",
+            )
+            return corrected
+        except Exception as error:
+            logger.warning(
+                "Classification quote repair failed title=%r input_sha256=%s: %s",
+                title[:160],
+                input_fingerprint(title, text),
+                classification_error_detail(error),
+            )
+            parsed.provenance["repair_status"] = "failed"
             return parsed
-        except Exception as e:
-            logger.warning("LLM classification failed: %s", type(e).__name__)
-            raise
 
     def _format_taxonomy(self, taxonomy: dict) -> str:
         lines = []
@@ -135,19 +228,23 @@ class LLMClassifier:
 
     def _parse_result(self, data: dict, title: str, text: str) -> ClassificationResult:
         if not isinstance(data, dict):
-            raise ValueError("Classification must be an object")
+            raise ClassificationValidationError("response", "an object", data)
         for field, enum_cls in _ENUM_MAP.items():
             values = data.get(field)
             valid = {entry.value for entry in enum_cls}
             if not isinstance(values, list) or any(
                 not isinstance(v, str) or v not in valid for v in values
             ):
-                raise ValueError(f"{field} must contain only valid taxonomy values")
+                raise ClassificationValidationError(
+                    field, f"a list drawn from {sorted(valid)}", values
+                )
         custom_tags = data.get("custom_tags")
         if not isinstance(custom_tags, list) or any(
             not isinstance(v, str) or not v.strip() for v in custom_tags
         ):
-            raise ValueError("custom_tags must be a list of nonempty strings")
+            raise ClassificationValidationError(
+                "custom_tags", "a list of nonempty strings", custom_tags
+            )
         if not custom_tags and not any(data[field] for field in _ENUM_MAP):
             raise ClassificationEvidenceError(
                 "Model returned no usable classification evidence; existing tags must be retained"
@@ -159,7 +256,9 @@ class LLMClassifier:
             or not math.isfinite(confidence)
             or not 0 <= confidence <= 1
         ):
-            raise ValueError("confidence must be a finite number between 0 and 1")
+            raise ClassificationValidationError(
+                "confidence", "a finite number between 0 and 1", confidence
+            )
         # Verify that every label has an actual quote in the material supplied to
         # this call. This checks attribution, not semantic entailment: category
         # boundaries and the reason are still assessed by the model and review.

@@ -29,6 +29,8 @@ from reportagent.classifiers.provenance import classification_material, failed_a
 from reportagent.classifiers.llm_classifier import (
     LLMClassifier,
     ClassificationEvidenceError,
+    ClassificationValidationError,
+    classification_error_detail,
 )
 from reportagent.classifiers.quant_filter import is_quant_finance
 from reportagent.llm.client import LLMClient
@@ -74,16 +76,35 @@ async def classify_for_storage(
     if llm_classifier:
         try:
             classification = await llm_classifier.classify(title, abstract)
-        except ClassificationEvidenceError:
+        except ClassificationEvidenceError as error:
+            logger.warning(
+                "Classification evidence invalid source=%s arxiv_id=%s title=%r: %s",
+                sr.source,
+                sr.arxiv_id,
+                title[:160],
+                classification_error_detail(error),
+            )
             errors.append("classification evidence invalid; retry required")
             error_kind = "invalid_evidence"
             classification = ClassificationResult(
                 method="unverified", provenance={"status": "unverified"}
             )
         except Exception as error:
-            logger.warning("Classification fallback: %s", type(error).__name__)
+            detail = classification_error_detail(error)
+            logger.warning(
+                "Classification fallback source=%s arxiv_id=%s title=%r: %s",
+                sr.source,
+                sr.arxiv_id,
+                title[:160],
+                detail,
+            )
+            stage = (
+                f"classification failed; retry required ({sr.arxiv_id or title[:80]})"
+            )
             errors.append(
-                safe_source_error(error, "classification failed; retry required")
+                f"{stage}: {detail}"
+                if isinstance(error, ClassificationValidationError)
+                else safe_source_error(error, stage)
             )
             error_kind = "model_error"
             classification = classifier.classify(title, abstract)
