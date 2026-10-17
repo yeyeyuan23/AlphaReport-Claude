@@ -88,7 +88,6 @@ def test_reachable_private_network_addresses_are_allowed(deployment, monkeypatch
         "FEISHU_APP_ID",
         "FEISHU_APP_SECRET",
         "FEISHU_ALLOWED_OPEN_IDS",
-        "DEEPSEEK_API_KEY",
     ],
 )
 def test_missing_bot_configuration_fails_before_startup(deployment, monkeypatch, name):
@@ -106,4 +105,41 @@ def test_missing_chat_runtime_is_reported(deployment, monkeypatch):
 def test_python_model_configuration_is_checked_too(deployment, monkeypatch):
     monkeypatch.setattr(deployment, "get_llm_api_key", lambda: "")
     with pytest.raises(ValueError, match="llm"):
+        deployment.check_deployment()
+
+
+def test_deployment_uses_runtime_credential_names_without_requiring_deepseek(
+    deployment, monkeypatch
+):
+    from reportagent.services import feishu_transport
+
+    monkeypatch.setattr(
+        feishu_transport,
+        "get_config",
+        lambda *args, **kwargs: {
+            "app_id_env": "CUSTOM_FEISHU_ID",
+            "app_secret_env": "CUSTOM_FEISHU_SECRET",
+        },
+    )
+    for name in ("FEISHU_APP_ID", "FEISHU_APP_SECRET", "DEEPSEEK_API_KEY"):
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("CUSTOM_FEISHU_ID", "configured-app")
+    monkeypatch.setenv("CUSTOM_FEISHU_SECRET", "configured-secret")
+    assert deployment.check_deployment() == "https://research.example"
+
+
+def test_deployment_rejects_blank_custom_credentials(deployment, monkeypatch):
+    from reportagent.services import feishu_transport
+
+    monkeypatch.setattr(
+        feishu_transport,
+        "get_config",
+        lambda *args, **kwargs: {
+            "app_id_env": "CUSTOM_FEISHU_ID",
+            "app_secret_env": "CUSTOM_FEISHU_SECRET",
+        },
+    )
+    monkeypatch.setenv("CUSTOM_FEISHU_ID", "   ")
+    monkeypatch.setenv("CUSTOM_FEISHU_SECRET", "configured-secret")
+    with pytest.raises(ValueError, match="CUSTOM_FEISHU_ID"):
         deployment.check_deployment()

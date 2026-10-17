@@ -10,17 +10,22 @@ from reportagent.utils.config import get_config
 CHUNK_BYTES = 7000
 
 
-def _get_credentials() -> tuple[str, str]:
+def credential_names() -> tuple[str, str]:
     config = get_config("feishu", default={})
     return (
-        os.environ.get(config.get("app_id_env", "FEISHU_APP_ID"), ""),
-        os.environ.get(config.get("app_secret_env", "FEISHU_APP_SECRET"), ""),
+        config.get("app_id_env", "FEISHU_APP_ID"),
+        config.get("app_secret_env", "FEISHU_APP_SECRET"),
     )
+
+
+def _get_credentials() -> tuple[str, str]:
+    app_id_env, app_secret_env = credential_names()
+    return os.environ.get(app_id_env, ""), os.environ.get(app_secret_env, "")
 
 
 def is_configured() -> bool:
     app_id, app_secret = _get_credentials()
-    return bool(app_id and app_secret)
+    return bool(app_id.strip() and app_secret.strip())
 
 
 def build_client(app_id=None, app_secret=None):

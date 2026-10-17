@@ -8,6 +8,7 @@ import sys
 from urllib.parse import urlsplit
 
 from reportagent.utils.config import get_llm_api_key
+from reportagent.services.feishu_transport import credential_names, is_configured
 
 
 def check_deployment() -> str:
@@ -44,15 +45,15 @@ def check_deployment() -> str:
                 raise ValueError(message)
     except ValueError:
         raise ValueError(message) from None
-    for name in (
-        "FEISHU_APP_ID",
-        "FEISHU_APP_SECRET",
-        "FEISHU_ALLOWED_OPEN_IDS",
-        "DEEPSEEK_API_KEY",
-    ):
-        if not os.environ.get(name, "").strip():
-            raise ValueError(f"缺少 {name}，请在部署使用的环境变量文件中填写。")
-    if not get_llm_api_key():
+    if not is_configured():
+        raise ValueError(
+            f"缺少 {' / '.join(credential_names())}，请按 configs/app.yaml 配置飞书应用凭据。"
+        )
+    if not os.environ.get("FEISHU_ALLOWED_OPEN_IDS", "").strip():
+        raise ValueError(
+            "缺少 FEISHU_ALLOWED_OPEN_IDS，请在部署使用的环境变量文件中填写。"
+        )
+    if not get_llm_api_key().strip():
         raise ValueError("configs/app.yaml 的 llm.api_key_env 对应的模型密钥未配置。")
     if not shutil.which("claude"):
         raise ValueError("缺少 Claude Code，无法处理飞书普通聊天，请重新构建镜像。")

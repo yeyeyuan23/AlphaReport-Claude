@@ -19,6 +19,7 @@
 `daily_collection.enabled` 和 `daily_report.enabled` 默认分别开启，调度器由 Web 后端承载；单独启动飞书机器人不会启动调度器。默认每天北京时间 08:00 多来源采集入库，09:00 从论文库生成日报，周末也执行。两项开关独立，`schedule_cron` 为 `HH:MM`；`daily_collection.lookback_days: 3` 从 UTC 当天往前 3 天零点起采集，用于回查可能延迟收录的来源条目，与报告范围独立。日报按北京时间当日 `created_at` 查询新增，周报按最近 7 个北京时间日期（含当天）的 `published_date` 查询；报告的日期边界统一转换成 UTC 后查库。日/周报不调用采集，不记录逐篇已推送标记。
 
 Web 的监听地址与端口由 `ALPHAREPORT_BIND_HOST`、`ALPHAREPORT_PORT` 环境变量控制。
+部署检查与运行时共用 `feishu.app_id_env`、`feishu.app_secret_env` 和 `llm.api_key_env` 的凭据配置；更换模型服务时不额外要求 DeepSeek 专属密钥。
 `push_directions.yaml` 中实际生效的 `push_settings` 包括：相关性阈值 `llm_filter_threshold`、
 日报评分批量 `llm_batch_size`、日/周报共用的新全文评估预算 `max_reviews` 和日报重点推荐数 `max_featured`。
 `max_reviews` 省略或为 `null` 时，日/周报默认评估所有符合条件且需更新的论文；

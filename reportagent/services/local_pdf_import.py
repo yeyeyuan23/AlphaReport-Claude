@@ -17,7 +17,7 @@ from reportagent.models.database import LocalPDFImport, Report
 from reportagent.models.schemas import UserCriteria
 from reportagent.services.collection import classify_for_storage
 from reportagent.sources.base import SourceParseError, safe_source_error
-from reportagent.sources.local_pdf import LocalPDFSource
+from reportagent.sources.local_pdf import LocalPDFSource, pdf_files
 from reportagent.utils.config import PROJECT_ROOT, get_config, get_db_path
 
 logger = logging.getLogger(__name__)
@@ -32,11 +32,7 @@ def _file_hash(path: Path) -> str:
 
 
 async def _scan(root: Path, result: dict):
-    files = await asyncio.to_thread(
-        lambda: sorted(
-            p for p in root.rglob("*") if p.is_file() and p.suffix.lower() == ".pdf"
-        )
-    )
+    files = await asyncio.to_thread(pdf_files, root)
     result["scanned"] = len(files)
     source = LocalPDFSource(str(root))
     criteria = UserCriteria(topics=["量化金融"])

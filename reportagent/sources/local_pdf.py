@@ -20,6 +20,15 @@ _mineru_parser = None
 _docling_parser = None
 
 
+def pdf_files(root: Path) -> list[Path]:
+    """One inventory for explicit collection and incremental startup imports."""
+    return sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix.lower() == ".pdf"
+    )
+
+
 def _get_mineru_parser():
     global _mineru_parser
     if _mineru_parser is None:
@@ -72,12 +81,12 @@ class LocalPDFSource(BaseSource):
             return []
 
         results = []
-        pdf_files = sorted(scan_dir.rglob("*.pdf"))
+        files = await asyncio.to_thread(pdf_files, scan_dir)
 
-        if not pdf_files:
+        if not files:
             self.last_search.successful_requests += 1
 
-        for pdf_file in pdf_files:
+        for pdf_file in files:
             self.last_search.fetched += 1
             try:
                 result = await asyncio.to_thread(self._process_pdf, pdf_file, criteria)
