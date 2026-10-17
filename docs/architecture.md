@@ -118,13 +118,13 @@ arXiv 公告模式由 `arxiv_catalog` 解析官网 `/list/<category>/recent` 的
 - **日报**：`daily_push` 按来源 `announced_at` 读取报告当天北京时间 08:00 前 24 小时公开发布的在线资料，复用采集时保存的有效相关性评分，按方向轮流处理候选；
   只读取已保存且当前有效的全文评估，缺失或过期显示待评估；随后按 `daily-report/briefing.md` 渲染，最多重点推荐 5 篇。
   来源覆盖读取最近定时采集记录，不能说成本次在线检查；过程锁和 `ReportRun` 记录本次运行。
-- **周报**：`weekly_report` 按同一来源 `announced_at` 查询报告当天北京时间 08:00 前 168 小时公开发布的库中在线资料，复用采集筛选和已保存全文评估，使用 `weekly_briefing` 和 `weekly-report/briefing.md` 独立排版：先按研究方向归纳已保存的研究发现摘录，再按北京时间公告日期倒序紧凑展示全部达标重点论文，不使用日报的5篇展示上限。每篇保留选读理由、质量标签、主要局限和链接，其他论文及待核验项置后。
-  不调用模型或补取全文，未完成评估的条目保留待核验。
+- **周报**：`weekly_report` 按同一来源 `announced_at` 查询报告当天北京时间 08:00 前 168 小时公开发布的库中在线资料，复用采集筛选和已保存全文评估，使用 `weekly_briefing` 和 `weekly-report/briefing.md` 独立排版：先将各方向全部有效评估交给配置的 DeepSeek 用一段精炼总结综合研究发现、差异与局限，并附对应论文链接。正文不再重复列出重点推荐或其他可浏览论文清单，待核验项置后；概览仍统计已保存的推荐结果。
+  不补取全文或重新评估论文，未完成评估的条目保留待核验。模型总结使用 `weekly-report/synthesis.md`；引用必须来自对应方向并覆盖全部输入论文，失败时显示明确说明并逐篇列出发现和链接，不改变推荐判断。
 - **采集后全文评估**：`scheduled_collection` 在入库后调用 `collection_reviews`，
   处理当前相关性达标的在线论文；有效评估直接复用，缺失、失败、过期或此前预算未覆盖的条目在后续采集中继续处理。
   单篇失败不回滚已入库论文，也不阻塞其余论文。来源采集与全文评估分别记录状态与耗时，评估不完整不冒充来源覆盖不足。
   `daily_collection.max_reviews` 省略或 `null` 时不限，正整数只计新模型调用；缺全文项不占预算。
-  日/周报均不调用模型或补下载，缺失评估显示待核验。`report_periods` 以北京时间08:00为截止点生成24/168小时的 `[start, end)` 窗口。
+  日/周报均不重新评估或补下载，缺失评估显示待核验；周报仅额外调用模型综合已有评估。`report_periods` 以北京时间08:00为截止点生成24/168小时的 `[start, end)` 窗口。
   单篇全文评估保留240秒时限，下载、解析和模型请求各有超时保护。
 - **报告投递**：日/周报只读已保存资料和评估，不采集或补下载。
   日/周报每次执行都按本期资料生成内容，重复执行会再次发送。
@@ -215,7 +215,7 @@ Web 中三项定时任务独立配置：`daily_collection` 默认每天北京时
 ### 采集补跑与报告预览
 
 默认自动采集与日报由 Web 调度，CLI 用于部署者补跑或聊天按需调用；
-日/周报的 `--dry-run` 不调用模型，仅生成已保存资料的预览；其他分析类维护命令仍可能消耗模型额度。
+日/周报的 `--dry-run` 默认不调用模型，仅生成已保存资料的预览；周报可加 `--with-summary` 调用配置的 DeepSeek 生成总结预览（消耗额度，不发送）。正式周报默认生成模型总结。其他分析类维护命令仍可能消耗模型额度。
 
 ```bash
 # 按当前部署配置补跑同一采集任务；会联网、筛选、分类、下载入库并完成全文评估
@@ -229,6 +229,8 @@ Web 中三项定时任务独立配置：`daily_collection` 默认每天北京时
 # 周报仅读缓存的模板预览；weeks-ago 每增加1，将7天窗口前移7天
 .venv/bin/python -m reportagent.cli.weekly_report --dry-run --output data/weekly-preview.md
 .venv/bin/python -m reportagent.cli.weekly_report --weeks-ago 1 --dry-run
+# 调用 DeepSeek 生成真实总结预览，不推送
+.venv/bin/python -m reportagent.cli.weekly_report --dry-run --with-summary --output data/weekly-summary-preview.md
 ```
 
 日报的 `--report-ids` 是显式检查已选论文，仅跳过摘要相关性候选限制，仍须满足报告当天北京时间 08:00 前 24 小时的来源公告窗口，

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import asyncio
 import json
 import logging
 import os
@@ -44,6 +45,7 @@ UI_BASE_URL = get_web_base_url()
 @dataclass(frozen=True)
 class WeeklyReportOptions:
     dry_run: bool = False
+    with_summary: bool = False
     weeks_ago: int = 0
     receive_ids: str = ""
     receive_type: str = ""
@@ -130,9 +132,14 @@ def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
 
 
 def generate_weekly_report(
-    papers: list[dict], week_start: str, week_end: str, *, publication_window: str = ""
+    papers: list[dict],
+    week_start: str,
+    week_end: str,
+    *,
+    publication_window: str = "",
+    summarize: bool = False,
 ) -> str:
-    """Render current saved assessments; never generate a second research judgment."""
+    """Synthesize saved assessments without changing their quality judgments."""
     checked = []
     for paper in papers:
         p = dict(paper)
@@ -157,11 +164,22 @@ def generate_weekly_report(
             )
         p["evaluation"] = evaluation
         checked.append(p)
+    summaries, notice = None, ""
+    if summarize:
+        from reportagent.services.weekly_synthesis import synthesize_weekly
+
+        try:
+            summaries = asyncio.run(synthesize_weekly(checked))
+        except Exception as error:
+            logger.warning("Weekly synthesis unavailable: %s", type(error).__name__)
+            notice = "模型总结未生成；以下逐篇展示已有研究发现与依据。"
     return render_briefing(
         checked,
         f"{week_start} ~ {week_end}",
         template_skill="weekly-report",
         publication_window=publication_window,
+        weekly_summaries=summaries,
+        summary_notice=notice,
     )
 
 
@@ -262,6 +280,7 @@ def run_weekly_report(options: WeeklyReportOptions) -> dict:
         start_label,
         end_label,
         publication_window=format_publication_window(week_start, week_end),
+        summarize=not options.dry_run or options.with_summary,
     )
     if options.output:
         output = Path(options.output)

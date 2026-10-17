@@ -121,7 +121,7 @@ def test_weekly_uses_verified_qualifiers_without_new_model_generation():
     assert "量化研究周报" in result
     assert "只有温度充分小时才保持凸性" in result
     assert "重点推荐 1 篇" in result
-    assert p["source_url"] in result
+    assert p["ui_url"] in result
 
 
 def test_stale_evidence_cannot_be_featured_after_text_changes():
@@ -267,7 +267,7 @@ def test_collection_review_does_not_rescore_stale_relevance(library, monkeypatch
     assert result["review_ids"] == []
 
 
-def test_weekly_groups_all_recommendations_by_beijing_announcement_day():
+def test_weekly_direction_updates_include_every_paper_without_recommendation_lists():
     papers = [
         assessed(
             paper(
@@ -289,8 +289,8 @@ def test_weekly_groups_all_recommendations_by_beijing_announcement_day():
     assert (
         "重点推荐 8 篇" in text
     )  # Weekly compact recommendations are not capped at daily's five.
-    assert text.index("### 2026-10-16") < text.index("### 2026-10-15")
-    assert "### 2021-01-01" not in text
-    assert all(text.count(f"**研究{i}**") == 1 for i in range(1, 8))
+    assert "## 本周重点推荐" not in text
+    assert "## 其他可浏览论文" not in text
+    assert all(text.count(f"http://localhost/library/{i})") == 1 for i in range(1, 9))
     assert "**方法与发现**" not in text and "**阅读建议**" not in text
     assert "作者证明：只有温度充分小时才保持凸性，过大时可能失去凸性。" in text

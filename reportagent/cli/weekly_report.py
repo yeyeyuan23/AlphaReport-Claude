@@ -8,6 +8,11 @@ def main():
     parser = argparse.ArgumentParser(description="Weekly Report — 每周论文周报推送")
     parser.add_argument("--dry-run", action="store_true", help="预览模式，不实际推送")
     parser.add_argument(
+        "--with-summary",
+        action="store_true",
+        help="预览时也调用配置的模型生成周报总结（消耗模型额度）",
+    )
+    parser.add_argument(
         "--weeks-ago",
         type=int,
         default=0,

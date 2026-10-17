@@ -50,3 +50,28 @@ def test_native_section_breaks_preserve_long_papers_and_fenced_headings():
     assert "```text\n## 代码中的标题\n```" in elements[0]["content"]
     assert elements[1] == {"tag": "hr"}
     assert elements[2]["content"] == "**来源覆盖**\n正常"
+
+
+def test_optimal_value_asterisks_do_not_turn_intervening_prose_italic():
+    source = "**方法与发现**：期货价格m*由零价值条件确定，作者给出显式收缩界；误差至多为10−3(X0−m*)。"
+    assert (
+        card_markdown(source)
+        == "**方法与发现**：期货价格m∗由零价值条件确定，作者给出显式收缩界；误差至多为10−3(X0−m∗)。"
+    )
+    assert "m*" in source  # The saved assessment is not rewritten.
+
+
+def test_math_star_conversion_preserves_intentional_formatting_code_and_urls():
+    source = (
+        "*强调* 和 *m* 与 **粗体**，*use x* 以及中文*强调 x*，数学x*、K_t*、x_1*。\n"
+        "`m*` ``x* 与 `code` `` [原文](https://example.org/m*) "
+        "https://example.org/x*\n```text\nm*\n```"
+    )
+    expected = source.replace("数学x*、K_t*、x_1*", "数学x∗、K_t∗、x_1∗")
+    assert card_markdown(source) == expected
+
+
+def test_math_stars_are_normalized_in_each_card_section():
+    sections = card_sections("## 方法\n价格m*使价值为零\n\n## 误差\n界为X0−m*。")
+    assert sections[0]["content"] == "**方法**\n价格m∗使价值为零"
+    assert sections[2]["content"] == "**误差**\n界为X0−m∗。"

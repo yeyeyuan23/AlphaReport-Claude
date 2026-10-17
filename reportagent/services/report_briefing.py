@@ -137,12 +137,18 @@ def render_briefing(
     template_skill: str = "daily-report",
     source_checked_at: str | None = None,
     publication_window: str = "",
+    weekly_summaries: dict | None = None,
+    summary_notice: str = "",
 ) -> str:
     if template_skill == "weekly-report":
         from reportagent.services.weekly_briefing import render_weekly_briefing
 
         return render_weekly_briefing(
-            papers, date_label, publication_window=publication_window
+            papers,
+            date_label,
+            publication_window=publication_window,
+            summaries=weekly_summaries,
+            summary_notice=summary_notice,
         )
     ordered = sorted(
         papers,

@@ -5,6 +5,26 @@ from __future__ import annotations
 import re
 
 
+_MATH_STAR = re.compile(
+    r"(?<![A-Za-z0-9_\\*])([A-Za-z][0-9]*(?:_(?:[A-Za-z0-9]+|\{[^{}\s]+\}))?)\*(?!\*)"
+)
+_INLINE_LITERAL = re.compile(
+    r"(`+).*?\1|\[[^\]\n]*\]\((?:\\.|[^()\s]|\([^()\n]*\))*\)|https?://\S+"
+    r"|(?<![A-Za-z0-9_\\*])\*(?![\s*])[^*\n]+\*(?!\*)"
+)
+
+
+def _math_asterisks(line: str) -> str:
+    """Use a mathematical star for postfix variables, outside code and links."""
+    output, start = [], 0
+    for match in _INLINE_LITERAL.finditer(line):
+        output.append(_MATH_STAR.sub(r"\1∗", line[start : match.start()]))
+        output.append(match[0])
+        start = match.end()
+    output.append(_MATH_STAR.sub(r"\1∗", line[start:]))
+    return "".join(output)
+
+
 def card_markdown(text: str, *, omit_leading_title: bool = False) -> str:
     """Use bold section labels in cards; keep hashes in prose, links and code."""
     output = []
@@ -40,7 +60,7 @@ def card_markdown(text: str, *, omit_leading_title: bool = False) -> str:
             )
         if line.strip():
             seen_content = True
-        output.append(line)
+        output.append(_math_asterisks(line))
     return "\n".join(output)
 
 

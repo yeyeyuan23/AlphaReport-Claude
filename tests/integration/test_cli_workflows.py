@@ -97,7 +97,7 @@ def test_weekly_renders_current_shared_template_without_model_rewrite(tmp_path):
 
     shutil.copytree(ROOT / "skills", tmp_path / "skills")
     target = tmp_path / "skills/weekly-report/briefing.md"
-    target.write_text("Weekly {date_label}: {overview}\n{other_papers}")
+    target.write_text("Weekly {date_label}: {overview}\n{pending_papers}")
     papers = [{"id": 1, "title": "Fixture paper", "source": "arxiv"}]
     with patch.object(registry, "PROJECT_ROOT", tmp_path):
         before = weekly_report.generate_weekly_report(
