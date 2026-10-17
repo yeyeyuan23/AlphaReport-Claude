@@ -1,4 +1,4 @@
-"""Daily and weekly reports use Beijing publication date windows."""
+"""Daily and weekly publication windows end at the Beijing collection cutoff."""
 
 from datetime import datetime, timezone
 
@@ -11,19 +11,19 @@ from reportagent.services import daily_push as daily, weekly_report as weekly
 @pytest.mark.parametrize(
     "now,first,last",
     [
-        (datetime(2026, 10, 17, 4, tzinfo=timezone.utc), "2026-10-11", "2026-10-17"),
-        (datetime(2026, 10, 18, 16, tzinfo=timezone.utc), "2026-10-13", "2026-10-19"),
-        (datetime(2027, 1, 1, tzinfo=timezone.utc), "2026-12-26", "2027-01-01"),
-        (datetime(2024, 3, 1, tzinfo=timezone.utc), "2024-02-24", "2024-03-01"),
+        (datetime(2026, 10, 17, 4, tzinfo=timezone.utc), "2026-10-10", "2026-10-17"),
+        (datetime(2026, 10, 18, 16, tzinfo=timezone.utc), "2026-10-12", "2026-10-19"),
+        (datetime(2027, 1, 1, tzinfo=timezone.utc), "2026-12-25", "2027-01-01"),
+        (datetime(2024, 3, 1, tzinfo=timezone.utc), "2024-02-23", "2024-03-01"),
     ],
 )
-def test_weekly_period_is_seven_beijing_dates_including_today(now, first, last):
+def test_weekly_period_is_168_hours_ending_at_eight(now, first, last):
     from reportagent.services.report_periods import get_weekly_range
 
     start, end, actual_first, actual_last = get_weekly_range(now=now)
     assert (actual_first, actual_last) == (first, last)
-    assert start == datetime.fromisoformat(f"{first}T00:00:00+08:00")
-    assert end == datetime.fromisoformat(f"{last}T23:59:59.999999+08:00")
+    assert start == datetime.fromisoformat(f"{first}T08:00:00+08:00")
+    assert end == datetime.fromisoformat(f"{last}T08:00:00+08:00")
 
 
 def test_weekly_backfill_offsets_the_rolling_window_by_seven_days():
@@ -32,7 +32,7 @@ def test_weekly_backfill_offsets_the_rolling_window_by_seven_days():
     _, _, first, last = get_weekly_range(
         1, now=datetime(2026, 10, 17, 4, tzinfo=timezone.utc)
     )
-    assert (first, last) == ("2026-10-04", "2026-10-10")
+    assert (first, last) == ("2026-10-03", "2026-10-10")
     with pytest.raises(ValueError):
         get_weekly_range(-1)
 
@@ -50,8 +50,8 @@ def test_daily_uses_publication_day_regardless_of_ingestion(
         for rid, created, published in [
             (1, "2026-10-16T16:00:00", "2026-10-15T00:00:00"),
             (2, "2026-10-17T15:59:59.999999", None),
-            (3, "2026-10-16T15:59:59.999999", "2026-10-17T00:00:00"),
-            (4, "2026-10-17T16:00:00", "2026-10-17T00:00:00"),
+            (3, "2026-10-16T15:59:59.999999", "2026-10-16T12:00:00"),
+            (4, "2026-10-17T16:00:00", "2026-10-16T12:00:00"),
         ]:
             db.add(
                 Report(
@@ -152,18 +152,18 @@ def test_daily_precise_publication_boundaries(
     monkeypatch.setattr(daily, "screening_is_current", lambda row: True)
     with factory() as db:
         for rid, published, info in [
-            (1, "2026-10-16T16:00:00", None),
-            (2, "2026-10-17T15:59:59.999999", None),
-            (3, "2026-10-16T15:59:59.999999", None),
-            (4, "2026-10-17T16:00:00", None),
+            (1, "2026-10-16T00:00:00", None),
+            (2, "2026-10-16T23:59:59.999999", None),
+            (3, "2026-10-15T23:59:59.999999", None),
+            (4, "2026-10-17T00:00:00", None),
             (5, None, {"precision": "year", "year": 2021}),
             (6, None, {"precision": "month", "year": 2026, "month": 10}),
             (
                 7,
-                "2026-10-17T00:00:00",
+                "2026-10-16T12:00:00",
                 {"precision": "month", "year": 2026, "month": 10},
             ),
-            (8, "2026-10-17T00:00:00", {"source": "pdf_creation_date"}),
+            (8, "2026-10-16T12:00:00", {"source": "pdf_creation_date"}),
         ]:
             db.add(
                 Report(
@@ -199,11 +199,11 @@ def test_relevance_refresh_uses_exact_publication_day(
     factory = memory_session_factory
     with factory() as db:
         for rid, published, precision in [
-            (1, "2026-10-16T16:00:00", None),
-            (2, "2026-10-17T15:59:59.999999", None),
-            (3, "2026-10-16T15:59:59.999999", None),
-            (4, "2026-10-17T16:00:00", None),
-            (5, "2026-10-17T00:00:00", "year"),
+            (1, "2026-10-16T00:00:00", None),
+            (2, "2026-10-16T23:59:59.999999", None),
+            (3, "2026-10-15T23:59:59.999999", None),
+            (4, "2026-10-17T00:00:00", None),
+            (5, "2026-10-16T12:00:00", "year"),
             (6, None, "month"),
         ]:
             db.add(
@@ -270,3 +270,66 @@ def test_daily_refresh_drops_changed_publication_date(
         )
         == []
     )
+
+
+@pytest.mark.parametrize("report_date", ["2026-10-17", "2027-01-01", "2024-03-01"])
+def test_daily_window_is_exactly_24_hours_ending_at_eight(report_date):
+    from datetime import timedelta
+    from reportagent.services.report_periods import get_daily_range
+
+    start, end, label, _ = get_daily_range(report_date)
+    assert end == datetime.fromisoformat(f"{report_date}T08:00:00+08:00")
+    assert end - start == timedelta(hours=24)
+    assert label == report_date
+
+
+def test_weekly_publication_query_excludes_cutoff_and_partial_dates(
+    monkeypatch, memory_session_factory
+):
+    import json
+    from reportagent.services.report_periods import get_weekly_range
+    from datetime import timedelta
+
+    start, end, _, _ = get_weekly_range(
+        now=datetime(2026, 10, 17, 4, tzinfo=timezone.utc)
+    )
+    factory = memory_session_factory
+    monkeypatch.setattr(weekly, "init_db", lambda: None)
+    monkeypatch.setattr(weekly, "get_session_factory", lambda: factory)
+    with factory() as db:
+        for rid, published, info in [
+            (1, start, None),
+            (2, end - timedelta(microseconds=1), None),
+            (3, start - timedelta(microseconds=1), None),
+            (4, end, None),
+            (5, start, {"precision": "month"}),
+            (6, start, {"source": "pdf_creation_date"}),
+        ]:
+            db.add(
+                Report(
+                    id=rid,
+                    title=f"Paper {rid}",
+                    source="arxiv",
+                    content_hash=str(rid),
+                    published_date=published,
+                    publication_date_info_json=json.dumps(info) if info else None,
+                )
+            )
+        db.commit()
+    assert {p["id"] for p in weekly.get_weekly_papers(start, end)} == {1, 2}
+
+
+def test_weekly_body_displays_the_actual_168_hour_window():
+    from reportagent.services.report_periods import (
+        get_weekly_range,
+        format_publication_window,
+    )
+
+    start, end, first, last = get_weekly_range(
+        now=datetime(2026, 10, 17, 4, tzinfo=timezone.utc)
+    )
+    text = weekly.generate_weekly_report(
+        [], first, last, publication_window=format_publication_window(start, end)
+    )
+    assert "发表时间范围：2026-10-10 08:00 ~ 2026-10-17 08:00" in text
+    assert "北京时间，含起点、不含截止点" in text

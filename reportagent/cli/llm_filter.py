@@ -27,7 +27,7 @@ def main():
     )
     parser.add_argument(
         "--published-date",
-        help="Score papers published on this Beijing date, with day precision (YYYY-MM-DD)",
+        help="Score publications in the 24 hours before this Beijing date at 08:00 (YYYY-MM-DD)",
     )
     parser.add_argument(
         "--created-date",

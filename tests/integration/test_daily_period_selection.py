@@ -1,12 +1,13 @@
 """Daily content depends on publication date/screening, never send markers."""
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from reportagent.services.report_periods import get_daily_range
 from reportagent.models.database import Base, Report
 from reportagent.services import daily_push as daily
 from reportagent.services.paper_scoring import evidence_fingerprint, scoring_fingerprint
@@ -17,7 +18,7 @@ def legacy_library(monkeypatch):
     engine = create_engine("sqlite:///:memory:")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
-    now = datetime.now(timezone.utc)
+    now = get_daily_range()[0] + timedelta(hours=1)
     with factory() as session:
         for rid, date, score in [
             (1, now, 8),

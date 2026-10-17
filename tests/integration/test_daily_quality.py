@@ -1,12 +1,13 @@
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from reportagent.services.report_periods import get_daily_range
 from reportagent.models.database import Base, Report
 from reportagent.services import daily_push as daily
 from tests.support.report_fixtures import Model, paper, response, module
@@ -133,7 +134,7 @@ def test_daily_does_not_select_old_score_after_abstract_changes():
             source="arxiv",
             content_hash="stale",
             abstract="We evaluate dynamic portfolios and transaction costs.",
-            published_date=datetime.now(timezone.utc),
+            published_date=get_daily_range()[0] + timedelta(hours=1),
             selection_relevance=9,
             is_selected=True,
         )
@@ -193,7 +194,7 @@ def test_daily_reviews_before_render_and_dry_run_never_records_delivery(tmp_path
                 source="arxiv",
                 content_hash="one",
                 is_selected=True,
-                published_date=datetime.now(timezone.utc),
+                published_date=get_daily_range()[0] + timedelta(hours=1),
             )
         )
         s.commit()

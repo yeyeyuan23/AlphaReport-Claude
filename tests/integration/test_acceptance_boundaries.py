@@ -85,15 +85,15 @@ def test_weekly_preview_uses_publication_boundaries_and_cannot_deliver(
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine)
     start = datetime(2026, 10, 5, tzinfo=timezone.utc)
-    end = start + timedelta(days=7) - timedelta(microseconds=1)
+    end = start + timedelta(days=7)
     try:
         with factory() as session:
             for i, stamp in enumerate(
                 (
                     start - timedelta(microseconds=1),
                     start,
+                    end - timedelta(microseconds=1),
                     end,
-                    end + timedelta(microseconds=1),
                 )
             ):
                 session.add(

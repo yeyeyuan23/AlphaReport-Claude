@@ -3,12 +3,13 @@
 import asyncio
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 from unittest.mock import AsyncMock
 
 import pytest
 
 from reportagent.db import engine as database
+from reportagent.services.report_periods import get_daily_range
 from reportagent.models.database import Report
 from reportagent.services import (
     daily_push as daily,
@@ -57,7 +58,7 @@ def queue_library(tmp_path, monkeypatch, memory_session_factory):
     )
     fetch = AsyncMock(side_effect=RuntimeError("offline PDF unavailable"))
     monkeypatch.setattr(one_report, "collect_paper", fetch)
-    now = datetime.now(timezone.utc)
+    now = get_daily_range()[0] + timedelta(hours=1)
     with factory() as session:
         for rid in range(1, 39):
             values = paper(
@@ -259,7 +260,7 @@ def test_daily_query_keeps_more_than_two_hundred_current_candidates(queue_librar
                         id=rid,
                         title=f"Portfolio study {rid}",
                         content_hash=str(rid),
-                        published_date=datetime.now(timezone.utc),
+                        published_date=get_daily_range()[0] + timedelta(hours=1),
                     )
                 )
             )

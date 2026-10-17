@@ -451,15 +451,11 @@ class ReportRepository:
         if created_until:
             q = q.filter(Report.created_at <= created_until)
         if published_since:
-            q = q.filter(
-                Report.published_date >= published_since,
-                Report.published_date
-                <= (
-                    published_until
-                    if published_until is not None
-                    else datetime.now(timezone.utc)
-                ),
-            )
+            q = q.filter(Report.published_date >= published_since)
+            if published_until is not None:
+                q = q.filter(Report.published_date < published_until)
+            else:
+                q = q.filter(Report.published_date <= datetime.now(timezone.utc))
         q = q.order_by(desc(Report.created_at))
         if scoring_fingerprint is None:
             return q.limit(limit).all()

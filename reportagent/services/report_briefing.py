@@ -120,6 +120,7 @@ def render_briefing(
     max_featured: int = 5,
     template_skill: str = "daily-report",
     source_checked_at: str | None = None,
+    publication_window: str = "",
 ) -> str:
     ordered = sorted(
         papers,
@@ -269,6 +270,8 @@ def render_briefing(
             s["status"] in {"error", "partial", "unavailable"} for s in source_statuses
         ):
             overview += " 部分来源采集失败或不完整，最新资料覆盖可能不完整。"
+    if publication_window:
+        overview = f"发表时间范围：{publication_window}\n\n" + overview
     return (
         skill_resource(template_skill, "briefing.md")
         .read_text(encoding="utf-8")

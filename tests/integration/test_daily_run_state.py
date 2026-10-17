@@ -2,12 +2,13 @@
 
 import json
 import subprocess
-from datetime import datetime, timezone
+from datetime import timedelta
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
+from reportagent.services.report_periods import get_daily_range
 from reportagent.models.database import Report, ReportRun
 from reportagent.services import daily_push as daily
 from reportagent.services.report_quality import review_fingerprint
@@ -72,7 +73,7 @@ def insert_paper(factory):
             abstract="We study portfolio allocation and compare rolling trading policies with transaction costs.",
             source_url="https://arxiv.org/abs/2610.00001v1",
             arxiv_id="2610.00001v1",
-            published_date=datetime.now(timezone.utc),
+            published_date=get_daily_range()[0] + timedelta(hours=1),
             selection_score=8,
             selection_relevance=8,
             selection_direction="portfolio",
@@ -455,7 +456,7 @@ def test_configured_review_budget_limits_candidates_and_explicit_option_override
                 title="Second",
                 source="arxiv",
                 content_hash="two",
-                published_date=datetime.now(timezone.utc),
+                published_date=get_daily_range()[0] + timedelta(hours=1),
             )
         )
         session.commit()
@@ -553,3 +554,18 @@ def test_review_of_later_paper_cannot_mix_new_metadata_with_earlier_stale_conclu
         assert candidate["title"] == "Newest revision" and candidate[
             "arxiv_id"
         ].endswith("v3")
+
+
+def test_daily_artifact_shows_the_exact_publication_window(offline_daily):
+    factory, _ = offline_daily
+    insert_paper(factory)
+    result = daily.run_daily_push(daily.DailyPushOptions(dry_run=True))
+    start, end, _, _ = get_daily_range(result["report_date"])
+    assert result["publication_window"] == {
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "end_exclusive": True,
+    }
+    text = Path(result["artifact_path"]).read_text()
+    assert "发表时间范围：" in text
+    assert "08:00" in text and "北京时间，含起点、不含截止点" in text

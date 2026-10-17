@@ -574,7 +574,10 @@ async def score_reports(options: ScoringOptions) -> None:
     if type(options.max_papers) is not int or options.max_papers < 0:
         raise ValueError("max_papers must be a nonnegative integer; 0 means unlimited")
     limit = options.max_papers or None
-    from reportagent.services.report_periods import get_daily_range
+    from reportagent.services.report_periods import (
+        get_daily_range,
+        get_calendar_day_range,
+    )
 
     if (
         sum(
@@ -593,7 +596,7 @@ async def score_reports(options: ScoringOptions) -> None:
         get_daily_range(options.published_date) if options.published_date else None
     )
     created_range = (
-        get_daily_range(options.created_date) if options.created_date else None
+        get_calendar_day_range(options.created_date) if options.created_date else None
     )
     init_db()
     factory = get_session_factory()

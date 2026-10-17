@@ -11,7 +11,7 @@ def main():
         "--weeks-ago",
         type=int,
         default=0,
-        help="0=最近7天（含当天），1=窗口前移7天（用于补发）",
+        help="0=当天北京时间08:00前168小时，1=窗口前移7天（用于补发）",
     )
     parser.add_argument(
         "--receive-ids", type=str, default="", help="飞书接收者 ID，逗号分隔"

@@ -24,7 +24,7 @@ def main():
     parser.add_argument(
         "--report-ids",
         default="",
-        help="指定库中论文 ID（逗号分隔），仍须当日发表且日期明确到日",
+        help="指定库中论文 ID（逗号分隔），仍须在日报时间窗口内发表且日期明确到日",
     )
     parser.add_argument(
         "--max-reviews",

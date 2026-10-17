@@ -25,7 +25,11 @@ from reportagent.services.report_quality import (
     resolve_review_budget,
 )
 from reportagent.services.feishu_markdown import card_sections
-from reportagent.services.report_periods import get_weekly_range
+from reportagent.services.report_periods import (
+    get_weekly_range,
+    is_publication_in_range,
+    format_publication_window,
+)
 
 load_dotenv()
 
@@ -56,7 +60,7 @@ class WeeklyReportOptions:
 
 
 def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
-    """Query papers with published_date in [week_start, week_end]."""
+    """Query papers with published_date in [week_start, week_end)."""
     init_db()
     factory = get_session_factory()
     session = factory()
@@ -66,10 +70,12 @@ def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
 
         q = session.query(Report).filter(
             Report.published_date >= week_start,
-            Report.published_date <= week_end,
+            Report.published_date < week_end,
         )
         q = q.order_by(desc(Report.published_date), Report.id)
-        reports = q.all()
+        reports = [
+            r for r in q.all() if is_publication_in_range(r, week_start, week_end)
+        ]
 
         papers = []
         for r in reports:
@@ -121,7 +127,9 @@ def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
 # ═══════════════════════════════════════════════════
 
 
-def generate_weekly_report(papers: list[dict], week_start: str, week_end: str) -> str:
+def generate_weekly_report(
+    papers: list[dict], week_start: str, week_end: str, *, publication_window: str = ""
+) -> str:
     """Render current saved assessments; never generate a second research judgment."""
     checked = []
     for paper in papers:
@@ -148,7 +156,10 @@ def generate_weekly_report(papers: list[dict], week_start: str, week_end: str) -
         p["evaluation"] = evaluation
         checked.append(p)
     return render_briefing(
-        checked, f"{week_start} ~ {week_end}", template_skill="weekly-report"
+        checked,
+        f"{week_start} ~ {week_end}",
+        template_skill="weekly-report",
+        publication_window=publication_window,
     )
 
 
@@ -364,7 +375,12 @@ def run_weekly_report(options: WeeklyReportOptions) -> dict:
             )
         )
         papers = get_weekly_papers(week_start, week_end)
-    text = generate_weekly_report(papers, start_label, end_label)
+    text = generate_weekly_report(
+        papers,
+        start_label,
+        end_label,
+        publication_window=format_publication_window(week_start, week_end),
+    )
     failures = preparation.get("failures", [])
     if failures:
         text += f"\n\n本期有 {len(failures)} 项筛选或全文阅读评估未完成；相关条目保留待核验，可重试。"
@@ -381,6 +397,11 @@ def run_weekly_report(options: WeeklyReportOptions) -> dict:
         else "empty"
         if not papers
         else "complete",
+        "publication_window": {
+            "start": week_start.isoformat(),
+            "end": week_end.isoformat(),
+            "end_exclusive": True,
+        },
         "week_start": start_label,
         "week_end": end_label,
         "paper_ids": [p["id"] for p in papers],

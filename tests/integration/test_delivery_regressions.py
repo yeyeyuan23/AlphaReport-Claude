@@ -12,6 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from reportagent.db.repository import ReportRepository
+from reportagent.services.report_periods import get_daily_range
 from reportagent.models.database import Base, Report
 from reportagent.models.schemas import (
     ClassifiedReport,
@@ -75,7 +76,7 @@ class DeliveryTests(unittest.TestCase):
                     source="arxiv",
                     content_hash=f"hash-{i}",
                     abstract="We study portfolio allocation and compare rolling trading policies with transaction costs.",
-                    published_date=datetime.now(timezone.utc),
+                    published_date=get_daily_range()[0] + timedelta(hours=1),
                     is_selected=True,
                     selection_relevance=8,
                 )

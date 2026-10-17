@@ -36,7 +36,7 @@
 .venv/bin/python -m tests.acceptance.workflows batch --run-dir data/acceptance/my-run --topic portfolio_optimization --depth standard
 # 3. 对整个库重新做摘要相关性评分；--review 再对所有过线候选做全文评估
 .venv/bin/python -m tests.acceptance.workflows score --run-dir data/acceptance/my-run --review
-# 周报只查询库中最近 7 个北京时间日期（含当天）发表的资料，不会自动补采；默认先验证模板
+# 周报只查询库中报告当天北京时间 08:00 前 168 小时发表的资料，不会自动补采；默认先验证模板
 .venv/bin/python -m tests.acceptance.workflows weekly --run-dir data/acceptance/my-run --label weekly-template
 .venv/bin/python -m tests.acceptance.workflows weekly --run-dir data/acceptance/my-run --label weekly-model --llm-weekly
 ```

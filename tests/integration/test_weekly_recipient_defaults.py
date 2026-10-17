@@ -94,7 +94,9 @@ def test_weekly_delivery_uses_recipient_type(
     )
     monkeypatch.setattr(weekly, "get_weekly_papers", lambda *args: papers)
     monkeypatch.setattr(
-        weekly, "generate_weekly_report", lambda *args: "Offline weekly report"
+        weekly,
+        "generate_weekly_report",
+        lambda *args, **kwargs: "Offline weekly report",
     )
     prepare = AsyncMock(
         side_effect=AssertionError("No model refresh in recipient tests")
