@@ -18,6 +18,9 @@ class ParsedContent:
     page_count: int = 0
     content_list: list[dict] = field(default_factory=list)
     file_path: str = ""
+    # None means unavailable page provenance; an empty string is a known blank
+    # first page and must not be replaced with text from later pages.
+    first_page_text: str | None = None
 
     @property
     def full_text_with_tables(self) -> str:
@@ -163,6 +166,7 @@ class MinerUParser:
 
     def _build_result(self, content_list: list[dict], pdf_path: str) -> ParsedContent:
         text_parts: list[str] = []
+        first_page_parts: list[str] = []
         tables: list[dict] = []
         images: list[dict] = []
         equations: list[dict] = []
@@ -175,6 +179,8 @@ class MinerUParser:
 
             if item_type == "text":
                 text_parts.append(item.get("text", ""))
+                if page_idx == 0:
+                    first_page_parts.append(item.get("text", ""))
             elif item_type == "table":
                 tables.append(
                     {
@@ -213,6 +219,7 @@ class MinerUParser:
             page_count=max_page + 1,
             content_list=content_list,
             file_path=pdf_path,
+            first_page_text="\n".join(first_page_parts),
         )
 
     def _fallback_parse(self, pdf_path: str) -> ParsedContent:
@@ -223,4 +230,5 @@ class MinerUParser:
             text=content.text,
             page_count=content.page_count,
             file_path=pdf_path,
+            first_page_text=content.first_page_text,
         )

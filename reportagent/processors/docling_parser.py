@@ -41,6 +41,7 @@ class DoclingParser:
         tables: list[dict] = []
         equations: list[dict] = []
         images: list[dict] = []
+        first_page_parts: list[str] = []
         max_page = 0
 
         # Build text lookup for formula self_refs
@@ -54,6 +55,12 @@ class DoclingParser:
         for item, _level in doc.iterate_items():
             page_no = item.prov[0].page_no if item.prov else 0
             max_page = max(max_page, page_no)
+            # Docling page numbers are one-based. Include titles and section
+            # headings, not only items labelled "text", to keep boundaries.
+            if page_no == 1 and item.label not in {"table", "formula", "picture"}:
+                text = getattr(item, "text", "")
+                if text:
+                    first_page_parts.append(text)
 
             if item.label == "table":
                 body = (
@@ -118,6 +125,7 @@ class DoclingParser:
             page_count=max_page,
             content_list=self._build_content_list(doc),
             file_path=pdf_path,
+            first_page_text="\n".join(first_page_parts),
         )
 
     def _build_content_list(self, doc) -> list[dict]:

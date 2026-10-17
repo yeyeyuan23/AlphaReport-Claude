@@ -10,6 +10,41 @@ def content(text, **metadata):
     return PDFContent(text=text, page_count=1, metadata=metadata)
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        "arXiv: 2501.12345v2",
+        "https://arxiv.org/abs/2501.12345v2",
+        "https://arxiv.org/pdf/2501.12345v2.pdf",
+        "2501.12345v2",
+    ],
+)
+def test_explicit_arxiv_front_matter_forms_keep_the_paper_identity(line):
+    result = MetadataExtractor().extract(content("Verified paper title\n" + line))
+    assert result["arxiv_id"] == "2501.12345"
+
+
+@pytest.mark.parametrize(
+    "line", ["DOI: 10.1234/Paper", "https://doi.org/10.1234/Paper", "10.1234/Paper"]
+)
+def test_explicit_doi_front_matter_forms_keep_the_paper_identity(line):
+    result = MetadataExtractor().extract(content("Verified paper title\n" + line))
+    assert result["doi"] == "10.1234/paper"
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "We compare arXiv: 2501.12345 and doi: 10.1234/cited.",
+        "Prior work: https://arxiv.org/abs/2501.12345, https://doi.org/10.1234/cited.",
+    ],
+)
+def test_unheaded_first_page_prose_does_not_supply_identity(prose):
+    result = MetadataExtractor().extract(content("Verified paper title\n" + prose))
+    assert result["arxiv_id"] is None
+    assert result["doi"] is None
+
+
 def test_pdf_creation_time_is_not_a_publication_date():
     result = MetadataExtractor().extract(
         content(

@@ -58,6 +58,7 @@ def test_bytes_parser_returns_real_text_with_optional_mineru_fallback(pdf, use_m
     assert result.page_count == 2
     assert result.tables == result.equations == []
     assert result.file_path == ""
+    assert result.first_page_text == "First research page\n"
 
 
 def test_docling_policy_merges_tables_but_keeps_mineru_equations(pdf, monkeypatch):
@@ -107,3 +108,65 @@ def test_optional_parser_failure_keeps_docling_merge_after_plain_text_fallback(p
     )
     assert result.text == "Docling evidence " * 20
     assert result.tables == [{"table_body": "recovered table"}]
+
+
+@pytest.mark.parametrize("first_page", ["OCR first-page title\nAbstract", ""])
+def test_selected_structured_text_keeps_its_matching_first_page(pdf, first_page):
+    primary = ParsedContent(
+        text="Primary text", first_page_text="Primary first page", page_count=1
+    )
+    secondary = ParsedContent(
+        text="Docling full text " * 20, first_page_text=first_page, page_count=2
+    )
+
+    result = parse_pdf(
+        pdf,
+        mineru_parser=SimpleNamespace(parse=lambda _: primary),
+        docling_parser=SimpleNamespace(parse=lambda _: secondary),
+    )
+
+    assert result.text == secondary.text
+    assert result.first_page_text == first_page
+
+
+def test_docling_first_page_uses_one_based_provenance_and_includes_headings():
+    from reportagent.processors.docling_parser import DoclingParser
+
+    items = [
+        SimpleNamespace(
+            label=label,
+            text=text,
+            prov=[SimpleNamespace(page_no=page)],
+            self_ref=str(i),
+        )
+        for i, (label, text, page) in enumerate(
+            [
+                ("title", "OCR paper title", 1),
+                ("text", "arXiv: 2501.12345", 1),
+                ("section_header", "Abstract", 1),
+                ("text", "First-page abstract", 1),
+                ("text", "doi: 10.4321/cited", 2),
+            ]
+        )
+    ]
+    doc = SimpleNamespace(
+        texts=items,
+        iterate_items=lambda: ((item, 0) for item in items),
+        export_to_markdown=lambda: "\n".join(item.text for item in items),
+    )
+
+    result = DoclingParser()._build_result(doc, "paper.pdf")
+
+    assert result.first_page_text == (
+        "OCR paper title\narXiv: 2501.12345\nAbstract\nFirst-page abstract"
+    )
+    assert "10.4321/cited" in result.text
+
+
+def test_mineru_known_empty_first_page_is_not_replaced_by_second_page():
+    result = mineru_parser.MinerUParser()._build_result(
+        [{"type": "text", "text": "Second-page text", "page_idx": 1}], "paper.pdf"
+    )
+
+    assert result.text == "Second-page text"
+    assert result.first_page_text == ""

@@ -9,52 +9,144 @@ from reportagent.processors.pdf_extractor import PDFContent
 
 class MetadataExtractor:
     _DOI_PATTERN = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+")
-    _ARXIV_PATTERN = re.compile(r"(\d{4}\.\d{4,5})")
+    _ARXIV_PATTERN = re.compile(r"(?<!\d)(\d{4}\.\d{4,5})(?!\d)")
+    _BARE_ARXIV = re.compile(r"\d{4}\.\d{4,5}(?:v\d+)?(?:\.pdf)?", re.I)
     _FRONTMATTER_END = re.compile(
         r"(?im)^[ \t]*(?:\#{1,6}[ \t]+)?(?:\d+(?:\.\d+)*\.?[ \t]+)?"
-        r"(?:abstract|摘[ \t]*要|references|参考文献)(?:[ \t]*[:：.—–-][^\n]*|[ \t]*)$"
+        r"(?:abstract|摘[ \t]*要|introduction|引言|references|参考文献)"
+        r"(?:[ \t]*[:：.—–-][^\n]*|[ \t]*)$"
     )
     _REFERENCES_START = re.compile(
         r"(?im)^[ \t]*(?:\#{1,6}[ \t]+)?(?:\d+(?:\.\d+)*\.?[ \t]+)?"
         r"(?:references|参考文献)[ \t]*[:：]?[ \t]*$"
     )
+    _ARXIV_REVISION_STAMP = re.compile(
+        r"(?im)^[ \t]*arXiv:\s*(?P<id>\d{4}\.\d{4,5})v\d+"
+        r"[ \t]+\[[^\]\n]+\][ \t]+(?P<date>\d{1,2}\s+[A-Za-z]+\s+\d{4})[ \t]*$"
+    )
 
-    def extract(self, pdf_content: PDFContent) -> dict:
+    def extract(self, pdf_content: PDFContent, *, fallback_text: str = "") -> dict:
+        """Prefer native fields; fill gaps from compatible structured front matter."""
         meta = pdf_content.metadata
-        first_page = getattr(pdf_content, "first_page_text", "") or pdf_content.text
+        first_page = pdf_content.first_page_text or (
+            pdf_content.text if pdf_content.page_count <= 1 else ""
+        )
+        front = self._FRONTMATTER_END.split(first_page, maxsplit=1)[0]
 
         title = meta.get("title", "").strip()
         if not title:
-            title = self._extract_title_from_text(first_page)
+            title = self._extract_title_from_text(front)
 
         authors = self._parse_authors(meta.get("author", ""))
 
-        doi = self._find_pattern(self._DOI_PATTERN, first_page)
-        arxiv_id = self._find_pattern(self._ARXIV_PATTERN, first_page)
+        # Structured text can contain the entire paper. Cited identifiers in its
+        # abstract/body/references must never become this paper's identity.
+        doi_candidates = self._find_patterns(self._DOI_PATTERN, front)
+        arxiv_candidates = self._find_patterns(self._ARXIV_PATTERN, front)
+        # Native/OCR first-page extraction can put the rotated arXiv imprint
+        # after the abstract. Only the standalone revision stamp is safe there.
+        imprint = self._REFERENCES_START.split(first_page, maxsplit=1)[0]
+        for stamp in self._ARXIV_REVISION_STAMP.finditer(imprint):
+            if self._parse_date(stamp["date"]):
+                arxiv_candidates.add(stamp["id"])
 
         date, date_source = self._publication_date(meta, first_page)
         date_info = self._publication_info(meta, first_page, date, date_source)
 
-        return {
+        result = {
             "title": title,
             "authors": authors,
-            "doi": doi,
-            "arxiv_id": arxiv_id,
+            "doi": next(iter(doi_candidates)) if len(doi_candidates) == 1 else None,
+            "arxiv_id": next(iter(arxiv_candidates))
+            if len(arxiv_candidates) == 1
+            else None,
+            "ambiguous_identity": len(doi_candidates) > 1 or len(arxiv_candidates) > 1,
             "date": date,
             "date_source": date_source,
             "pdf_creation_date": meta.get("creation_date"),
             "publication_date_info": date_info,
         }
+        if fallback_text.strip() and fallback_text.strip() != first_page.strip():
+            fallback = self.extract(PDFContent(text=fallback_text, page_count=1))
+            result = self._merge_metadata(result, fallback)
+        return result
+
+    @staticmethod
+    def _merge_metadata(native: dict, fallback: dict) -> dict:
+        # An explicit identifier disagreement means the fallback cannot safely
+        # supply *any* missing identity/date fields for this native paper.
+        if (
+            native["ambiguous_identity"]
+            or fallback["ambiguous_identity"]
+            or any(
+                native[key]
+                and fallback[key]
+                and native[key].casefold() != fallback[key].casefold()
+                for key in ("doi", "arxiv_id")
+            )
+        ):
+            return native
+
+        result = dict(native)
+        for key in ("title", "doi", "arxiv_id"):
+            if not result[key]:
+                result[key] = fallback[key]
+
+        native_info = native["publication_date_info"]
+        fallback_info = fallback["publication_date_info"]
+        precision = {"unknown": 0, "year": 1, "month": 2, "day": 3}
+        compatible = all(
+            native_info[key] == fallback_info.get(key)
+            for key in ("year", "month", "day")
+            if key in native_info
+        )
+        if (
+            native["date"] is None
+            and compatible
+            and (
+                native_info["precision"] == "unknown"
+                or precision[fallback_info["precision"]]
+                > precision[native_info["precision"]]
+            )
+        ):
+            result["date"] = fallback["date"]
+            result["date_source"] = fallback["date_source"]
+            # Retain separate native conference/revision evidence when refining
+            # an unknown or partial publication date.
+            result["publication_date_info"] = {
+                **fallback_info,
+                **{
+                    key: value
+                    for key, value in native_info.items()
+                    if key
+                    not in {"precision", "year", "month", "day", "source", "evidence"}
+                },
+            }
+        return result
 
     def _extract_title_from_text(self, text: str) -> str:
-        lines = [line.strip() for line in text.split("\n") if line.strip()]
+        lines = []
+        for line in text.splitlines():
+            line = re.sub(r"^\s*#{1,6}\s+", "", line).strip()
+            if not line or re.match(
+                r"(?i)^(?:(?:digitized|scanned|downloaded|printed|generated)\s+"
+                r"(?:by|from|with)\b|(?:arxiv|doi|published(?: online| on)?|"
+                r"publication date|发表日期|出版日期|发布日期)\s*[:：]|"
+                r"https?://|copyright\b|©|page\s+\d+\b|\d+\s*$)",
+                line,
+            ):
+                continue
+            if self._DOI_PATTERN.fullmatch(line) or self._BARE_ARXIV.fullmatch(line):
+                continue
+            lines.append(line)
         if lines:
             candidate = lines[0]
             if len(candidate) > 10:
                 return candidate[:500]
             elif len(lines) > 1:
                 return (candidate + " " + lines[1])[:500]
-        return "Untitled"
+            return candidate
+        return ""
 
     def _parse_authors(self, author_str: str) -> list[str]:
         if not author_str:
@@ -64,9 +156,22 @@ class MetadataExtractor:
                 return [a.strip() for a in author_str.split(sep) if a.strip()]
         return [author_str.strip()] if author_str.strip() else []
 
-    def _find_pattern(self, pattern: re.Pattern, text: str) -> Optional[str]:
-        match = pattern.search(text)
-        return match.group(0) if match else None
+    def _find_patterns(self, pattern: re.Pattern, text: str) -> set[str]:
+        if pattern is self._DOI_PATTERN:
+            prefix = r"(?i)^(?:doi(?=\s|:)|(?:https?://)?(?:dx\.)?doi\.org/)"
+            bare = self._DOI_PATTERN
+        else:
+            prefix = r"(?i)^(?:arxiv(?=\s|:)|(?:https?://)?(?:www\.)?arxiv\.org/(?:abs|pdf)/)"
+            bare = self._BARE_ARXIV
+        # Even a first page may have unheaded prose citing another paper. Use
+        # only explicit identifier lines, not every DOI/number in that prose.
+        lines = [line.lstrip("#* \t").strip() for line in text.splitlines()]
+        return {
+            match.group(0).rstrip(".,;").casefold()
+            for line in lines
+            if re.match(prefix, line) or bare.fullmatch(line.rstrip(".,;"))
+            for match in pattern.finditer(line)
+        }
 
     def _publication_date(self, meta: dict, first_page: str):
         for key in ("publication_date", "published_date"):

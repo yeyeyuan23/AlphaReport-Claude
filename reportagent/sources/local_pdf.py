@@ -7,7 +7,7 @@ from pathlib import Path
 import re
 
 from reportagent.models.schemas import UserCriteria, SearchResult, SourceType
-from reportagent.processors.pdf_extractor import PDFContent, PDFExtractor
+from reportagent.processors.pdf_extractor import PDFExtractor
 from reportagent.processors.metadata_extractor import MetadataExtractor
 from reportagent.processors.paper_sections import extract_paper_sections
 from reportagent.sources.base import BaseSource, SourceParseError, usable_full_text
@@ -125,13 +125,17 @@ class LocalPDFSource(BaseSource):
             base_content=content,
         )
         text = parsed.full_text_with_tables
+        fallback_front = parsed.first_page_text
+        if fallback_front is None:
+            # Legacy/custom parsers may lack page provenance. Only treat their
+            # entire text as front matter when the actual PDF has one page.
+            fallback_front = parsed.text if content.page_count == 1 else ""
         meta = self.meta_extractor.extract(
-            PDFContent(
-                text=text,
-                page_count=content.page_count,
-                metadata=content.metadata,
-                first_page_text=content.first_page_text or text,
-            )
+            content,
+            # A native watermark is not complete front matter. Extract fields
+            # separately so OCR can fill gaps without replacing valid evidence.
+            # Use parser text, not appended tables/equations or later native pages.
+            fallback_text=fallback_front,
         )
         tables_json_str = (
             json.dumps(parsed.tables, ensure_ascii=False) if parsed.tables else None

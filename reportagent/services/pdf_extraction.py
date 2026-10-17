@@ -37,7 +37,10 @@ def parse_pdf(
     if parsed is None or not parsed.full_text_with_tables.strip():
         content = base_content or PDFExtractor().extract(pdf_path)
         parsed = ParsedContent(
-            text=content.text, page_count=content.page_count, file_path=str(pdf_path)
+            text=content.text,
+            page_count=content.page_count,
+            file_path=str(pdf_path),
+            first_page_text=content.first_page_text,
         )
     if docling_parser is not None:
         try:
@@ -49,6 +52,7 @@ def parse_pdf(
                 and len(secondary.text) > len(parsed.full_text_with_tables) * 0.5
             ):
                 parsed.text = secondary.text
+                parsed.first_page_text = secondary.first_page_text
             if secondary.tables and len(secondary.tables) >= len(parsed.tables):
                 parsed.tables = secondary.tables
             if secondary.equations and not parsed.equations:
@@ -61,7 +65,11 @@ def parse_pdf(
 def parse_pdf_bytes(data: bytes, *, use_mineru: bool = True) -> ParsedContent:
     if not use_mineru:
         content = PDFExtractor().extract_bytes(data)
-        return ParsedContent(text=content.text, page_count=content.page_count)
+        return ParsedContent(
+            text=content.text,
+            page_count=content.page_count,
+            first_page_text=content.first_page_text,
+        )
     with TemporaryDirectory() as directory:
         path = Path(directory) / "report.pdf"
         path.write_bytes(data)
