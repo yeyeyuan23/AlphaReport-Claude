@@ -7,13 +7,6 @@ const TIER_STYLES: Record<Evaluation['tier'], string> = {
   exclude: 'border-gray-200 bg-gray-100 text-gray-600',
 };
 
-const TIER_LABELS: Record<Evaluation['tier'], string> = {
-  focus: '重点阅读',
-  browse: '值得浏览',
-  pending: '待核验',
-  exclude: '不推荐',
-};
-
 const SOURCE_CATEGORIES: Record<Evaluation['source_category'], string> = {
   academic: '学术论文',
   broker: '券商研报',
@@ -46,10 +39,10 @@ export function EvaluationBadge({ evaluation }: { evaluation?: Evaluation | null
   return (
     <span
       className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-medium ${
-        evaluation ? TIER_STYLES[evaluation.tier] : 'border-gray-200 bg-gray-50 text-gray-500'
+        (evaluation && TIER_STYLES[evaluation.tier]) || 'border-gray-200 bg-gray-50 text-gray-500'
       }`}
     >
-      {evaluation ? TIER_LABELS[evaluation.tier] : '尚未按新标准评估'}
+      {evaluation ? evaluation.label?.trim() || '待核验' : '尚未按新标准评估'}
     </span>
   );
 }
