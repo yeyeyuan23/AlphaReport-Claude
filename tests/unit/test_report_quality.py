@@ -72,9 +72,7 @@ def test_weak_method_is_not_promoted_by_relevance():
         ("strong", "medium"),
     ],
 )
-def test_readworthy_relevant_work_can_be_featured_with_disclosed_limitations(
-    quality, confidence
-):
+def test_only_strong_high_work_can_be_featured(quality, confidence):
     data = response()
     data.update(
         quality=quality,
@@ -85,7 +83,7 @@ def test_readworthy_relevant_work_can_be_featured_with_disclosed_limitations(
     result = asyncio.run(
         module().evaluate_paper(paper(selection_relevance=6), Model(data))
     )
-    assert result["tier"] == "focus"
+    assert result["tier"] == "browse"
     assert result["limitations"] == [
         "原文明示：目前仅在一个市场检验，跨市场适用性待验证。"
     ]

@@ -234,8 +234,8 @@ async def evaluate_paper(
     elif review["quality"] == "weak" or review["critical_concerns"]:
         tier = "exclude"
     elif (
-        review["quality"] in {"sound", "strong"}
-        and review["confidence"] in {"medium", "high"}
+        review["quality"] == "strong"
+        and review["confidence"] == "high"
         and relevance is not None
         and relevance >= 6
     ):

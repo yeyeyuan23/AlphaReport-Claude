@@ -96,25 +96,32 @@ def test_valid_source_count_is_not_treated_as_selected_paper_count():
     ("source", "label"),
     [("arxiv", "学术论文"), ("eastmoney", "券商研报"), ("bigquant", "社区研究")],
 )
-def test_reading_priority_features_sound_work_across_sources_and_discloses_limits(
-    source, label
+@pytest.mark.parametrize(
+    "quality,confidence", [("strong", "high"), ("sound", "medium")]
+)
+def test_reading_priority_uses_same_strict_gate_across_sources(
+    source, label, quality, confidence
 ):
     from reportagent.services.report_briefing import render_briefing
 
     data = response()
     data.update(
-        quality="sound",
-        confidence="medium",
+        quality=quality,
+        confidence=confidence,
         strengths=[],
         limitations=["原文明示：仅覆盖一个市场。"],
     )
     p = paper(id=1, source=source, title="值得优先读的研究", selection_relevance=8)
     p["evaluation"] = asyncio.run(module().evaluate_paper(p, Model(data)))
     brief = render_briefing([p], "fixture")
-    assert "重点推荐 1 篇" in brief
-    assert "**研究问题**" in brief
-    assert "仅覆盖一个市场" in brief
-    assert label in brief
+    if quality == "strong":
+        assert "重点推荐 1 篇" in brief
+        assert "**研究问题**" in brief
+        assert "仅覆盖一个市场" in brief and label in brief
+    else:
+        assert "重点推荐 0 篇" in brief
+        assert p["evaluation"]["tier"] == "browse"
+        assert "值得浏览" in brief
 
 
 def test_daily_does_not_select_old_score_after_abstract_changes(memory_session_factory):

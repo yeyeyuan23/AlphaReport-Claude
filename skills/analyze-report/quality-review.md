@@ -23,7 +23,7 @@ limitations 区分“原文明示的限制”“未报告/无法确认”“模�
 
 quality: strong=核心方法与主要证据充分且适用边界明确；sound=有阅读价值但验证或细节存在局限；weak=明确证据不足以支持主要结论；unknown=材料不足无法评价。confidence 表示这次评估的把握，不是论文正确概率。没有强证据不得填strong/high。text_complete=false时不得声称完成全文检查。
 
-重点推荐表示值得优先阅读。相关性达到6分、quality 为 sound 或 strong、confidence 为 medium 或 high，且没有明确影响核心结论的关键疑虑时，可以进入重点阅读候选；一般局限随推荐展示。来源类型和是否单独列出 strengths 不作为硬门槛。保持质量与置信度评价真实，不要为了推荐而抬高分级。
+重点推荐表示值得优先阅读。相关性达到6分、quality 必须为 strong、confidence 必须为 high，且没有明确影响核心结论的关键疑虑时，才可以进入重点阅读候选；sound 或 medium 等其余可读研究归为值得浏览。一般局限随推荐展示。来源类型和是否单独列出 strengths 不作为硬门槛。保持质量与置信度评价真实，不要为了推荐而抬高分级。
 
 只返回以下结构的JSON，不新增字段，不使用Markdown代码块：
 {
