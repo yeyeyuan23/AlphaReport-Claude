@@ -7,11 +7,12 @@ from pathlib import Path
 import re
 
 from reportagent.models.schemas import UserCriteria, SearchResult, SourceType
-from reportagent.processors.pdf_extractor import PDFExtractor
+from reportagent.processors.pdf_extractor import PDFContent, PDFExtractor
 from reportagent.processors.metadata_extractor import MetadataExtractor
 from reportagent.processors.paper_sections import extract_paper_sections
 from reportagent.sources.base import BaseSource, SourceParseError, usable_full_text
 from reportagent.sources.date_window import in_date_window
+from reportagent.services.pdf_extraction import parse_pdf
 
 logger = logging.getLogger(__name__)
 
@@ -113,55 +114,33 @@ class LocalPDFSource(BaseSource):
         mineru = _get_mineru_parser()
         docling = _get_docling_parser()
 
-        tables_json_str = None
-        equations_json_str = None
-        text = ""
-
-        # ---- Primary parse: MinerU (best LaTeX for formulas) ----
-        if mineru:
-            try:
-                parsed = mineru.parse(pdf_path)
-                text = parsed.full_text_with_tables
-                meta = self.meta_extractor.extract(
-                    type("C", (), {"text": text, "metadata": {}})()
-                )
-                if parsed.tables:
-                    tables_json_str = json.dumps(parsed.tables, ensure_ascii=False)
-                if parsed.equations:
-                    equations_json_str = json.dumps(
-                        parsed.equations, ensure_ascii=False
-                    )
-            except Exception:
-                content = self.extractor.extract(pdf_path)
-                text = content.text
-                meta = self.meta_extractor.extract(content)
-        else:
-            content = self.extractor.extract(pdf_path)
-            text = content.text
-            meta = self.meta_extractor.extract(content)
-
-        # ---- Secondary parse: Docling (better tables & structured text) ----
-        if docling:
-            try:
-                dparsed = docling.parse(pdf_path)
-                # Use Docling's markdown text if it's richer than MinerU's
-                if dparsed.text and len(dparsed.text) > len(text) * 0.5:
-                    text = dparsed.text
-                # Merge tables: Docling tables are usually better structured
-                if dparsed.tables and (
-                    not tables_json_str
-                    or len(dparsed.tables) >= len(parsed.tables if mineru else [])
-                ):
-                    tables_json_str = json.dumps(dparsed.tables, ensure_ascii=False)
-                # Keep MinerU equations (better LaTeX); fall back to Docling if MinerU has none
-                if dparsed.equations and not equations_json_str:
-                    equations_json_str = json.dumps(
-                        dparsed.equations, ensure_ascii=False
-                    )
-            except Exception as e:
-                logger.warning(
-                    "Docling secondary parse failed for '%s': %s", pdf_path.name, e
-                )
+        # Read native metadata/front matter once. Structured parsers enrich the
+        # research material without dropping the PDF's title/authors/date evidence.
+        content = self.extractor.extract(pdf_path)
+        parsed = parse_pdf(
+            pdf_path,
+            use_mineru=mineru is not None,
+            mineru_parser=mineru,
+            docling_parser=docling,
+            base_content=content,
+        )
+        text = parsed.full_text_with_tables
+        meta = self.meta_extractor.extract(
+            PDFContent(
+                text=text,
+                page_count=content.page_count,
+                metadata=content.metadata,
+                first_page_text=content.first_page_text or text,
+            )
+        )
+        tables_json_str = (
+            json.dumps(parsed.tables, ensure_ascii=False) if parsed.tables else None
+        )
+        equations_json_str = (
+            json.dumps(parsed.equations, ensure_ascii=False)
+            if parsed.equations
+            else None
+        )
 
         # Normalize PDF extraction artifacts in formulas
         if equations_json_str:

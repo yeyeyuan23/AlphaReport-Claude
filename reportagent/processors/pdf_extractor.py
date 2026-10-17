@@ -19,30 +19,31 @@ class PDFContent:
 class PDFExtractor:
     def extract(self, pdf_path: str | Path) -> PDFContent:
         pdf_path = Path(pdf_path)
-        doc = fitz.open(str(pdf_path))
-        try:
-            text_parts = []
-            for page in doc:
-                text_parts.append(page.get_text())
-            text = "\n".join(text_parts)
+        with fitz.open(str(pdf_path)) as document:
+            return self._extract(document, str(pdf_path), pdf_path.stat().st_size)
 
-            meta = doc.metadata or {}
-            return PDFContent(
-                text=text,
-                page_count=doc.page_count,
-                metadata={
-                    "title": meta.get("title", ""),
-                    "author": meta.get("author", ""),
-                    "subject": meta.get("subject", ""),
-                    "creator": meta.get("creator", ""),
-                    "creation_date": meta.get("creationDate", ""),
-                },
-                file_path=str(pdf_path),
-                file_size_bytes=pdf_path.stat().st_size,
-                first_page_text=text_parts[0] if text_parts else "",
-            )
-        finally:
-            doc.close()
+    def extract_bytes(self, data: bytes) -> PDFContent:
+        with fitz.open(stream=data, filetype="pdf") as document:
+            return self._extract(document, "", len(data))
+
+    @staticmethod
+    def _extract(document, file_path, file_size_bytes) -> PDFContent:
+        text_parts = [page.get_text() for page in document]
+        meta = document.metadata or {}
+        return PDFContent(
+            text="\n".join(text_parts),
+            page_count=document.page_count,
+            metadata={
+                "title": meta.get("title", ""),
+                "author": meta.get("author", ""),
+                "subject": meta.get("subject", ""),
+                "creator": meta.get("creator", ""),
+                "creation_date": meta.get("creationDate", ""),
+            },
+            file_path=file_path,
+            file_size_bytes=file_size_bytes,
+            first_page_text=text_parts[0] if text_parts else "",
+        )
 
     def batch_extract(self, directory: str | Path) -> list[PDFContent]:
         directory = Path(directory)

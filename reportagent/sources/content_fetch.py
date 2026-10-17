@@ -375,10 +375,9 @@ def pdf_links(soup, page_url: str) -> list[str]:
 
 
 def _extract_pdf_text(data: bytes) -> str:
-    import fitz
+    from reportagent.processors.pdf_extractor import PDFExtractor
 
-    with fitz.open(stream=data, filetype="pdf") as document:
-        return "\n".join(page.get_text() for page in document)
+    return PDFExtractor().extract_bytes(data).text
 
 
 def _save_public_pdf(data: bytes, source: str, *, directory: Path | None = None) -> str:

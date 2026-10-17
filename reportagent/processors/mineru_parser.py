@@ -147,15 +147,16 @@ class MinerUParser:
         with tempfile.TemporaryDirectory() as tmp_dir:
             try:
                 content_list = _run_mineru_parse(pdf_path, tmp_dir)
+                parsed = self._build_result(content_list, pdf_path)
+                if parsed.full_text_with_tables.strip():
+                    return parsed
             except Exception as e:
                 logger.warning(
                     "MinerU parse failed for %s: %s, falling back to PyMuPDF",
                     pdf_path,
                     e,
                 )
-                return self._fallback_parse(pdf_path)
-
-        return self._build_result(content_list, pdf_path)
+        return self._fallback_parse(pdf_path)
 
     async def aparse(self, pdf_path: str | Path) -> ParsedContent:
         return await asyncio.to_thread(self.parse, pdf_path)
@@ -215,15 +216,11 @@ class MinerUParser:
         )
 
     def _fallback_parse(self, pdf_path: str) -> ParsedContent:
-        import fitz
+        from reportagent.processors.pdf_extractor import PDFExtractor
 
-        doc = fitz.open(pdf_path)
-        try:
-            text_parts = [page.get_text() for page in doc]
-            return ParsedContent(
-                text="\n".join(text_parts),
-                page_count=doc.page_count,
-                file_path=pdf_path,
-            )
-        finally:
-            doc.close()
+        content = PDFExtractor().extract(pdf_path)
+        return ParsedContent(
+            text=content.text,
+            page_count=content.page_count,
+            file_path=pdf_path,
+        )

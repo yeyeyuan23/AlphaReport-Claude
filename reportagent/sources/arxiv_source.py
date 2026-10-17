@@ -355,15 +355,9 @@ class ArxivSource(BaseSource):
     @staticmethod
     def _parse_pdf_bytes(pdf_bytes: bytes) -> Optional[str]:
         try:
-            import fitz
-
-            doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-            try:
-                text = "\n".join(page.get_text() for page in doc)
-                if text and len(text.strip()) > 100:
-                    return text
-            finally:
-                doc.close()
+            text = content_fetch._extract_pdf_text(pdf_bytes)
+            if text and len(text.strip()) > 100:
+                return text
         except Exception as e:
             logger.debug("PyMuPDF parse failed: %s", type(e).__name__)
         return None

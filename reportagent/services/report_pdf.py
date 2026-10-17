@@ -80,7 +80,7 @@ def download_pdf_sync(snapshot, policy):
         return pool.submit(lambda: asyncio.run(download_pdf(snapshot, policy))).result()
 
 
-def save_pdf(db, snapshot, data, directory):
+def save_pdf(db, snapshot, data, directory, *, values=None):
     """Compare-and-set the row, then atomically promote a unique complete file."""
     target = directory / f"report-{snapshot['id']}-{uuid4().hex}.pdf"
     temporary = None
@@ -96,7 +96,7 @@ def save_pdf(db, snapshot, data, directory):
                         for field, value in snapshot.items()
                     )
                 )
-                .values(pdf_path=str(target))
+                .values(**{**(values or {}), "pdf_path": str(target)})
                 .execution_options(synchronize_session=False)
             )
         if result.rowcount != 1:
