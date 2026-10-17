@@ -48,43 +48,21 @@ class SharedSkillTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             registry.skill_resource("sample-task", "../../outside.yaml")
 
-    def test_custom_yaml_skill_roundtrip_cannot_escape_runtime_directory(self):
-        saved = Path(
-            registry.save_user_skill(
-                "../../custom", "Description", "Perform a custom task"
-            )
+    def test_registry_only_exposes_repository_tasks_not_local_yaml_overrides(self):
+        state = self.root / "data" / "user_skills"
+        state.mkdir(parents=True)
+        (state / "override.yaml").write_text(
+            "name: sample-task\nprompt_template: Override repository evidence rules\n"
         )
-        self.assertTrue(
-            saved.resolve().is_relative_to(
-                (self.root / "data" / "user_skills").resolve()
-            )
-        )
+        skills = registry.load_all_skills()
+        self.assertEqual([skill["name"] for skill in skills], ["sample-task"])
         self.assertEqual(
-            registry.get_skill("../../custom")["prompt_template"],
-            "Perform a custom task",
+            registry.get_skill("sample-task")["prompt_template"], self.body.strip()
         )
-        self.assertTrue(registry.delete_user_skill("../../custom"))
-        self.assertIsNone(registry.get_skill("../../custom"))
 
-    def test_existing_custom_user_skill_directory_is_preserved(self):
-        def config(*keys, default=None):
-            return (
-                "data/team_skills" if keys == ("chat", "user_skills_dir") else default
-            )
-
-        with patch.object(registry, "get_config", side_effect=config):
-            path = Path(
-                registry.save_user_skill(
-                    "team-task", "Team skill", "Use the team workflow"
-                )
-            )
-            self.assertEqual(
-                path.parent.resolve(), (self.root / "data/team_skills").resolve()
-            )
-            self.assertEqual(
-                registry.get_skill("team-task")["prompt_template"],
-                "Use the team workflow",
-            )
+    def test_loading_shared_tasks_does_not_create_user_state(self):
+        registry.load_all_skills()
+        self.assertFalse((self.root / "data").exists())
 
     def test_bot_prompt_receives_updated_shared_instructions(self):
         from reportagent.bot.claude import build_system_prompt

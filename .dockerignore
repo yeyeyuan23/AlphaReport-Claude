@@ -1,6 +1,5 @@
 # Docker (只排除脚本，保留 nginx.conf 等)
 deploy/.env.production
-deploy/app.production.yaml
 deploy/deploy.sh
 deploy/docker-compose.yml
 

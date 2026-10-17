@@ -5,7 +5,17 @@ metadata:
   aliases: [研报分析, 单篇研报]
 ---
 
-Use the shared report service in `reportagent/services/one_report.py`. It downloads an explicit arXiv revision, extracts full text, validates analysis and persists the artifact. Reuse completed analysis only when the PDF and prompt/model fingerprints match; pending quality assessments remain retryable.
+For an existing library paper, first resolve the user's title, prior search result, or conversation context with `reportagent.cli.db_query`. Use the returned report ID internally; do not require the user to find or enter database IDs. If several papers match, ask using their titles rather than guessing. Read a current saved analysis before requesting new model work.
+
+Use existing library analysis for requests to read a stored paper or analyze a set of papers:
+```bash
+.venv/bin/python -m reportagent.cli.db_query --search 'portfolio' --limit 20
+.venv/bin/python -m reportagent.cli.db_query --get 12 --full
+.venv/bin/python -m reportagent.cli.analyze --report-id 12 --depth standard
+```
+For a category batch, resolve the stored classification token and use the same `cli.analyze --topic <token>` workflow. Summarize the returned per-paper results, material coverage and failures. Do not present abstract-only analysis as full-text reading, claim unfinished work has completed, or confuse analysis with the separate reading-quality assessment. Do not launch an unlimited batch when the user requested a specific set. Selection and generation CLI details are in `docs/architecture.md` under background tools.
+
+When the user explicitly supplies an arXiv identifier or URL, use the shared report service in `reportagent/services/one_report.py`. It downloads an explicit revision, extracts full text, validates analysis and persists the artifact. Reuse completed analysis only when the PDF and prompt/model fingerprints match; pending quality assessments remain retryable.
 
 Run from the project root:
 ```bash

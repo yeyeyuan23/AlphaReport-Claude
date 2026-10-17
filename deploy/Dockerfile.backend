@@ -26,8 +26,7 @@ ENV PATH="/opt/venv/bin:$PATH" \
     ALPHAREPORT_PYTHON=/opt/venv/bin/python \
     ALPHAREPORT_FRONTEND_PREBUILT=true \
     CLAUDE_CONFIG_DIR=/app/.claude-bot \
-    DISABLE_AUTOUPDATER=1 \
-    HF_ENDPOINT=https://hf-mirror.com
+    DISABLE_AUTOUPDATER=1
 COPY requirements/ requirements/
 RUN pip install --no-cache-dir --progress-bar off -r requirements/runtime.txt
 COPY reportagent/ reportagent/

@@ -1,4 +1,4 @@
-# Lightweight test environment; excludes optional PDF OCR and embedding runtimes.
+# Lightweight test environment; excludes optional PDF OCR runtimes.
 -r bot.txt
 fastapi>=0.104
 uvicorn[standard]>=0.24

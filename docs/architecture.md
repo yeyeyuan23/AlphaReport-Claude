@@ -52,9 +52,10 @@ WebSocket 和 HTTP inbox 只提取消息字段，交给 `handle_incoming_message
 
 任务定义跟随技能管理，运行设置归入 `configs/`，详见 [配置说明](../configs/README.md)。
 普通聊天的通用系统提示位于 `bot/claude.py`，并附加 registry 读取的技能说明。
-CLI 和 `/api/v1/skills` 使用同一 registry；用户技能默认保存在 `data/user_skills/`。
-`cli.skills` 提供列表和详情，保存、更新与删除使用 registry 的 Python 接口。
-资源解析须限制在技能目录内，用户提供的名称不能直接成为文件路径。
+CLI 和 `/api/v1/skills` 使用同一 registry，只读取配置的仓库技能目录。
+`cli.skills` 提供内置任务列表和详情，资源解析限制在各技能目录内。
+聊天根据用户提到的标题或上下文查库，内部解析研报 ID 后调用共享 CLI；
+不要求用户查询数据库编号，也不为分类、评分和卡片增加独立交互步骤。
 
 技能指导模型工作；权限、输入与响应校验、缓存和发送回执由代码执行。
 读取已有结果不需要调用模型。
@@ -109,20 +110,19 @@ CLI 和 `/api/v1/skills` 使用同一 registry；用户技能默认保存在 `da
   `cli.narrative_brief` 使用同一服务，不额外调用模型，无有效评估时只显示摘要和待核验状态。
   `POST /api/v1/reports/{report_id}/research-briefing?force=true` 可调用模型生成叙事文本，
   提示词位于 `analyze-report/briefing.md`；返回文本不写入质量评估或改变推荐。
-- **复现准备与研究创意**：`reproduction` 从可用全文提取设置，原文事实须附可定位引文；
+- **复现准备**：`reproduction` 从可用全文提取设置，原文事实须附可定位引文；
   建议方案单独标注，成功卡片保存到 `analysis_json.reproduction_preparation`。
-  `research_ideation` 使用语义索引检索文献，再让模型提出有范围声明的候选假设，
-  外部查新可按需使用 Tavily；检索失败与未命中分开处理。
+  网页和普通聊天按需调用同一服务，不下载数据或运行实验。
 
 Web 中两项定时任务独立配置，每天含周末执行：`daily_collection` 默认北京时间 08:00
 调用 `scheduled_collection`，通过共享采集服务入库；`daily_report` 默认 09:00
 调用与手动 `/daily` 相同的报告服务。`cli.scheduled_collect` 可按配置补跑采集。
 手动 `/daily`、`/weekly` 不依赖定时开关，周报自动运行使用外部调度。
 
-## 内部处理与维护工具
+## 后台处理与维护工具
 
 下载、解析、正文清洗、公式/表格提取、去重、缓存和索引维护是业务内部步骤。
-正常阅读和启动导入不要求先运行维护命令。用户功能及部署入口见 [README](../README.md#功能与入口)。
+正常阅读和启动导入不要求先运行维护命令。用户功能及部署入口见 [README](../README.md#功能与使用)。
 
 ### PDF、公式与表格解析
 
@@ -144,26 +144,72 @@ Web 中两项定时任务独立配置，每天含周末执行：`daily_collectio
 本地导入的 PDF 留在配置目录，数据库记录其原路径；部署时应持久化整个资料目录。
 单篇产物在 `data/one_reports/`，采集记录在 `data/collections/`，日报产物在 `data/daily_reports/`。
 
-### 向量索引准备与重建
+### 分类、批量分析与评分
 
-语义检索与研究创意使用 `vector_store` 的 Chroma 索引，它独立于 SQLite，
-普通采集和 `/report` 不自动填充索引。用途和查询示例见 [README](../README.md#按意思查找论文语义检索)。
+这些 CLI 供聊天工具和部署者调用，普通用户无需记住研报编号或分类代码。
+分类默认在采集与导入时完成，相关性评分由采集和报告流程调用；只有需要重跑时才手动使用。
+以下 ID、分类和日期均为示例，调用前查询当前资料；模型操作可能产生费用。
 
 ```bash
-.venv/bin/python -m reportagent.vector_store.populate --source arxiv --limit 100
-.venv/bin/python -m reportagent.vector_store.populate --report-id 12
+# 查询已存材料；--full 包含提取全文，详情自动隐藏过期分析
+.venv/bin/python -m reportagent.cli.db_query --search '因子模型' --limit 20
+.venv/bin/python -m reportagent.cli.db_query --get 12 --full
+.venv/bin/python -m reportagent.cli.db_query --list --json-output data/reports-export.json
+# 分类：--report-id / --recent / --all 三选一；可用 --dry-run 预览
+.venv/bin/python -m reportagent.cli.classify --recent 20 --hybrid --dry-run
+# 分析：--report-id / --recent / --all / --unanalyzed / --topic 五选一
+.venv/bin/python -m reportagent.cli.analyze --report-id 12 --depth standard
+.venv/bin/python -m reportagent.cli.analyze --topic factor_model --depth standard
+.venv/bin/python -m reportagent.cli.analyze --unanalyzed --depth quick
+# 摘要相关性初筛，不是全文质量评估；预览也会调用模型
+.venv/bin/python -m reportagent.cli.llm_filter --created-date 2026-10-17 --threshold 6 --batch-size 10 --dry-run
+.venv/bin/python -m reportagent.cli.llm_direction_filter --report-ids 12,18 --dry-run --json
+# 从已保存且有效的全文评估投影卡片，不额外调用模型
+.venv/bin/python -m reportagent.cli.narrative_brief --report-id 12 --dry-run
+# 按需核对复现设置；--dry-run 不写数据库，但可能调用模型
+.venv/bin/python -m reportagent.cli.reproduction --report-id 12 --dry-run
 ```
 
-构建索引会运行 embedding，可能下载本地模型或调用模型 API；设置由 `vector_store` 管理。
-默认处理含全文论文，`--clear` 删除已有索引再重建。资料更新或删除后须核对索引版本。
+分析深度为 `quick`、`standard`、`deep`。批量分析结果保存在 `analysis_json`，
+摘要分析与全文分析分别标明材料范围；它不会自动成为全文质量评估或发送飞书消息。
+`--force` 可重新分析；缺失原文设置不能推测成已报告事实。
+普通评分与方向明细共用输入、提示词、材料指纹和失败判定；
+`cli.llm_filter` 默认最多处理 200 篇，`--max-papers 0` 表示所选窗口内不限，日报已使用不限设置。
+有效同批结果先保存，模型或保存失败仍向调用方返回失败，不将待补材料当成低分。
+
+部署镜像的 Claude Code 权限只放行已列出的业务 CLI；这里新增调用方时应同步检查
+`deploy/claude-settings.json`，不放开通用 Shell 来绕过缺失的专用权限。
+
+### 采集补跑与报告预览
+
+默认自动采集与日报由 Web 调度，CLI 用于部署者补跑或聊天按需调用；
+`--dry-run` 只控制投递/保存范围，不保证免费或完全只读。
+
+```bash
+# 按当前部署配置补跑同一采集任务；会联网、分类和更新资料
+.venv/bin/python -m reportagent.cli.scheduled_collect
+.venv/bin/python -m reportagent.cli.collect --topics '因子模型,高频交易' --sources arxiv,eastmoney,bigquant --days 7 --max 15 --no-analysis
+# 单篇产物不指定目标时仅生成；已有产物可在明确授权目标后投递
+.venv/bin/python -m reportagent.cli.report --arxiv-id 2005.13665
+.venv/bin/python -m reportagent.cli.report --artifact data/one_reports/2005.13665v3.json --chat-id oc_your_chat_id
+# 日报预览会刷新评分与评估、保存运行记录，不发送
+.venv/bin/python -m reportagent.cli.daily_feishu_push --dry-run --output data/daily-preview.md
+# 周报仅读缓存的模板预览；weeks-ago 每增加1，将7天窗口前移7天
+.venv/bin/python -m reportagent.cli.weekly_report --dry-run --no-llm --output data/weekly-preview.md
+.venv/bin/python -m reportagent.cli.weekly_report --weeks-ago 1 --dry-run
+```
+
+`--force-review` 用于日/周报强制更新评估，`--max-reviews N` 覆盖共享的可选评估预算，
+默认不限。日报的 `--report-ids` 是显式检查已选论文，跳过日期与摘要相关性候选限制，
+不用于自动采集。单篇产物文件名以实际版本为准，成功投递回执保留；产物中的旧评估不能覆盖库中当前有效的评估。
 
 ## 修改与验证
 
 业务逻辑放共享服务，入口负责适配；应用代码不反向导入 `scripts/`。
 修改入口、文件位置或参数时，同步检查 Shell、Docker、技能说明与测试中的调用。
-维护阅读 API 地址、材料及分析的缓存指纹、用户技能与单篇投递回执的一致性。
+维护阅读 API 地址、材料及分析的缓存指纹、内置任务资源与单篇投递回执的一致性。
 空研报 ID、多候选与参数错误须明确处理，不能默默选择第一项；单条入库失败须先回滚再处理后续记录。
 干净 checkout 缺少 `frontend/dist/` 时应能导入应用和运行后端测试。
 
-检查命令见 [README](../README.md#自动检查ci)，离线测试和真实材料验收的分工见
+检查命令见 [README](../README.md#维护与排查)，离线测试和真实材料验收的分工见
 [tests/README.md](../tests/README.md)。前端构建与 lint、程序正确性与研究内容质量分别验证。

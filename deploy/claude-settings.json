@@ -9,8 +9,11 @@
       "Bash(.venv/bin/python -m reportagent.cli.llm_filter *)",
       "Bash(.venv/bin/python -m reportagent.cli.daily_feishu_push *)",
       "Bash(.venv/bin/python -m reportagent.cli.weekly_report *)",
-      "Bash(.venv/bin/python -m reportagent.cli.ideation *)",
-      "Bash(.venv/bin/python -m reportagent.cli.reproduction *)"
+      "Bash(.venv/bin/python -m reportagent.cli.reproduction *)",
+      "Bash(.venv/bin/python -m reportagent.cli.analyze *)",
+      "Bash(.venv/bin/python -m reportagent.cli.classify *)",
+      "Bash(.venv/bin/python -m reportagent.cli.llm_direction_filter *)",
+      "Bash(.venv/bin/python -m reportagent.cli.narrative_brief *)"
     ]
   }
 }

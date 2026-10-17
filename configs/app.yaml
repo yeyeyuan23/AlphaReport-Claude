@@ -63,13 +63,6 @@ collection:
     retry_backoff_seconds: 2
     max_retry_delay_seconds: 30  # Retry-After 与指数退避均受此上限约束
 
-# ── Vector Store ──────────────────────────────────────
-vector_store:
-  persist_dir: "data/chroma_db"
-  embedding_backend: "local"
-  local_model: "BAAI/bge-small-zh-v1.5"
-  local_dim: 512
-
 # ── Feishu Bot ────────────────────────────────────────
 feishu:
   enabled: true
@@ -99,4 +92,3 @@ server:
 # One skill library for every adapter.
 skills:
   builtin_dir: "skills"
-  user_dir: "data/user_skills"

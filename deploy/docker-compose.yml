@@ -16,7 +16,6 @@ services:
       ALPHAREPORT_BIND_HOST: "0.0.0.0"
       ALPHAREPORT_PORT: "8000"
       ALPHAREPORT_PUBLIC_TUNNEL: "false"
-      HF_ENDPOINT: "${HF_ENDPOINT:-https://hf-mirror.com}"
       HOME: /app/data/runtime-home
       OPENBLAS_NUM_THREADS: "1"
       OMP_NUM_THREADS: "1"
@@ -26,7 +25,6 @@ services:
       - "${PORT:-80}:8000"
     volumes:
       - ${DATA_DIR:-/data1/alphareport/data}:/app/data
-      - ${MODEL_CACHE:-/data1/alphareport/model_cache}:/app/data/runtime-home/.cache/huggingface
       - ${CONFIG_DIR:-/data1/alphareport/configs}/app.yaml:/app/configs/app.yaml:ro
       - ${BOT_STATE_DIR:-/data1/alphareport/bot_state}:/app/.claude-bot
     command: ["bash", "start.sh"]

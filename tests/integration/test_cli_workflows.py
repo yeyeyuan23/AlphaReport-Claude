@@ -32,7 +32,6 @@ from tests.support.collection_scoring import RelevanceModel
         ("weekly_report", "--no-llm"),
         ("scheduled_collect", "--help"),
         ("reproduction", "--dry-run"),
-        ("ideation", "--verify-external"),
         ("parse_pdf", "--save"),
         ("db_query", "--update-knowledge-card"),
     ],

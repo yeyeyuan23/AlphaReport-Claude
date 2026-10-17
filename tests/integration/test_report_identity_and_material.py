@@ -321,61 +321,6 @@ def test_source_identity_migration_is_additive_and_repeatable(monkeypatch):
         engine.dispose()
 
 
-def test_vector_index_uses_retained_newer_material_and_classification(
-    library, monkeypatch
-):
-    import sys
-    from types import SimpleNamespace
-    from reportagent.models.schemas import Topic
-
-    session, repo = library
-    newest = incoming(
-        source=SourceType.ARXIV,
-        arxiv_id="2005.13665v3",
-        title="Current title",
-        full_text="Current body",
-    )
-    newest.classification.topics = [Topic.FACTOR_MODEL]
-    _, rid = repo.upsert_report(newest)
-    old = incoming(
-        source=SourceType.ARXIV,
-        arxiv_id="2005.13665v1",
-        title="Old title",
-        full_text="Stale body",
-    )
-    repo.upsert_report(old)
-    captured = []
-    fake_store = SimpleNamespace(
-        index_report=lambda **kwargs: captured.append(kwargs) or 1
-    )
-    monkeypatch.setitem(
-        sys.modules,
-        "reportagent.vector_store.store",
-        SimpleNamespace(
-            get_vector_store=lambda: fake_store, VectorStore=lambda: fake_store
-        ),
-    )
-    from reportagent.vector_store import populate
-
-    monkeypatch.setattr(
-        populate,
-        "get_session_factory",
-        lambda: sessionmaker(bind=session.get_bind()),
-    )
-    monkeypatch.setattr(populate, "get_vector_store", lambda: fake_store)
-    monkeypatch.setattr(sys, "argv", ["populate", "--report-id", str(rid)])
-    populate.main()
-    assert len(captured) == 1
-    row = captured[0]
-    assert (
-        row["report_id"],
-        row["title"],
-        row["text"],
-        row["topics"],
-        row["source"],
-    ) == (rid, "Current title", "Current body", "factor_model", "arxiv")
-
-
 def test_bigquant_relative_and_absolute_doc_paths_identify_same_document(library):
     session, repo = library
     _, rid = repo.upsert_report(

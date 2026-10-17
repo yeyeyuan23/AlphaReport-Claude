@@ -46,7 +46,6 @@ if args and args[0] == 'inspect':
         **os.environ,
         "PATH": str(binary) + os.pathsep + os.environ["PATH"],
         "DATA_DIR": str(state / "data"),
-        "MODEL_CACHE": str(state / "models"),
         "CONFIG_DIR": str(state / "configs"),
         "BOT_STATE_DIR": str(state / "sessions"),
         "ENV_FILE": str(env_file),
@@ -139,8 +138,17 @@ def test_fresh_image_grants_only_named_shared_skill_commands():
         "Fresh containers need tracked permissions for shared skill CLIs"
     )
     allowed = json.loads(settings.read_text())["permissions"]["allow"]
-    assert "Bash(.venv/bin/python -m reportagent.cli.report *)" in allowed
-    assert "Bash(.venv/bin/python -m reportagent.cli.reproduction *)" in allowed
+    for command in (
+        "report",
+        "reproduction",
+        "db_query",
+        "analyze",
+        "classify",
+        "llm_filter",
+        "llm_direction_filter",
+        "narrative_brief",
+    ):
+        assert f"Bash(.venv/bin/python -m reportagent.cli.{command} *)" in allowed
     assert "Bash" not in allowed and "Bash(*)" not in allowed
     dockerfile = (PROJECT_ROOT / "deploy/Dockerfile.backend").read_text()
     assert "COPY deploy/claude-settings.json /app/.claude/settings.json" in dockerfile

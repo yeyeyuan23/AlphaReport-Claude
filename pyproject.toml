@@ -24,9 +24,6 @@ dependencies = [
   "arxiv>=2.1",
   "httpx>=0.27",
   "beautifulsoup4>=4.12",
-  # 向量检索
-  "chromadb>=0.5",
-  "sentence-transformers>=3.0",
   # 定时任务
   "apscheduler>=3.10",
   # 配置

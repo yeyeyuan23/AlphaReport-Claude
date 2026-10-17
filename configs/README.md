@@ -11,7 +11,6 @@
 它仍属于分析技能；`app.yaml` 中的调度时间即使写成文本，也仍属于运行配置。
 按职责划分，不按文件扩展名划分。
 
-头脑风暴任务的角色提示词在 `skills/research-ideation/system.md`。
 密钥保存在忽略提交的 `.env` 中。
 
 `llm.thinking` 控制 Python Anthropic 兼容请求的思考模式；当前 DeepSeek 结构化流程设为

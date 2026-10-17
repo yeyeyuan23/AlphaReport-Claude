@@ -4,12 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 export DATA_DIR="${DATA_DIR:-/data1/alphareport/data}"
-export MODEL_CACHE="${MODEL_CACHE:-/data1/alphareport/model_cache}"
 export CONFIG_DIR="${CONFIG_DIR:-/data1/alphareport/configs}"
 export BOT_STATE_DIR="${BOT_STATE_DIR:-/data1/alphareport/bot_state}"
 export ENV_FILE="${ENV_FILE:-/data1/alphareport/.env}"
 export PORT="${PORT:-80}"
-export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 export APP_UID="${APP_UID:-$(id -u)}"
 export APP_GID="${APP_GID:-$(id -g)}"
 COMPOSE_FILE="$SCRIPT_DIR/docker-compose.yml"
@@ -24,8 +22,8 @@ else
     exit 1
 fi
 docker info >/dev/null
-mkdir -p "$DATA_DIR/pdf_library" "$DATA_DIR/chroma_db" "$DATA_DIR/runtime-home" \
-    "$MODEL_CACHE" "$CONFIG_DIR" "$BOT_STATE_DIR" "$(dirname "$ENV_FILE")"
+mkdir -p "$DATA_DIR/pdf_library" "$DATA_DIR/runtime-home" \
+    "$CONFIG_DIR" "$BOT_STATE_DIR" "$(dirname "$ENV_FILE")"
 if [[ ! -f "$ENV_FILE" ]]; then
     cp "$PROJECT_DIR/.env.example" "$ENV_FILE"
     chmod 600 "$ENV_FILE"
