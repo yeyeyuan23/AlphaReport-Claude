@@ -81,7 +81,9 @@ async def _scan(root: Path, result: dict):
                         safe_source_error(error, "classification initialization"),
                     )
             errors = []
-            classified = await classify_for_storage(sr, rules, llm, errors)
+            classified = await classify_for_storage(
+                sr, rules, llm, errors, model_unavailable=llm is None
+            )
             if await asyncio.to_thread(_file_hash, path) != fingerprint:
                 raise SourceParseError(
                     "PDF changed during import; retry on next startup"
@@ -101,8 +103,6 @@ async def _scan(root: Path, result: dict):
                 action, report_id = ReportRepository(session).upsert_report(classified)
                 result[action] += 1
                 result["report_ids"].append(report_id)
-                if llm is None:
-                    errors.append("classification unavailable; rule fallback used")
                 if not errors:
                     session.merge(
                         LocalPDFImport(

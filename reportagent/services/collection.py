@@ -27,6 +27,7 @@ from reportagent.sources.base import (
     usable_full_text,
 )
 from reportagent.classifiers.rule_classifier import RuleClassifier
+from reportagent.classifiers.provenance import classification_material, failed_attempt
 from reportagent.classifiers.llm_classifier import (
     LLMClassifier,
     ClassificationEvidenceError,
@@ -53,13 +54,13 @@ class CollectionOptions:
     broad: bool = False
 
 
-async def classify_for_storage(sr, classifier, llm_classifier, errors):
+async def classify_for_storage(
+    sr, classifier, llm_classifier, errors, *, model_unavailable: bool = False
+):
     """Apply the shared domain gate and classification fallback before persistence."""
     title = sr.title or ""
-    introduction = sr.raw_metadata.get("introduction")
-    abstract = sr.abstract or (
-        f"【原文引言；未提取到论文摘要】\n{introduction}" if introduction else ""
-    )
+    abstract = classification_material(sr)
+    error_kind = None
     if not title.strip():
         raise SourceParseError("report missing title")
     if not is_quant_finance(title, abstract):
@@ -68,20 +69,27 @@ async def classify_for_storage(sr, classifier, llm_classifier, errors):
         try:
             classification = await llm_classifier.classify(title, abstract)
         except ClassificationEvidenceError:
-            errors.append(
-                "classification evidence invalid; stored unclassified for retry"
-            )
+            errors.append("classification evidence invalid; retry required")
+            error_kind = "invalid_evidence"
             classification = ClassificationResult(
                 method="unverified", provenance={"status": "unverified"}
             )
         except Exception as error:
             logger.warning("Classification fallback: %s", type(error).__name__)
             errors.append(
-                safe_source_error(error, "classification; rule fallback used")
+                safe_source_error(error, "classification failed; retry required")
             )
+            error_kind = "model_error"
             classification = classifier.classify(title, abstract)
     else:
         classification = classifier.classify(title, abstract)
+        if model_unavailable:
+            error_kind = "model_error"
+            errors.append("classification unavailable; retry required")
+    if error_kind is not None:
+        classification.provenance["last_failed_attempt"] = failed_attempt(
+            title, abstract, error_kind
+        )
     return ClassifiedReport(search_result=sr, classification=classification)
 
 
@@ -184,12 +192,14 @@ async def collect_reports(
     # Init LLM-based classification and analysis
     llm_client = None
     llm_classifier = None
+    model_unavailable = False
     try:
         llm_client = LLMClient()
         llm_classifier = LLMClassifier(llm_client)
         logger.info("LLM client ready for classification")
     except Exception as e:
-        logger.warning(f"LLM client init failed: {e}, falling back to rule-based only")
+        model_unavailable = True
+        logger.warning("LLM client init failed: %s", type(e).__name__)
 
     source_statuses = []
     collection_errors = []
@@ -284,7 +294,11 @@ async def collect_reports(
                                 continue
                         progress("classifying", f"Classifying {source_name} metadata")
                         classified = await classify_for_storage(
-                            sr, classifier, llm_classifier, errors
+                            sr,
+                            classifier,
+                            llm_classifier,
+                            errors,
+                            model_unavailable=model_unavailable,
                         )
                         if classified is None:
                             screening["checked"] += 1

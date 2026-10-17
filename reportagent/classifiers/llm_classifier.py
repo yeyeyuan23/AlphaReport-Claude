@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import logging
 import math
-import hashlib
 import json
 
 from reportagent.classifiers.taxonomy import load_taxonomy
+from reportagent.classifiers.provenance import input_fingerprint
 from reportagent.llm.client import LLMClient
 from reportagent.skills.registry import skill_resource
 from reportagent.services.text_evidence import locate_quote
@@ -118,7 +118,7 @@ class LLMClassifier:
                     parsed.provenance["repair_status"] = "failed"
             return parsed
         except Exception as e:
-            logger.warning("LLM classification failed: %s", e)
+            logger.warning("LLM classification failed: %s", type(e).__name__)
             raise
 
     def _format_taxonomy(self, taxonomy: dict) -> str:
@@ -226,9 +226,7 @@ class LLMClassifier:
             method="llm",
             provenance={
                 "schema_version": 1,
-                "input_sha256": hashlib.sha256(
-                    (title + "\n" + text).encode()
-                ).hexdigest(),
+                "input_sha256": input_fingerprint(title, text),
                 "labels": supported,
                 "rejected_labels": rejected,
             },

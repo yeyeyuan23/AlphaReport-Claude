@@ -9,6 +9,7 @@ from sqlalchemy import or_, desc, asc, func
 from sqlalchemy.orm import Session
 
 from reportagent.models.database import Report, Tag, SearchHistory
+from reportagent.classifiers.provenance import reusable_provenance
 from reportagent.models.schemas import (
     ClassifiedReport,
     StorageResult,
@@ -86,6 +87,7 @@ class ReportRepository:
             ):
                 # A delayed source response must not roll the library back.
                 return "updated", existing.id
+            retained_provenance = reusable_provenance(existing, sr, cl)
             revision_changed = bool(sr.arxiv_id and sr.arxiv_id != existing.arxiv_id)
             checked_local_pdf = (
                 sr.source == SourceType.LOCAL_PDF and existing.source == "local_pdf"
@@ -175,7 +177,12 @@ class ReportRepository:
                 existing.has_full_text = not sr.abstract_only
             if sr.abstract or checked_abstract:
                 existing.abstract = sr.abstract
-            self.apply_classification(existing, cl)
+            if retained_provenance is None:
+                self.apply_classification(existing, cl)
+            else:
+                existing.classification_provenance_json = json.dumps(
+                    retained_provenance, ensure_ascii=False, sort_keys=True
+                )
             # Save analysis of the accepted material after invalidating stale outputs.
             # A metadata-only reimport without analysis must preserve the current one.
             if report.analysis is not None:
