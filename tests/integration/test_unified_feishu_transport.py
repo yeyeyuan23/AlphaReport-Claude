@@ -41,7 +41,9 @@ def test_text_requires_real_nonempty_message_id(sdk, bad_id):
 
 
 @pytest.mark.parametrize("service", [daily_push, weekly_report])
-def test_card_failure_falls_back_to_complete_utf8_bounded_text(sdk, service, monkeypatch):
+def test_card_failure_falls_back_to_complete_utf8_bounded_text(
+    sdk, service, monkeypatch
+):
     from reportagent.services import feishu_transport
 
     build = MagicMock(return_value=sdk)

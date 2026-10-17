@@ -179,7 +179,9 @@ class DeliveryTests(unittest.TestCase):
 
         with (
             patch.object(lark_oapi.Client, "builder") as builder,
-            patch("reportagent.services.feishu_transport.send_payload", side_effect=send),
+            patch(
+                "reportagent.services.feishu_transport.send_payload", side_effect=send
+            ),
         ):
             builder.return_value.app_id.return_value.app_secret.return_value.build.return_value = client
             self.assertTrue(daily.send_feishu_card("A", briefing, papers))
