@@ -265,3 +265,32 @@ def test_collection_review_does_not_rescore_stale_relevance(library, monkeypatch
     result = asyncio.run(collection_reviews.prepare_collection_reviews())
     assert result["unreviewed_candidates"] == 0
     assert result["review_ids"] == []
+
+
+def test_weekly_groups_all_recommendations_by_beijing_announcement_day():
+    papers = [
+        assessed(
+            paper(
+                rid=i,
+                title=f"研究{i}",
+                announced_at="2026-10-15T18:00:00+00:00",
+                published_date="2021-01-01",
+            )
+        )
+        for i in range(1, 8)
+    ]
+    papers.append(
+        assessed(
+            paper(rid=8, title="较早公告", announced_at="2026-10-15T01:00:00+00:00")
+        )
+    )
+    text = weekly.generate_weekly_report(papers, "2026-10-10", "2026-10-17")
+    assert "## 本周研究更新" in text
+    assert (
+        "重点推荐 8 篇" in text
+    )  # Weekly compact recommendations are not capped at daily's five.
+    assert text.index("### 2026-10-16") < text.index("### 2026-10-15")
+    assert "### 2021-01-01" not in text
+    assert all(text.count(f"**研究{i}**") == 1 for i in range(1, 8))
+    assert "**方法与发现**" not in text and "**阅读建议**" not in text
+    assert "作者证明：只有温度充分小时才保持凸性，过大时可能失去凸性。" in text

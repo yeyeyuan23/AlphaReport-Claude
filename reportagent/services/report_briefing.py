@@ -138,6 +138,12 @@ def render_briefing(
     source_checked_at: str | None = None,
     publication_window: str = "",
 ) -> str:
+    if template_skill == "weekly-report":
+        from reportagent.services.weekly_briefing import render_weekly_briefing
+
+        return render_weekly_briefing(
+            papers, date_label, publication_window=publication_window
+        )
     ordered = sorted(
         papers,
         key=lambda p: (
