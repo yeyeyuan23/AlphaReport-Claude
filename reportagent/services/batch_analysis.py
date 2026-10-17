@@ -8,6 +8,7 @@ import asyncio
 import json
 import hashlib
 import logging
+import inspect
 
 from sqlalchemy import update
 
@@ -85,7 +86,13 @@ class AnalysisOptions:
     topic: str | None = None
 
 
-async def run_analysis(options: AnalysisOptions) -> dict:
+async def run_analysis(
+    options: AnalysisOptions,
+    *,
+    progress_cb=None,
+    cancel_check=None,
+    session_factory=None,
+) -> dict:
     """Analyze a library selection, preserving successes when another paper fails.
 
     ``report_ids`` contains the entire selection, including cached and empty papers.
@@ -100,8 +107,9 @@ async def run_analysis(options: AnalysisOptions) -> dict:
         raise ValueError("topic must be one nonempty classification token")
     if options.recent is not None and options.recent < 1:
         raise ValueError("recent must be positive")
-    init_db()
-    factory = get_session_factory()
+    if session_factory is None:
+        init_db()
+    factory = session_factory or get_session_factory()
     session = factory()
 
     llm_client = None
@@ -143,6 +151,7 @@ async def run_analysis(options: AnalysisOptions) -> dict:
             "failed_ids": [],
             "errors": {},
             "evidence_scope_by_id": {},
+            "results_by_id": {},
         }
 
         if not reports:
@@ -178,6 +187,7 @@ async def run_analysis(options: AnalysisOptions) -> dict:
                 r.analysis_json, fingerprint, options.depth
             ):
                 audit["skipped_ids"].append(r.id)
+                audit["results_by_id"][r.id] = json.loads(r.analysis_json)
                 continue
 
             full_text = (
@@ -191,6 +201,20 @@ async def run_analysis(options: AnalysisOptions) -> dict:
                 continue
 
             try:
+
+                def check_cancelled():
+                    if cancel_check and cancel_check():
+                        raise ValueError("分析已取消，停止保存")
+
+                async def progress(phase, label):
+                    check_cancelled()
+                    if progress_cb:
+                        pending = progress_cb(report_id, phase, label)
+                        if inspect.isawaitable(pending):
+                            await pending
+                    check_cancelled()
+
+                check_cancelled()
                 current_policy = analysis_cache_fingerprint(None, options.depth)
                 if llm_client is None:
                     agent_policy = current_policy
@@ -205,7 +229,9 @@ async def run_analysis(options: AnalysisOptions) -> dict:
                     full_text=full_text,
                     depth=options.depth,
                     equations_json=r.equations_json,
+                    progress_cb=progress,
                 )
+                check_cancelled()
                 if options.depth == "quick":
                     if not all(
                         value.strip()
@@ -255,6 +281,7 @@ async def run_analysis(options: AnalysisOptions) -> dict:
                     get_knowledge_card(write_session.get(Report, report_id))
                     write_session.commit()
                 audit["analyzed_ids"].append(r.id)
+                audit["results_by_id"][r.id] = analysis_dict
                 logger.info(f"  [{i + 1}/{len(reports)}] ✓ {r.title[:50]}")
             except Exception as e:
                 audit["failed_ids"].append(r.id)

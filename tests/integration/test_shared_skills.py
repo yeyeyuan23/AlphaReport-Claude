@@ -86,13 +86,10 @@ class SharedSkillTests(unittest.TestCase):
                 "Use the team workflow",
             )
 
-    def test_both_agent_prompts_receive_updated_shared_instructions(self):
+    def test_bot_prompt_receives_updated_shared_instructions(self):
         from reportagent.bot.claude import build_system_prompt
-        from reportagent.chat.graph import _load_system_prompt as plan_prompt
-        from reportagent.chat.agent import _load_system_prompt as react_prompt
 
-        for loader in [build_system_prompt, plan_prompt, react_prompt]:
-            self.assertIn("FINAL_REQUIRED_RULE", loader())
+        self.assertIn("FINAL_REQUIRED_RULE", build_system_prompt())
 
 
 if __name__ == "__main__":

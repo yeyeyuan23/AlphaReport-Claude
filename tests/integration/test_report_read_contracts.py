@@ -1,4 +1,4 @@
-"""Current and historical HTTP readers share workflows, not their wire format."""
+"""The maintained HTTP reader delegates to shared, evidence-aware workflows."""
 
 from datetime import datetime
 import inspect
@@ -12,7 +12,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from reportagent.api import library, reports
+from reportagent.api import library
 from reportagent.db.repository import ReportRepository
 from reportagent.models.database import Base, Report, Tag
 from reportagent.services import report_views
@@ -51,7 +51,7 @@ CURRENT_FIELDS = {
 DETAIL_FIELDS = {"full_text", "summary", "tables_json", "equations_json", "analysis"}
 
 
-@pytest.fixture(params=[library, reports], ids=["current", "legacy"])
+@pytest.fixture(params=[library], ids=["current"])
 def reader(request):
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
@@ -398,11 +398,8 @@ def test_knowledge_card_refresh_commits_only_changed_projection_and_preserves_ev
 def test_adapter_execution_modes_and_serializer_imports_are_compatible():
     for name in ["list_reports", "get_stats", "get_report"]:
         assert not inspect.iscoroutinefunction(getattr(library, name))
-        assert inspect.iscoroutinefunction(getattr(reports, name))
     assert not inspect.iscoroutinefunction(library.get_knowledge_card)
-    assert not inspect.iscoroutinefunction(reports.get_knowledge_card)
     assert library._report_to_dict is report_views.report_to_dict
-    assert callable(reports._report_to_summary)
 
 
 @pytest.mark.parametrize(
@@ -413,14 +410,14 @@ def test_adapter_execution_modes_and_serializer_imports_are_compatible():
         ("post", "/1/knowledge-card", "get_knowledge_card"),
     ],
 )
-def test_both_adapters_execute_the_same_read_service(
+def test_reader_executes_the_shared_read_service(
     reader, monkeypatch, method, path, service_name
 ):
     # Fail before extraction, then wrap the real implementation rather than return
     # a canned response: output-only equivalence would miss duplicated workflows.
     service = getattr(reader.adapter, "report_reads", None)
     assert service is not None, "adapter must delegate to the shared read service"
-    assert library.report_reads is reports.report_reads is service
+    assert library.report_reads is service
     original = getattr(service, service_name)
     calls = []
 

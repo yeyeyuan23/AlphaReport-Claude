@@ -326,7 +326,6 @@ def test_vector_index_uses_retained_newer_material_and_classification(
 ):
     import sys
     from types import SimpleNamespace
-    from reportagent.agents import storage_agent
     from reportagent.models.schemas import Topic
 
     session, repo = library
@@ -352,14 +351,20 @@ def test_vector_index_uses_retained_newer_material_and_classification(
     monkeypatch.setitem(
         sys.modules,
         "reportagent.vector_store.store",
-        SimpleNamespace(get_vector_store=lambda: fake_store),
+        SimpleNamespace(
+            get_vector_store=lambda: fake_store, VectorStore=lambda: fake_store
+        ),
     )
+    from reportagent.vector_store import populate
+
     monkeypatch.setattr(
-        storage_agent,
+        populate,
         "get_session_factory",
         lambda: sessionmaker(bind=session.get_bind()),
     )
-    storage_agent.StorageAgent._index_into_vector_store([old])
+    monkeypatch.setattr(populate, "get_vector_store", lambda: fake_store)
+    monkeypatch.setattr(sys, "argv", ["populate", "--report-id", str(rid)])
+    populate.main()
     assert len(captured) == 1
     row = captured[0]
     assert (

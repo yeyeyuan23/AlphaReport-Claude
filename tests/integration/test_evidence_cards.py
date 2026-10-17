@@ -33,13 +33,10 @@ def library():
     engine.dispose()
 
 
-def client_for(factory, legacy=False):
-    if legacy:
-        from reportagent.api.legacy_app import app
-    else:
-        from reportagent.main import create_app
+def client_for(factory):
+    from reportagent.main import create_app
 
-        app = create_app()
+    app = create_app()
 
     def db():
         with factory() as session:
@@ -49,14 +46,13 @@ def client_for(factory, legacy=False):
     return TestClient(app)
 
 
-@pytest.mark.parametrize("legacy", [False, True])
-def test_web_cards_reject_legacy_cache_and_use_current_evidence(library, legacy):
+def test_web_cards_reject_legacy_cache_and_use_current_evidence(library):
     with library() as db:
         db.get(Report, 1).knowledge_card_json = json.dumps(
             {"highlights": ["fabricated 99%"], "quality_score": 9}
         )
         db.commit()
-    client = client_for(library, legacy)
+    client = client_for(library)
     try:
         first = client.post("/api/v1/reports/1/knowledge-card").json()["data"]
         assert first["status"] == "ready" and first["quality_score"] is None
@@ -71,9 +67,8 @@ def test_web_cards_reject_legacy_cache_and_use_current_evidence(library, legacy)
             db.commit()
         pending = client.post("/api/v1/reports/1/knowledge-card").json()["data"]
         assert pending["status"] == "pending" and not pending["highlights"]
-        if not legacy:
-            detail = client.get("/api/v1/reports/1").json()["data"]
-            assert detail["knowledge_card"]["status"] == "pending"
+        detail = client.get("/api/v1/reports/1").json()["data"]
+        assert detail["knowledge_card"]["status"] == "pending"
         with library() as db:
             assert (
                 json.loads(db.get(Report, 1).knowledge_card_json)["status"] == "ready"

@@ -112,24 +112,20 @@ def test_hybrid_cannot_restore_rule_labels_rejected_by_model():
     assert result.provenance == model.provenance
 
 
-def test_agent_hybrid_cannot_restore_unverified_rule_labels():
-    from reportagent.agents.classification_agent import ClassificationAgent
+def test_collection_cannot_restore_unverified_rule_labels():
     from reportagent.models.schemas import SearchResult, SourceType
+    from reportagent.services.collection import classify_for_storage
 
     rules = SimpleNamespace(
-        classify=lambda title, text: ClassificationResult(
-            topics=[Topic.STATISTICAL_ARB]
-        )
+        classify=lambda *args: ClassificationResult(topics=[Topic.STATISTICAL_ARB])
     )
     model = SimpleNamespace(classify=AsyncMock(return_value=classify(response())))
-    agent = ClassificationAgent(rules, model)
-    state = {
-        "raw_results": [
-            SearchResult(title="Stock prediction", source=SourceType.LOCAL_PDF)
-        ],
-        "messages": [],
-    }
-    final = asyncio.run(agent.run(state))["classified_reports"][0].classification
+    paper = SearchResult(
+        title="Quantitative stock prediction model",
+        abstract="We use graph learning to predict stock returns.",
+        source=SourceType.LOCAL_PDF,
+    )
+    final = asyncio.run(classify_for_storage(paper, rules, model, [])).classification
     assert final.topics == [Topic.AI_ML_MODEL]
     assert final.provenance["labels"]["topics.ai_ml_model"]["quote"] == "graph learning"
 
@@ -187,9 +183,7 @@ def test_failed_quote_repair_retains_only_previously_verified_subset():
     assert result.provenance["repair_status"] == "failed"
 
 
-@pytest.mark.parametrize("entrypoint", ["agent", "collection"])
-def test_all_invalid_model_evidence_cannot_restore_rule_guesses(entrypoint):
-    from reportagent.agents.classification_agent import ClassificationAgent
+def test_all_invalid_model_evidence_cannot_restore_rule_guesses():
     from reportagent.models.schemas import SearchResult, SourceType
     from reportagent.services.collection import classify_for_storage
 
@@ -206,14 +200,8 @@ def test_all_invalid_model_evidence_cannot_restore_rule_guesses(entrypoint):
         abstract="We use neural networks to predict stock returns.",
         source=SourceType.LOCAL_PDF,
     )
-    if entrypoint == "agent":
-        state = {"raw_results": [sr], "messages": []}
-        result = asyncio.run(ClassificationAgent(rules, model).run(state))[
-            "classified_reports"
-        ][0]
-    else:
-        errors = []
-        result = asyncio.run(classify_for_storage(sr, rules, model, errors))
-        assert errors
+    errors = []
+    result = asyncio.run(classify_for_storage(sr, rules, model, errors))
+    assert errors
     assert result.classification.topics == []
     assert result.classification.method == "unverified"

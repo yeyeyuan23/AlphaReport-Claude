@@ -1,4 +1,4 @@
-"""Both collection adapters must construct sources from the same configuration."""
+"""Collection and default source construction share configuration semantics."""
 
 import asyncio
 import importlib
@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from reportagent.agents import graph
 from reportagent.services import collection
+from reportagent.sources import factory as source_factory
 from reportagent.sources.arxiv_source import ArxivSource
 from reportagent.sources.bigquant_source import BigQuantSource
 from reportagent.sources.eastmoney_source import EastMoneySource
@@ -19,11 +19,9 @@ from reportagent.utils import config
 SOURCE_NAMES = ["local_pdf", "arxiv", "eastmoney", "bigquant"]
 
 
-@pytest.fixture(params=["collection", "graph"])
-def build_sources(request):
-    if request.param == "collection":
-        return lambda: collection.build_sources(SOURCE_NAMES)
-    return graph._build_sources
+@pytest.fixture
+def build_sources():
+    return lambda: collection.build_sources(SOURCE_NAMES)
 
 
 def configure(monkeypatch, sources):
@@ -89,16 +87,16 @@ def test_both_callers_preserve_missing_configuration_defaults(
     assert all(s.download_pdfs is True for s in (arxiv, eastmoney, bigquant))
 
 
-def test_explicit_sources_override_enabled_but_graph_defaults_honor_it(monkeypatch):
+def test_explicit_sources_override_enabled_but_defaults_honor_it(monkeypatch):
     configure(monkeypatch, {name: {"enabled": False} for name in SOURCE_NAMES})
 
     assert [s.source_type.value for s in collection.build_sources(SOURCE_NAMES)] == (
         SOURCE_NAMES
     )
-    assert graph._build_sources() == []
+    assert source_factory.build_sources() == []
 
 
-def test_graph_defaults_keep_legacy_order_and_ignore_unknown_config(monkeypatch):
+def test_defaults_keep_order_and_ignore_unknown_config(monkeypatch):
     configure(
         monkeypatch,
         {
@@ -108,7 +106,7 @@ def test_graph_defaults_keep_legacy_order_and_ignore_unknown_config(monkeypatch)
         },
     )
 
-    assert [s.source_type.value for s in graph._build_sources()] == [
+    assert [s.source_type.value for s in source_factory.build_sources()] == [
         "local_pdf",
         "eastmoney",
         "bigquant",
@@ -135,8 +133,7 @@ def test_both_callers_keep_local_path_semantics(build_sources, monkeypatch, path
     assert build_sources()[0].pdf_library_path == Path(path)
 
 
-@pytest.mark.parametrize("caller", ["collection", "graph"])
-def test_adapters_delegate_to_shared_factory(monkeypatch, caller):
+def test_collection_delegates_to_shared_factory(monkeypatch):
     factory = shared_factory()
     expected = [object()]
     calls = []
@@ -146,25 +143,9 @@ def test_adapters_delegate_to_shared_factory(monkeypatch, caller):
         return expected
 
     monkeypatch.setattr(factory, "build_sources", build)
-
-    if caller == "collection":
-        names = ["arxiv", "unknown"]
-        assert collection.build_sources(names) is expected
-        assert calls == [names]
-    else:
-        assert graph._build_sources() is expected
-        assert calls == [None]
-
-
-def test_graph_collection_agent_uses_shared_factory(monkeypatch):
-    factory = shared_factory()
-    sources = [ArxivSource(rate_limit_seconds=0, download_pdfs=False)]
-    monkeypatch.setattr(factory, "build_sources", lambda: sources)
-    monkeypatch.setattr(graph, "get_config", lambda *args, **kwargs: False)
-
-    agent = graph._build_collection_agent()
-
-    assert agent.sources is sources
+    names = ["arxiv", "unknown"]
+    assert collection.build_sources(names) is expected
+    assert calls == [names]
 
 
 def test_collection_workflow_uses_shared_factory_and_keeps_no_valid_sources_error(

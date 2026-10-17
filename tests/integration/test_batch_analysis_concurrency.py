@@ -9,7 +9,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from reportagent.api import library, reports
+from reportagent.api import library
 from reportagent.models.database import Base, Report
 from reportagent.models.schemas import AnalysisResult
 from reportagent.services import batch_analysis as batch
@@ -114,7 +114,7 @@ def test_analysis_reports_a_deleted_row_as_failed(analysis_library, monkeypatch)
         assert db.get(Report, 1) is None
 
 
-@pytest.mark.parametrize("reader", ["current", "legacy", "briefing"])
+@pytest.mark.parametrize("reader", ["current", "briefing"])
 def test_readers_hide_stale_batch_analysis_without_destroying_history(
     analysis_library, reader
 ):
@@ -133,8 +133,6 @@ def test_readers_hide_stale_batch_analysis_without_destroying_history(
         saved = row.analysis_json
         if reader == "current":
             assert "analysis" not in library.get_report(1, db)["data"]
-        elif reader == "legacy":
-            assert "analysis" not in asyncio.run(reports.get_report(1, db))["data"]
         else:
             result = asyncio.run(library.get_research_briefing(1, False, db))["data"]
             assert result["source"] == "empty"
@@ -158,7 +156,6 @@ def test_current_and_legacy_analysis_remain_readable(analysis_library, signed):
         row.analysis_json = json.dumps(analysis)
         db.commit()
         assert library.get_report(1, db)["data"]["analysis"] == analysis
-        assert asyncio.run(reports.get_report(1, db))["data"]["analysis"] == analysis
 
 
 def test_analysis_does_not_save_under_changed_model_policy(
@@ -174,40 +171,6 @@ def test_analysis_does_not_save_under_changed_model_policy(
     assert audit["failed_ids"] == [1]
     with analysis_library() as db:
         assert db.get(Report, 1).analysis_json is None
-
-
-def test_legacy_summary_uses_current_material_instead_of_stale_analysis(
-    analysis_library, monkeypatch
-):
-    from reportagent.llm import client
-
-    with analysis_library() as db:
-        row = db.get(Report, 1)
-        row.analysis_json = json.dumps(
-            {
-                "depth": "standard",
-                "analysis_fingerprint": batch.analysis_cache_fingerprint(
-                    row, "standard"
-                ),
-                "methodology": {"analysis_points": [{"analysis": "OLD conclusion"}]},
-            }
-        )
-        row.title = "New title"
-        db.commit()
-        selected = []
-        monkeypatch.setattr(
-            reports,
-            "_build_summary_from_analysis",
-            lambda *_: selected.append("stale") or "stale",
-        )
-        monkeypatch.setattr(
-            reports,
-            "_build_summary_from_content",
-            lambda *_: selected.append("current") or "current",
-        )
-        monkeypatch.setattr(client, "LLMClient", lambda: SimpleNamespace())
-        asyncio.run(reports.summarize_report(1, db))
-        assert selected == ["current"]
 
 
 def test_changed_policy_cannot_label_reused_client_results_as_current(

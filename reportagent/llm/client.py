@@ -67,23 +67,6 @@ class LLMClient:
             )
         return await self._chat_openai(messages, temperature, max_tokens, model=model)
 
-    async def chat_stream(
-        self,
-        messages: list[dict[str, str]],
-        temperature: float = 0.3,
-        max_tokens: int = 2000,
-    ):
-        response = await self._client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stream=True,
-        )
-        async for chunk in response:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
-
     async def chat_json(
         self,
         messages: list[dict[str, str]],

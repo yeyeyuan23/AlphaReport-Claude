@@ -6,9 +6,6 @@ pydantic>=2.0
 pydantic-settings>=2.0
 
 # ── Agent 编排 + LLM ──────────────────────────
-langgraph>=0.2
-langchain-core>=0.3
-langchain-openai>=0.2
 
 # ── 可选 LLM Provider（按需取消注释） ──────────
 anthropic>=0.42,<1

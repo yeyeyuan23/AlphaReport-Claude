@@ -1,13 +1,12 @@
-"""Offline coverage for the legacy collector's shared identity/storage boundaries."""
+"""Offline coverage for collection identity and material persistence boundaries."""
 
-import asyncio
 import json
 
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from reportagent.agents.collection_agent import CollectionAgent
+from reportagent.sources.base import deduplicate_results
 from reportagent.db.repository import ReportRepository
 from reportagent.models.database import Base, Report
 from reportagent.models.schemas import (
@@ -16,9 +15,7 @@ from reportagent.models.schemas import (
     ClassificationResult,
     SearchResult,
     SourceType,
-    UserCriteria,
 )
-from reportagent.sources.base import BaseSource
 
 
 BODY = "The full paper describes a factor portfolio and its limitations. " * 8
@@ -67,20 +64,20 @@ def library(tmp_path):
 
 def test_collection_returns_one_result_for_one_doi():
     result = search_result()
-    assert CollectionAgent([])._deduplicate([result]) == [result]
+    assert deduplicate_results([result]) == [result]
 
 
 @pytest.mark.parametrize("identity", ["doi", "arxiv_id", "source_url", "pdf_path"])
 def test_collection_keeps_same_title_with_distinct_known_identities(identity):
     first = search_result(**{"doi": None, identity: "first"})
     second = search_result(**{"doi": None, identity: "second"})
-    assert CollectionAgent([])._deduplicate([first, second]) == [first, second]
+    assert deduplicate_results([first, second]) == [first, second]
 
 
 def test_collection_does_not_merge_unidentified_results_by_title():
     first = search_result(doi=None, authors=["First author"])
     second = search_result(doi=None, authors=["Second author"])
-    assert CollectionAgent([])._deduplicate([first, second]) == [first, second]
+    assert deduplicate_results([first, second]) == [first, second]
 
 
 @pytest.mark.parametrize("full_text_first", [False, True])
@@ -90,7 +87,7 @@ def test_collection_normalizes_doi_and_prefers_complete_material(full_text_first
     )
     complete = search_result(pdf_path="/paper.pdf", tables_json='["table"]')
     results = [complete, metadata] if full_text_first else [metadata, complete]
-    unique = CollectionAgent([])._deduplicate(results)
+    unique = deduplicate_results(results)
     assert unique == [complete]
     assert unique[0].pdf_path == "/paper.pdf"
     assert unique[0].tables_json == '["table"]'
@@ -100,33 +97,7 @@ def test_collection_normalizes_doi_and_prefers_complete_material(full_text_first
 def test_collection_keeps_arxiv_revisions_separate():
     first = search_result(doi=None, arxiv_id="2610.00001v1")
     second = search_result(doi=None, arxiv_id="2610.00001v2")
-    assert CollectionAgent([])._deduplicate([first, second]) == [first, second]
-
-
-def test_collection_run_reports_unique_count():
-    class Source(BaseSource):
-        source_type = SourceType.BIGQUANT
-
-        def is_available(self):
-            return True
-
-        async def search(self, criteria):
-            return [search_result(), search_result()]
-
-    state = asyncio.run(
-        CollectionAgent([Source()]).run(
-            {
-                "criteria": UserCriteria(topics=["factors"]),
-                "messages": [],
-                "collection_errors": [],
-            }
-        )
-    )
-    assert len(state["raw_results"]) == 1
-    assert state["collection_status"] == "done"
-    assert (
-        state["messages"][-1] == "Collection complete: 1 unique results (from 2 total)"
-    )
+    assert deduplicate_results([first, second]) == [first, second]
 
 
 def test_upsert_persists_supplied_analysis_on_create(library):

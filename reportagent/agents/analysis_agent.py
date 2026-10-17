@@ -9,7 +9,6 @@ from typing import Any
 
 import yaml
 
-from reportagent.agents.state import AgentState
 from reportagent.llm.client import LLMClient
 from reportagent.models.schemas import (
     AnalysisResult,
@@ -38,123 +37,6 @@ def _normalize_latex_delimiters(text: str) -> str:
     return text
 
 
-def _equation_explanation_fields(explanation: dict) -> dict:
-    """Keep only well-typed explanation fields, including from older saved output."""
-    fields = {}
-    for name in ("meaning", "role_in_paper"):
-        if isinstance(explanation.get(name), str):
-            fields[name] = explanation[name]
-    symbols = explanation.get("symbols")
-    if isinstance(symbols, dict) and all(
-        isinstance(key, str) and isinstance(value, str)
-        for key, value in symbols.items()
-    ):
-        fields["symbols"] = symbols
-    if isinstance(explanation.get("is_key_formula"), bool):
-        fields["is_key_formula"] = explanation["is_key_formula"]
-    return fields
-
-
-def _merge_equation_explanations(
-    batch: list[dict], response: Any, batch_start: int
-) -> list[dict]:
-    """Merge valid explanations by global index without changing source evidence."""
-    enriched = [
-        dict(eq) if isinstance(eq, dict) else {"latex": str(eq)} for eq in batch
-    ]
-    if not isinstance(response, dict) or not isinstance(
-        response.get("equations"), list
-    ):
-        return enriched
-
-    seen: set[int] = set()
-    for explanation in response["equations"]:
-        if not isinstance(explanation, dict):
-            continue
-        index = explanation.get("index")
-        if (
-            type(index) is not int
-            or not batch_start <= index < batch_start + len(batch)
-            or index in seen
-        ):
-            continue
-
-        # Model output may enrich a source formula, never replace its LaTeX or page.
-        fields = _equation_explanation_fields(explanation)
-        if fields:
-            # Keep the first valid reply for an index; never duplicate its source.
-            enriched[index - batch_start].update(fields)
-            seen.add(index)
-
-    return enriched
-
-
-async def explain_equations(
-    equations: list[dict],
-    title: str,
-    context_text: str,
-    llm_client: LLMClient | None = None,
-    config: dict | None = None,
-) -> list[dict]:
-    """Shared utility: enrich equations with LLM-powered explanations.
-
-    Takes MinerU-extracted equations (latex + page_idx) and returns them
-    enriched with meaning, symbol definitions, and role-in-paper.
-    Used by the /parse endpoint; preserves extracted formulas and source metadata.
-    """
-    if not equations:
-        return []
-
-    if llm_client is None:
-        llm_client = LLMClient()
-
-    if config is None:
-        config = {}
-    eq_cfg = config.get("analysis", {}).get("phases", {}).get("equations", {})
-    batch_size = eq_cfg.get("max_formulas_per_batch", 3)
-
-    enriched: list[dict] = []
-
-    for batch_start in range(0, len(equations), batch_size):
-        batch = equations[batch_start : batch_start + batch_size]
-        eq_lines = []
-        for i, eq in enumerate(batch):
-            idx = batch_start + i
-            latex = eq.get("latex", "") if isinstance(eq, dict) else str(eq)
-            eq_lines.append(f"公式 {idx}: {latex}")
-
-        prompt = (
-            "以下是一篇量化金融论文中的数学公式，请逐一解读每个公式：\n\n"
-            f"论文标题：{title}\n\n"
-            f"论文上下文（部分）：\n{context_text[:3000]}\n\n"
-            "公式列表：\n" + "\n".join(eq_lines) + "\n\n"
-            "index 必须使用公式列表中的原始编号，不要按本批次从 0 重新编号。\n"
-            f"请对这 {len(batch)} 个公式逐一解读，所有文本用中文输出，返回 JSON：\n"
-            f'{{"equations": [{{"index": {batch_start}, "meaning": "公式含义（一句话）", '
-            '"symbols": {"符号": "含义", ...}, '
-            '"role_in_paper": "在论文中的作用", "is_key_formula": true/false}]}'
-        )
-
-        resp = None
-        try:
-            resp = await llm_client.chat_json(
-                [
-                    {
-                        "role": "system",
-                        "content": "你是量化金融数学专家，擅长解读公式。所有输出必须用中文，包括公式含义、符号说明、作用描述。",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.1,
-                max_tokens=1500,
-            )
-        except Exception:
-            logger.warning("Equation batch %d failed for '%s'", batch_start, title[:50])
-        enriched.extend(_merge_equation_explanations(batch, resp, batch_start))
-
-    return enriched
-
-
 class AnalysisAgent:
     def __init__(
         self,
@@ -163,8 +45,6 @@ class AnalysisAgent:
     ):
         self._llm = llm_client
         self._config = self._load_config(config_path)
-        self.progress_cb = None
-        self.cancel_check = None
         self._current_depth = "standard"
 
     def _load_config(self, config_path: str | None = None) -> dict:
@@ -217,51 +97,6 @@ class AnalysisAgent:
         m = cfg.get("model", "default")
         return m if m != "default" else None
 
-    async def run(self, state: AgentState) -> AgentState:
-        self._current_depth = self._config.get("analysis", {}).get("depth", "standard")
-        reports = state.get("classified_reports", [])
-        total = len(reports)
-
-        state["analysis_status"] = "analyzing"
-        state["current_phase"] = "analyzing"
-
-        msg = f"Analyzing {total} reports (depth: {self._current_depth})..."
-        state["messages"].append(msg)
-        if self.progress_cb:
-            self.progress_cb("analyzing", msg)
-
-        for i, cr in enumerate(reports):
-            if self.cancel_check and self.cancel_check():
-                state["analysis_status"] = "cancelled"
-                state["messages"].append("Analysis cancelled by user")
-                return state
-
-            sr = cr.search_result
-            title = sr.title or ""
-            full_text = sr.full_text or sr.abstract or ""
-
-            if not full_text.strip():
-                continue
-
-            try:
-                result = await self._analyze_single(
-                    title, sr.abstract or "", full_text, sr.equations_json
-                )
-            except Exception as e:
-                logger.warning("Analysis failed for '%s': %s", title[:50], e)
-                result = AnalysisResult(summary=f"Analysis failed: {e}")
-
-            cr.analysis = result
-
-            progress_msg = f"Analyzed {i + 1}/{total}: {title[:40]}..."
-            state["messages"].append(progress_msg)
-            if self.progress_cb:
-                self.progress_cb("analyzing", progress_msg)
-
-        state["analysis_status"] = "done"
-        state["messages"].append(f"Analysis complete: {total} reports")
-        return state
-
     async def analyze_report_directly(
         self,
         title: str,
@@ -311,7 +146,7 @@ class AnalysisAgent:
         # Phase 1: Metadata extraction
         if self._phase_enabled("metadata"):
             result = await self._run_phase_metadata(title, abstract, full_text, result)
-        if progress_cb:
+        if progress_cb and self._phase_enabled("methodology"):
             await progress_cb("methodology", "解析方法论...")
 
         # Phase 2: Methodology deep dive with formula analysis
@@ -668,68 +503,12 @@ class AnalysisAgent:
     # ---- Summary synthesis ----
 
     async def _synthesize_summary(self, result: AnalysisResult, title: str) -> str:
-        """Generate a flowing narrative prose summary via LLM, with formulas inline."""
-        context_parts: list[str] = []
-        if result.research_question:
-            context_parts.append(f"研究问题：{result.research_question}")
-        if result.core_contribution:
-            context_parts.append(f"核心贡献：{result.core_contribution}")
-        if result.data_used.market or result.data_used.sample_period:
-            di = result.data_used
-            context_parts.append(
-                f"数据：{di.market}市场，{', '.join(di.instruments) if di.instruments else '—'}，"
-                f"频率{di.frequency}，样本期{di.sample_period}，股票池{di.universe}"
-            )
+        from reportagent.services.summary import build_summary_request, generate_summary
 
-        if result.methodology:
-            for point in result.methodology.analysis_points:
-                if isinstance(point, dict):
-                    context_parts.append(
-                        f"洞察-{point.get('title', '')}：{point.get('analysis', '')}"
-                    )
-                    if point.get("marginal_contribution"):
-                        context_parts.append(
-                            f"  边际贡献：{point['marginal_contribution']}"
-                        )
-                    if point.get("practical_implication"):
-                        context_parts.append(
-                            f"  实践推论：{point['practical_implication']}"
-                        )
-            for f in result.methodology.factor_list:
-                context_parts.append(f"因子-{f.name}（{f.type}）：{f.construction}")
-
-        if result.equations:
-            for eq in result.equations:
-                if eq.is_key_formula:
-                    context_parts.append(f"关键公式：${eq.latex}$ — {eq.meaning}")
-
-        if result.assessment:
-            a = result.assessment
-            context_parts.append(f"质量评分：{a.overall_quality_score}")
-            context_parts.append(f"优势：{'；'.join(a.strengths)}")
-            context_parts.append(f"不足：{'；'.join(a.weaknesses)}")
-            if a.marginal_contribution_summary:
-                context_parts.append(f"边际贡献总评：{a.marginal_contribution_summary}")
-            if a.practical_implications:
-                context_parts.append(f"实践推论：{'；'.join(a.practical_implications)}")
-
-        context = "\n\n".join(context_parts)
-
-        cfg = self._config["analysis"]["summary"]
-        profile = cfg["profiles"][self._current_depth]
-        grounding = skill_resource("analyze-report", "grounding.md").read_text(
-            encoding="utf-8"
+        request = build_summary_request(
+            title,
+            analysis=result,
+            depth=self._current_depth,
+            config=self._config["analysis"]["summary"],
         )
-        prompt = cfg["user_prompt_template"].format(title=title, context=context)
-        prompt += "\n\n" + profile["instruction"]
-        summary = await self._get_llm().chat(
-            [
-                {"role": "system", "content": cfg["system_prompt"] + "\n" + grounding},
-                {"role": "user", "content": prompt},
-            ],
-            temperature=cfg.get("temperature", 0.1),
-            max_tokens=profile["max_tokens"],
-        )
-        if not summary.strip():
-            raise ValueError("分析总结为空，停止保存")
-        return _normalize_latex_delimiters(summary)
+        return await generate_summary(request, self._get_llm())

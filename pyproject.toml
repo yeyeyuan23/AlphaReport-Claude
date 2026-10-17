@@ -15,9 +15,6 @@ dependencies = [
   "pydantic>=2.0",
   "pydantic-settings>=2.0",
   # Agent + LLM
-  "langgraph>=0.2",
-  "langchain-core>=0.3",
-  "langchain-openai>=0.2",
   "anthropic>=0.42",
   "lark-oapi>=1.4",
   # PDF 处理

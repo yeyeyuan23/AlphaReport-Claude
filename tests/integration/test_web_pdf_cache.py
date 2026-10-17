@@ -1,4 +1,4 @@
-"""Both web adapters cache only bounded, validated PDFs for the current row."""
+"""The reading service caches only bounded, validated PDFs for the current row."""
 
 import asyncio
 from contextlib import contextmanager
@@ -13,7 +13,7 @@ import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
-from reportagent.api import library, reports
+from reportagent.api import library
 from reportagent.models.database import Base, Report
 from reportagent.sources import content_fetch
 from reportagent.sources.base import SourceParseError
@@ -37,9 +37,8 @@ class InterruptedStream(httpx.SyncByteStream, httpx.AsyncByteStream):
             yield chunk
 
 
-@pytest.fixture(params=[library, reports], ids=["current", "legacy"])
-def web_pdf(request, monkeypatch, tmp_path):
-    adapter = request.param
+@pytest.fixture
+def web_pdf(monkeypatch, tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'reports.db'}")
     Base.metadata.create_all(engine)
     factory = sessionmaker(bind=engine, expire_on_commit=False)
@@ -66,19 +65,12 @@ def web_pdf(request, monkeypatch, tmp_path):
 
     transport = httpx.MockTransport(handler)
     async_client = httpx.AsyncClient
-    sync_client = httpx.Client
     monkeypatch.setattr(
         httpx,
         "AsyncClient",
         lambda **kwargs: async_client(transport=transport, **kwargs),
     )
 
-    # Cover the original synchronous adapter during the red run as well.
-    def get(url, **kwargs):
-        with sync_client(transport=transport) as client:
-            return client.get(url, **kwargs)
-
-    monkeypatch.setattr(httpx, "get", get)
     with factory() as db:
         row = Report(
             title="Offline paper",
@@ -93,11 +85,9 @@ def web_pdf(request, monkeypatch, tmp_path):
         report_id = row.id
 
         def call():
-            result = adapter.get_report_pdf(report_id, db)
-            return asyncio.run(result) if inspect.isawaitable(result) else result
+            return library.get_report_pdf(report_id, db)
 
         yield {
-            "adapter": adapter,
             "db": db,
             "factory": factory,
             "row": row,
@@ -110,12 +100,10 @@ def web_pdf(request, monkeypatch, tmp_path):
     engine.dispose()
 
 
-def rejected(web_pdf, legacy_error=SourceParseError):
-    error_type = HTTPException if web_pdf["adapter"] is library else legacy_error
-    with pytest.raises(error_type) as caught:
+def rejected(web_pdf):
+    with pytest.raises(HTTPException) as caught:
         web_pdf["call"]()
-    if error_type is HTTPException:
-        assert caught.value.status_code == 404
+    assert caught.value.status_code == 404
 
 
 def assert_not_cached(web_pdf):
@@ -161,7 +149,7 @@ def test_interrupted_download_never_persists_partial_bytes(web_pdf, error):
     web_pdf["responses"].extend(
         httpx.Response(200, stream=InterruptedStream(error)) for _ in range(2)
     )
-    rejected(web_pdf, error)
+    rejected(web_pdf)
     assert_not_cached(web_pdf)
     # A later successful request must not reuse bytes from either failed attempt.
     web_pdf["responses"].clear()
@@ -172,7 +160,7 @@ def test_interrupted_download_never_persists_partial_bytes(web_pdf, error):
 @pytest.mark.parametrize("status", [404, 503])
 def test_upstream_http_error_keeps_adapter_exception_contract(web_pdf, status):
     web_pdf["responses"].extend(httpx.Response(status) for _ in range(2))
-    rejected(web_pdf, httpx.HTTPStatusError)
+    rejected(web_pdf)
     assert_not_cached(web_pdf)
 
 
@@ -266,7 +254,7 @@ def test_atomic_promotion_failure_leaves_no_cache_and_next_request_recovers(
 
     monkeypatch.setattr(Path, "replace", failed_replace)
     web_pdf["responses"].append(httpx.Response(200, content=PDF))
-    rejected(web_pdf, OSError)
+    rejected(web_pdf)
     assert_not_cached(web_pdf)
     monkeypatch.setattr(Path, "replace", original_replace)
     web_pdf["responses"].append(httpx.Response(200, content=PDF))
@@ -283,7 +271,7 @@ def test_commit_failure_removes_promoted_file_and_rolls_back_path(web_pdf, monke
 
     monkeypatch.setattr(web_pdf["db"], "commit", failed_commit)
     web_pdf["responses"].append(httpx.Response(200, content=PDF))
-    rejected(web_pdf, OSError)
+    rejected(web_pdf)
     assert_not_cached(web_pdf)
     monkeypatch.setattr(web_pdf["db"], "commit", original_commit)
     web_pdf["responses"].append(httpx.Response(200, content=PDF))
@@ -298,12 +286,10 @@ def test_old_arxiv_identifier_can_be_derived_from_source_url(web_pdf):
     assert web_pdf["requests"][0].url.path == "/pdf/quant-ph/9701001v1"
 
 
-def test_adapter_signatures_stay_sync_and_async():
+def test_pdf_adapter_stays_synchronous():
     assert not inspect.iscoroutinefunction(library.get_report_pdf)
-    assert inspect.iscoroutinefunction(reports.get_report_pdf)
 
 
-@pytest.mark.parametrize("web_pdf", [library], indirect=True, ids=["current"])
 def test_sync_adapter_remains_callable_inside_running_event_loop(web_pdf):
     web_pdf["responses"].append(httpx.Response(200, content=PDF))
     caller_thread = get_ident()
@@ -401,7 +387,7 @@ def test_partial_disk_write_cleans_up_and_leaves_cache_retryable(web_pdf, monkey
 
     monkeypatch.setattr(report_pdf, "NamedTemporaryFile", failing_file)
     web_pdf["responses"].append(httpx.Response(200, content=PDF))
-    rejected(web_pdf, OSError)
+    rejected(web_pdf)
     assert_not_cached(web_pdf)
     monkeypatch.setattr(report_pdf, "NamedTemporaryFile", temporary_file)
     web_pdf["responses"].append(httpx.Response(200, content=PDF))
@@ -435,7 +421,7 @@ def test_post_commit_refresh_failure_cannot_remove_committed_pdf(web_pdf, monkey
 
     monkeypatch.setattr(web_pdf["db"], "expire_all", failed_expire)
     web_pdf["responses"].append(httpx.Response(200, content=PDF))
-    rejected(web_pdf, RuntimeError)
+    rejected(web_pdf)
     with web_pdf["factory"]() as db:
         path = db.get(Report, web_pdf["id"]).pdf_path
         assert path is not None
@@ -443,9 +429,7 @@ def test_post_commit_refresh_failure_cannot_remove_committed_pdf(web_pdf, monkey
 
 
 @pytest.mark.parametrize("cached", [False, True], ids=["download", "local-cache"])
-def test_one_validator_change_is_observed_by_both_adapters(
-    web_pdf, monkeypatch, cached
-):
+def test_reader_observes_shared_validator_changes(web_pdf, monkeypatch, cached):
     original = content_fetch.validate_pdf_header
     # The fixture is accepted by the actual policy before changing that one seam.
     original(PDF, source="fixture", paper_id="fixture")

@@ -5,7 +5,7 @@ metadata:
   aliases: [研究创意头脑风暴]
 ---
 
-使用 reportagent.services.research_ideation；实验聊天入口调用 brainstorm_research，飞书普通聊天可以执行：
+使用 reportagent.services.research_ideation；飞书普通聊天可以调用同一 CLI：
 ```bash
 .venv/bin/python -m reportagent.cli.ideation --topic '波动率预测' --angle methodology
 ```

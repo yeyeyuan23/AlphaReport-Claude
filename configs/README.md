@@ -5,7 +5,6 @@
 - `app.yaml`：模型、数据源、数据库、服务端口、技能库位置。
 - `classification_taxonomy.yaml`：分类维度与标签。
 - `push_directions.yaml`：用户关注的研究方向与推送设置。
-- `prompts/chat_system.txt`：整个交互 Agent 的通用角色与工具使用约定。
 
 任务专属的说明、提示词、输出模板归入根目录 `skills/<任务>/`，和任务一起维护。
 例如 `skills/analyze-report/analysis.yaml` 是分析任务定义，虽然使用 YAML，
@@ -13,7 +12,6 @@
 按职责划分，不按文件扩展名划分。
 
 头脑风暴任务的角色提示词在 `skills/research-ideation/system.md`。
-`chat.brainstorm_prompt_path` 可显式覆盖其路径，旧的自定义路径仍可使用。
 密钥保存在忽略提交的 `.env` 中。
 
 `llm.thinking` 控制 Python Anthropic 兼容请求的思考模式；当前 DeepSeek 结构化流程设为

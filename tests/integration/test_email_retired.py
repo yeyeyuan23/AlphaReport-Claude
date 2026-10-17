@@ -8,20 +8,12 @@ import sys
 import pytest
 
 
-@pytest.mark.parametrize("module", ["reportagent.main", "reportagent.api.legacy_app"])
+@pytest.mark.parametrize("module", ["reportagent.main"])
 def test_web_entrypoints_do_not_register_mail_delivery(module):
     app = importlib.import_module(module).app
     paths = set(app.openapi()["paths"])
     assert "/api/v1/reports" in paths
     assert not any("/subscriptions" in path or "/email" in path for path in paths)
-
-
-def test_chat_catalog_keeps_research_tools_without_mail_actions():
-    from reportagent.chat.tools import ALL_TOOLS
-
-    names = {tool.name for tool in ALL_TOOLS}
-    assert {"semantic_search_reports", "brainstorm_research", "manage_skill"} <= names
-    assert not {"save_report_direction", "generate_daily_report"} & names
 
 
 def test_disabled_scheduler_operates_without_subscription_service():
