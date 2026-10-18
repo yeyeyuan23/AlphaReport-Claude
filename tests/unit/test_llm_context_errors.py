@@ -6,8 +6,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
-from anthropic import BadRequestError as AnthropicBadRequest
-from openai import BadRequestError, RateLimitError
+from anthropic import BadRequestError, RateLimitError
 
 from reportagent.llm.client import LLMClient
 from reportagent.llm.errors import ContextWindowExceeded
@@ -26,13 +25,8 @@ def test_provider_errors_preserve_distinct_causes_and_safe_call_receipts(
         if failure in {"context", "rate_limit"}
         else "Invalid response_format"
     )
-    error_class = (
-        RateLimitError
-        if failure == "rate_limit"
-        else AnthropicBadRequest
-        if provider == "anthropic"
-        else BadRequestError
-    )
+    # Both transports normalize status/body attributes, not SDK exception classes.
+    error_class = RateLimitError if failure == "rate_limit" else BadRequestError
     response = httpx.Response(
         status, request=httpx.Request("POST", "https://model.test")
     )
