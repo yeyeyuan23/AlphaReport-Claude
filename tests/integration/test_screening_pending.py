@@ -48,13 +48,13 @@ def test_pending_partition_keeps_original_indexes_and_model_reported_insufficien
     model = Model(
         [
             {
-                "index": 1,
+                "index": 0,
                 "status": "pending_needs_material",
                 "relevance": None,
                 "score": None,
                 "reason": "Abstract is too ambiguous to judge",
             },
-            {"index": 2, "score": 8, "reason": "Research topic matches"},
+            {"index": 1, "score": 8, "reason": "Research topic matches"},
         ]
     )
     papers = [
@@ -69,7 +69,7 @@ def test_pending_partition_keeps_original_indexes_and_model_reported_insufficien
         "scored",
     ]
     prompt = model.prompts[0][1]["content"]
-    assert "论文 #1" in prompt and "论文 #2" in prompt and "论文 #0" not in prompt
+    assert "论文 #0" in prompt and "论文 #1" in prompt and "论文 #2" not in prompt
 
 
 def test_pending_persistence_retries_after_material_changes(

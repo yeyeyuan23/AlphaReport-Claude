@@ -102,7 +102,7 @@ def _scoring_context() -> tuple[dict[str, dict], str, str, str]:
         encoding="utf-8"
     )
     payload = {
-        "schema_version": 2,
+        "schema_version": 3,
         "directions": directions,
         "system_prompt": system,
         "user_prompt": user,
@@ -191,7 +191,7 @@ def has_screening_material(paper) -> bool:
 
 
 def _format_papers_for_llm(papers: list, indices=None) -> str:
-    """Send complete abstracts with their original batch indexes."""
+    """Send complete abstracts with the supplied model submission indexes."""
     indices = range(len(papers)) if indices is None else indices
     return "\n".join(
         f"### 论文 #{index}\n"
@@ -353,11 +353,14 @@ async def _score_one_batch(
     llm_client, batch, offset, context, system_prompt, provenance
 ):
     directions, _, user_template, _ = context
-    eligible = {i: p for i, p in enumerate(batch) if has_screening_material(p)}
+    # Models naturally enumerate the papers they see. Keep that numbering dense
+    # and remap to original positions only after validating the response.
+    submitted = [(i, p) for i, p in enumerate(batch) if has_screening_material(p)]
+    eligible = {i: p for i, (_, p) in enumerate(submitted)}
     valid = [
         _missing_material(p, i, offset, provenance)
         for i, p in enumerate(batch)
-        if i not in eligible
+        if not has_screening_material(p)
     ]
     if not eligible:
         return valid, []
@@ -375,10 +378,11 @@ async def _score_one_batch(
             max_tokens=max(4000, 350 * len(eligible) * len(directions)),
         )
         assessed, errors = _validate_batch_response(response, eligible, directions)
-        valid.extend(
-            _batch_assessment(item, batch[i], i, offset, provenance)
-            for i, item in assessed
-        )
+        for index, item in assessed:
+            original_index, paper = submitted[index]
+            valid.append(
+                _batch_assessment(item, paper, original_index, offset, provenance)
+            )
         pending = len(batch) - len(valid)
         failures = [(offset, pending, "; ".join(errors)[:200])] if pending else []
         if errors and not pending:
@@ -420,7 +424,7 @@ async def score_papers_batch(
         directions_desc=_build_directions_desc(directions)
     )
     provenance = {
-        "schema_version": 2,
+        "schema_version": 3,
         "fingerprint": fingerprint,
         "evidence_scope": "title_abstract",
     }
@@ -511,7 +515,7 @@ def apply_scores(
                         **(
                             item.get("_provenance")
                             or {
-                                "schema_version": 2,
+                                "schema_version": 3,
                                 "fingerprint": scoring_fingerprint(),
                                 "evidence_scope": "title_abstract",
                             }

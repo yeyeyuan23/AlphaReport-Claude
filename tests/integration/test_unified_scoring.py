@@ -56,6 +56,52 @@ def test_direction_detail_is_the_same_canonical_assessment(rubric):
     assert detailed.assessment["_provenance"] == ordinary[0]["_provenance"]
 
 
+def test_missing_abstracts_do_not_leave_gaps_in_model_indexes(rubric):
+    papers = [
+        {"id": 7, "title": "No abstract", "abstract": ""},
+        {"id": 8, "title": "Volatility factor", "abstract": ABSTRACT},
+        {"id": 9, "title": "Trading amount factor", "abstract": ABSTRACT},
+        {"id": 10, "title": "Missing material", "abstract": ""},
+    ]
+
+    class ContiguousModel:
+        async def chat_json(self, messages, **kwargs):
+            assert "论文 #0" in messages[1]["content"]
+            assert "论文 #1" in messages[1]["content"]
+            assert "论文 #2" not in messages[1]["content"]
+            return {
+                "papers": [
+                    {
+                        "index": i,
+                        "status": "scored",
+                        "direction_scores": [
+                            {"direction_id": "risk", "score": score, "reason": reason},
+                            {
+                                "direction_id": "factor",
+                                "score": 1,
+                                "reason": "Not the main task",
+                            },
+                        ],
+                    }
+                    for i, score, reason in [
+                        (0, 9, "Volatility evidence"),
+                        (1, 7, "Trading amount evidence"),
+                    ]
+                ]
+            }
+
+    results, failures = asyncio.run(
+        scoring.score_papers_batch(ContiguousModel(), papers)
+    )
+    assert not failures
+    assert [r["index"] for r in results] == [0, 1, 2, 3]
+    assert [
+        (r["_paper"]["id"], r["relevance"], r["reason"])
+        for r in results
+        if r["status"] == "scored"
+    ] == [(8, 9, "Volatility evidence"), (9, 7, "Trading amount evidence")]
+
+
 def test_direction_cli_writes_the_same_current_selection_fields(
     rubric, tmp_path, monkeypatch
 ):
