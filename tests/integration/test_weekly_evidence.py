@@ -105,6 +105,49 @@ def test_week_query_covers_more_than_100_and_retains_full_abstract(library):
     assert len(rows[0]["abstract"]) == 1200
 
 
+@pytest.mark.parametrize("source", ["eastmoney", "bigquant"])
+def test_week_query_preserves_current_review_for_papers_without_arxiv_id(
+    library, source
+):
+    p = assessed(
+        paper(source=source, arxiv_id=None, published_date=datetime(2026, 10, 9))
+    )
+    with library() as session:
+        values = {k: v for k, v in p.items() if k in Report.__table__.columns.keys()}
+        session.add(Report(**values, content_hash="current-non-arxiv"))
+        session.commit()
+
+    rows = weekly.get_weekly_papers(datetime(2026, 10, 5), datetime(2026, 10, 12))
+    text = weekly.generate_weekly_report(rows, "2026-10-05", "2026-10-11")
+    assert "重点推荐 1 篇" in text
+    assert "只有温度充分小时才保持凸性" in text
+    assert "## 待核验" not in text
+
+
+def test_week_query_keeps_saved_material_failure_instead_of_generic_stale_notice(
+    library,
+):
+    from reportagent.services.report_quality import pending_review
+
+    p = paper(
+        published_date=datetime(2026, 10, 9),
+        abstract=None,
+        full_text=None,
+        has_full_text=False,
+    )
+    reason = "PDF 下载失败，需要重试取得全文。"
+    p["evaluation_json"] = json.dumps(pending_review(p, reason), ensure_ascii=False)
+    with library() as session:
+        values = {k: v for k, v in p.items() if k in Report.__table__.columns.keys()}
+        session.add(Report(**values, content_hash="missing-material"))
+        session.commit()
+
+    rows = weekly.get_weekly_papers(datetime(2026, 10, 5), datetime(2026, 10, 12))
+    text = weekly.generate_weekly_report(rows, "2026-10-05", "2026-10-11")
+    assert reason in text
+    assert "尚无与当前原文" not in text
+
+
 def test_weekly_never_promotes_relevance_or_legacy_summary_to_quality():
     p = paper(summary="正则化必然提升样本外收益，应当立即调仓。")
     result = weekly.generate_weekly_report([p], "2026-10-05", "2026-10-11")
