@@ -56,9 +56,10 @@ class AnnouncementHTTP:
 
 
 def _retry_delay(error, attempt):
-    delay = positive_setting(
-        "collection", "metadata", "retry_backoff_seconds", default=3
-    ) * 2**attempt
+    delay = (
+        positive_setting("collection", "metadata", "retry_backoff_seconds", default=3)
+        * 2**attempt
+    )
     if isinstance(error, httpx.HTTPStatusError):
         value = error.response.headers.get("Retry-After", "")
         try:

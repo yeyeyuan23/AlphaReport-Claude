@@ -31,10 +31,7 @@ GENERATION_TIMEOUT = 240
 
 
 def usable_source(paper: dict) -> bool:
-    return bool(
-        paper.get("has_full_text")
-        and usable_full_text(paper.get("full_text"))
-    )
+    return bool(paper.get("has_full_text") and usable_full_text(paper.get("full_text")))
 
 
 class Excerpt(BaseModel):

@@ -313,7 +313,9 @@ def test_daily_refresh_removes_candidate_whose_date_became_unknown(factory):
         (SourceType.BIGQUANT, "unknown"),
     ],
 )
-def test_online_sources_without_document_evidence_stay_unknown(factory, source, expected):
+def test_online_sources_without_document_evidence_stay_unknown(
+    factory, source, expected
+):
     with factory() as session:
         _, rid = ReportRepository(session).upsert_report(
             incoming(source=source, raw_metadata={})
