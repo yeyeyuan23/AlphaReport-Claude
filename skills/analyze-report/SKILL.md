@@ -30,6 +30,7 @@ Both analysis profiles load [grounding.md](grounding.md), and share [assessment.
 [quality-review.md](quality-review.md) with the same quality rubric through `reportagent.services.report_quality`. It records
 method, findings, strengths, limitations, confidence and optional source excerpts; relevance is
 kept separate from quality. Missing or partial full text cannot receive a top recommendation.
+Choose validation requirements for each actual claim, rather than for a document label: descriptive facts need traceable, consistent data and calculations; prediction, causality and trading-performance claims need their respective evidence. Mixed reports must assess these claims separately. Absence of an inapplicable predictive test cannot lower a descriptive assessment, and a descriptive label cannot excuse an unsupported predictive or strategy claim. Record this reasoning in the validation check's basis.
 Text chunk IDs are extraction offsets, not PDF page numbers. All available text up to the explicit 240,000 character safety cap is sent as contiguous offset chunks; exceeding a real limit fails or remains pending instead of silently reading a prefix. References are retained for readers to consult, without exact-quote matching as a screening, recommendation or display gate. Reading assessments do not independently verify a paper's conclusions or reproduce experiments.
 The library and daily digest render this saved assessment without another model call.
 Single-paper summaries use the deterministic [single-brief.md](single-brief.md) template;

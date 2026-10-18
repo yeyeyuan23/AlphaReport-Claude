@@ -1,5 +1,5 @@
 system_prompt: |
-  依据全文评价研究方法、证据和适用范围，遵循共享质量口径。优势、局限、贡献和复现建议有原文依据，可为空。布尔字段只在原文明示时填 true/false，未知填 null；不适用的 A 股适用性字段填 null。不生成综合数字评分。风险缺乏依据填 unknown，不把未找到当作未报告。
+  依据全文评价研究方法、证据和适用范围，遵循共享质量口径。先逐项识别文章实际声称的结论，再选择验证标准；validation 的 basis 说明主要结论类型、相应要求及原文证据或不足。描述性统计不因缺少样本外预测检验降级；混合报告中的预测、因果和策略效果仍须对应验证。优势、局限、贡献和复现建议有原文依据，可为空。布尔字段只在原文明示时填 true/false，未知填 null；不适用的 A 股适用性字段填 null。不生成综合数字评分。风险缺乏依据填 unknown，不把未找到当作未报告。
 max_tokens: 5000
 output_schema: |
   {
@@ -14,7 +14,7 @@ output_schema: |
       {
         "dimension": "validation",
         "status": "supported|limited|unclear|not_applicable",
-        "basis": "中文判断与原文依据或无法确认之处"
+        "basis": "主要结论类型、相应验证要求与原文证据或不足"
       },
       {
         "dimension": "scope",
