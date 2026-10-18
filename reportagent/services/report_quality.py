@@ -19,9 +19,9 @@ from reportagent.services.paper_scoring import scoring_fingerprint, screening_is
 from reportagent.services.text_evidence import text_chunks
 from reportagent.services.document_metadata import material_type
 from reportagent.models.schemas import QualityJudgment
+from reportagent.llm.errors import ContextWindowExceeded
 
 logger = logging.getLogger(__name__)
-MAX_REVIEW_CHARS = 240000
 SCHEMA_VERSION = 6
 TIER_LABELS = {
     "focus": "重点阅读",
@@ -95,22 +95,20 @@ def current_relevance(paper: dict) -> float | None:
     return float(value)
 
 
-def review_fingerprint(
+def _review_inputs(
     paper: dict,
     model: str,
-    max_chars: int = MAX_REVIEW_CHARS,
     *,
     instructions: str | None = None,
-) -> str:
+) -> dict:
     relevance = paper.get("selection_relevance", paper.get("selection_score"))
     if isinstance(relevance, (int, float)) and not isinstance(relevance, bool):
         relevance = float(
             relevance
         )  # SQLite REAL and JSON integers represent the same score.
-    payload = {
+    return {
         "schema": SCHEMA_VERSION,
         "model": model,
-        "max_chars": max_chars,
         "endpoint": get_llm_base_url(),
         "provider": get_llm_provider(),
         "revision": paper.get("arxiv_id"),
@@ -124,24 +122,58 @@ def review_fingerprint(
         "current_scoring_rubric": scoring_fingerprint(),
         "prompt": instructions if instructions is not None else review_instructions(),
     }
+
+
+def review_fingerprint(
+    paper: dict, model: str, *, instructions: str | None = None
+) -> str:
     return hashlib.sha256(
-        json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()
+        json.dumps(
+            _review_inputs(paper, model, instructions=instructions),
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode()
     ).hexdigest()
 
 
-def has_review_material(paper) -> bool:
-    """Automatic reviews and digests skip missing or oversized full text."""
-    if not isinstance(paper, dict):
-        paper = {
-            "full_text": paper.full_text,
-            "has_full_text": paper.has_full_text,
-        }
-    text = paper.get("full_text") or ""
+def review_fingerprint_matches(paper: dict, review: dict, model: str) -> bool:
+    inputs = _review_inputs(paper, model)
+    # Previously completed full-text reviews stay valid after removing the cap.
+    # This recognizes their stored hash encoding; it never limits new inputs.
+    payloads = [inputs]
+    if review.get("status") == "reviewed" and review.get("text_complete"):
+        payloads.append({**inputs, "max_chars": 240000})
+    for payload in payloads:
+        fingerprint = hashlib.sha256(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()
+        ).hexdigest()
+        if review.get("fingerprint") == fingerprint:
+            return True
+    return False
+
+
+def context_limit_is_current(paper: dict, review, model: str) -> bool:
     return bool(
-        paper.get("has_full_text")
-        and len(text.strip()) >= 1000
-        and len(text) <= MAX_REVIEW_CHARS
+        isinstance(review, dict)
+        and review.get("status") == "skipped"
+        and review.get("skip_reason") == "context_length_exceeded"
+        and review.get("model") == model
+        and review_fingerprint_matches(paper, review, model)
     )
+
+
+def has_review_material(paper) -> bool:
+    """Skip unusable text and context limits explicitly confirmed by the provider."""
+    if not isinstance(paper, dict):
+        paper = vars(paper)
+    text = paper.get("full_text") or ""
+    if not paper.get("has_full_text") or len(text.strip()) < 1000:
+        return False
+    try:
+        review = json.loads(paper.get("evaluation_json") or "null")
+    except (ValueError, TypeError):
+        review = None
+    return not context_limit_is_current(paper, review, get_llm_model())
 
 
 def cached_review_is_current(paper: dict, review, model: str) -> bool:
@@ -154,7 +186,7 @@ def cached_review_is_current(paper: dict, review, model: str) -> bool:
         and review.get("text_complete")
         and review.get("status") == "reviewed"
         and review.get("tier") in {"focus", "browse", "exclude"}
-        and review.get("fingerprint") == review_fingerprint(paper, model)
+        and review_fingerprint_matches(paper, review, model)
     )
 
 
@@ -184,46 +216,43 @@ def pending_review(paper: dict, reason: str) -> dict:
     }
 
 
-async def evaluate_paper(
-    paper: dict, llm, *, max_chars: int = MAX_REVIEW_CHARS
-) -> dict:
+async def evaluate_paper(paper: dict, llm) -> dict:
     text = paper.get("full_text") or ""
     if not paper.get("has_full_text") or len(text.strip()) < 1000:
         return pending_review(paper, "未取得可用全文；摘要只能用于相关性初筛。")
-    if max_chars < 1:
-        raise ValueError("max_chars must be positive")
-    if len(text) > max_chars:
-        result = pending_review(
-            paper,
-            f"全文 {len(text)} 字符超过可用输入上限 {max_chars}；已跳过全文评估。",
-        )
-        result.update(input_chars=0, full_text_chars=len(text))
-        return result
-    content = text
-    chunks = text_chunks(content)
+    chunks = text_chunks(text)
     instructions = review_instructions()
     prompt = json.dumps(
         {
             "title": paper.get("title"),
             "abstract": paper.get("abstract"),
-            "text_complete": len(content) == len(text),
+            "text_complete": True,
             "text_chunks": chunks,
         },
         ensure_ascii=False,
     )
-    data = await llm.chat_json(
-        [
-            {"role": "system", "content": instructions},
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.1,
-        max_tokens=6000,
-    )
+    try:
+        data = await llm.chat_json(
+            [
+                {"role": "system", "content": instructions},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.1,
+            max_tokens=6000,
+        )
+    except ContextWindowExceeded as error:
+        result = pending_review(paper, str(error))
+        result.update(
+            status="skipped",
+            skip_reason="context_length_exceeded",
+            input_chars=len(text),
+            full_text_chars=len(text),
+            model=llm.model,
+            fingerprint=review_fingerprint(paper, llm.model),
+        )
+        return result
     review = Review.model_validate(data).model_dump(exclude_none=True)
     issues = []
-    complete = len(content) == len(text)
-    if not complete:
-        issues.append("全文超过本次输入上限，当前仅完成部分文本评估。")
     relevance = current_relevance(paper)
     if review["quality"] == "unknown":
         issues.append("研究质量尚无法判断，需要补充材料或重新核验。")
@@ -253,17 +282,15 @@ async def evaluate_paper(
         "status": "needs_verification" if tier == "pending" else "reviewed",
         "validation_issues": issues,
         "source_category": _display_category(paper),
-        "text_complete": complete,
-        "input_chars": len(content),
+        "text_complete": True,
+        "input_chars": len(text),
         "full_text_chars": len(text),
         "relevance": relevance,
         "relevance_reason": paper.get("selection_reason", "")
         if relevance is not None
         else "尚未按当前研究方向完成相关性初筛。",
         "model": llm.model,
-        "fingerprint": review_fingerprint(
-            paper, llm.model, max_chars, instructions=instructions
-        ),
+        "fingerprint": review_fingerprint(paper, llm.model, instructions=instructions),
         "reviewed_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -367,6 +394,11 @@ async def review_report_ids(
                     cached = None
                 if not isinstance(cached, dict):
                     cached = None
+                if not force and context_limit_is_current(
+                    paper, cached, get_llm_model()
+                ):
+                    results[rid] = cached
+                    continue
                 if not force and cached_review_is_current(
                     paper, cached, get_llm_model()
                 ):
@@ -384,12 +416,6 @@ async def review_report_ids(
                     result = pending_review(
                         paper, "未取得可用全文；暂不作研究质量推荐。"
                     )
-                elif len(paper["full_text"]) > MAX_REVIEW_CHARS:
-                    result = pending_review(
-                        paper,
-                        f"全文 {len(paper['full_text'])} 字符超过可用输入上限 {MAX_REVIEW_CHARS}；已跳过全文评估。",
-                    )
-                    audit["pending_material_ids"].append(rid)
                 elif not budget_available:
                     audit["deferred_ids"].append(rid)
                     continue

@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from reportagent.llm.client import LLMClient
+from reportagent.llm.errors import ContextWindowExceeded
 from reportagent.models.schemas import (
     AnalysisResult,
     Assessment,
@@ -94,12 +95,7 @@ class AnalysisAgent:
     def _phase_config(self, phase: str) -> dict:
         return self._config.get("analysis", {}).get("phases", {}).get(phase, {})
 
-    def _phase_content(self, text: str, cfg: dict) -> str:
-        limit = cfg.get("max_input_chars", 240000)
-        if len(text) > limit:
-            raise ValueError(
-                f"全文 {len(text)} 字符超过阶段输入上限 {limit}，停止分析；未截取部分正文"
-            )
+    def _phase_content(self, text: str) -> str:
         return "\n\n".join(
             f"[{key}]\n{value}" for key, value in text_chunks(text).items()
         )
@@ -191,7 +187,7 @@ class AnalysisAgent:
     ) -> AnalysisResult:
         cfg = self._phase_config("metadata")
         max_chars = len(full_text)
-        content = self._phase_content(full_text, cfg)
+        content = self._phase_content(full_text)
 
         prompt = cfg.get("user_prompt_template", "").format(
             title=title,
@@ -225,6 +221,8 @@ class AnalysisAgent:
                 sample_period=di.get("sample_period", ""),
                 universe=di.get("universe", ""),
             )
+        except ContextWindowExceeded:
+            raise
         except Exception as e:
             logger.warning("Phase 1 (metadata) failed for '%s': %s", title[:50], e)
 
@@ -241,7 +239,7 @@ class AnalysisAgent:
     ) -> AnalysisResult:
         cfg = self._phase_config("methodology")
         max_chars = len(full_text)
-        content = self._phase_content(full_text, cfg)
+        content = self._phase_content(full_text)
 
         # Parse extracted equations for inclusion in the prompt
         equations_text = ""
@@ -317,6 +315,8 @@ class AnalysisAgent:
                 model_architecture=model_arch,
                 portfolio_construction=port_con,
             )
+        except ContextWindowExceeded:
+            raise
         except Exception as e:
             logger.warning("Phase 2 (methodology) failed for '%s': %s", title[:50], e)
 
@@ -329,7 +329,7 @@ class AnalysisAgent:
     ) -> AnalysisResult:
         cfg = self._phase_config("assessment")
         max_chars = len(full_text)
-        content = self._phase_content(full_text, cfg)
+        content = self._phase_content(full_text)
 
         extra = ""
         if result.equations:
@@ -400,6 +400,8 @@ class AnalysisAgent:
                 practical_implications=resp.get("practical_implications", []),
                 key_contributions=resp.get("key_contributions", []),
             )
+        except ContextWindowExceeded:
+            raise
         except Exception as e:
             logger.warning("Phase 4 (assessment) failed for '%s': %s", title[:50], e)
 

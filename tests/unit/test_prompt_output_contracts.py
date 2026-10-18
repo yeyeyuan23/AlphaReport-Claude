@@ -74,7 +74,7 @@ def test_forced_narrative_reads_whole_evidence_and_shared_grounding(monkeypatch)
     report = SimpleNamespace(
         title="理论论文",
         abstract="摘要",
-        full_text="x" * 2000 + tail,
+        full_text="x" * 350000 + tail,
         has_full_text=True,
         analysis_json=json.dumps(analysis),
     )

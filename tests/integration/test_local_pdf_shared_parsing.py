@@ -74,14 +74,12 @@ def test_optional_structured_parsing_preserves_pdf_metadata_date_and_abstract(
     assert row.raw_metadata["pdf_creation_date"] == "D:20261017120000"
 
 
-def test_docling_table_does_not_artificially_exceed_full_review_limit(
-    tmp_path, monkeypatch
-):
+def test_docling_table_is_not_duplicated_in_full_review_material(tmp_path, monkeypatch):
     import asyncio
 
     import pytest
 
-    from reportagent.services.report_quality import MAX_REVIEW_CHARS, evaluate_paper
+    from reportagent.services.report_quality import evaluate_paper
 
     path = tmp_path / "large-paper.pdf"
     with fitz.open() as document:
@@ -114,7 +112,6 @@ def test_docling_table_does_not_artificially_exceed_full_review_limit(
 
     assert len(markdown) == 202547
     assert row.full_text == markdown
-    assert len(row.full_text) < MAX_REVIEW_CHARS == 240000
     assert row.full_text.count(table.strip()) == 1
     assert json.loads(row.tables_json) == [{"table_body": table}]
 

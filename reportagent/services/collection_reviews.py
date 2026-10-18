@@ -91,7 +91,9 @@ async def prepare_collection_reviews(
         str(rid): result.get("tier") for rid, result in reviewed.items()
     }
     for rid, result in reviewed.items():
-        if result.get("status") != "reviewed":
+        if result.get("status") == "skipped":
+            audit["skipped_material_ids"].append(rid)
+        elif result.get("status") != "reviewed":
             audit["failures"].append(
                 {
                     "stage": "review",

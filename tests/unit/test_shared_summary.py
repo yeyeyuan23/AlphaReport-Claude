@@ -22,7 +22,9 @@ def test_summary_request_profiles_keep_grounding_and_complete_original_text(
     depth, budget
 ):
     summary = service()
-    text = "opening\n" + "x" * 13000 + "\nTAIL evidence: sufficiently small temperature"
+    text = (
+        "opening\n" + "x" * 350000 + "\nTAIL evidence: sufficiently small temperature"
+    )
     request = summary.build_summary_request("Title", content=text, depth=depth)
     assert request.max_tokens == budget
     assert "不能补造" in request.messages[0]["content"]
@@ -31,11 +33,10 @@ def test_summary_request_profiles_keep_grounding_and_complete_original_text(
     assert "已完成的分析" not in request.messages[1]["content"]
 
 
-def test_summary_request_refuses_over_limit_or_empty_material():
+def test_summary_request_refuses_empty_material():
     summary = service()
-    for content in (" ", "x" * 240001):
-        with pytest.raises(ValueError):
-            summary.build_summary_request("Title", content=content)
+    with pytest.raises(ValueError):
+        summary.build_summary_request("Title", content=" ")
 
 
 def test_summary_keeps_full_structured_evidence_including_assumptions_and_benchmarks():

@@ -165,7 +165,7 @@ def test_legacy_or_stale_relevance_cannot_promote_explicit_paper(provenance):
 
 
 def test_default_review_includes_long_paper_tail_and_complete_raw_coverage():
-    size = 115000
+    size = 350000
     text = (
         TEXT
         + "x" * (size - len(TEXT) - 50)
@@ -179,12 +179,26 @@ def test_default_review_includes_long_paper_tail_and_complete_raw_coverage():
     assert result["text_complete"] is True
 
 
-def test_explicit_review_limit_is_pending_and_never_sends_partial_text():
+def test_removing_character_cap_preserves_existing_complete_review_but_rejects_changed_text():
+    import hashlib
+    import json
+
+    quality = module()
+    candidate = paper()
     llm = Model(response())
-    result = asyncio.run(module().evaluate_paper(paper(), llm, max_chars=1000))
-    assert result["tier"] == "pending"
-    assert not llm.requests
-    assert result["text_complete"] is False
+    review = asyncio.run(quality.evaluate_paper(candidate, llm))
+    previous_inputs = {
+        **quality._review_inputs(candidate, llm.model),
+        "max_chars": 240000,
+    }
+    review["fingerprint"] = hashlib.sha256(
+        json.dumps(previous_inputs, ensure_ascii=False, sort_keys=True).encode()
+    ).hexdigest()
+    assert quality.cached_review_is_current(candidate, review, llm.model)
+    old_rejection = {**review, "status": "pending", "text_complete": False}
+    assert not quality.review_fingerprint_matches(candidate, old_rejection, llm.model)
+    candidate["full_text"] += "Changed research evidence."
+    assert not quality.cached_review_is_current(candidate, review, llm.model)
 
 
 @pytest.mark.parametrize("field", ["title", "abstract"])

@@ -4,6 +4,8 @@ import json
 import logging
 from typing import Any
 
+from reportagent.llm.errors import context_window_error
+
 from reportagent.utils.config import (
     get_config,
     get_llm_api_key,
@@ -179,8 +181,10 @@ class LLMClient:
     async def _openai_text(self, kwargs: dict) -> str:
         try:
             response = await self._client.chat.completions.create(**kwargs)
-        except Exception:
-            self.calls.append({"model": kwargs["model"], "complete": False})
+        except Exception as error:
+            context_error = self._record_failure(error, kwargs["model"])
+            if context_error:
+                raise context_error from error
             raise
         choice = response.choices[0]
         content = choice.message.content or ""
@@ -197,6 +201,15 @@ class LLMClient:
         if not complete:
             raise ValueError(f"Incomplete model response: {choice.finish_reason}")
         return content
+
+    def _record_failure(self, error: Exception, model: str):
+        context_error = context_window_error(error, model)
+        call = {"model": model, "complete": False}
+        if context_error:
+            call["error"] = "context_length_exceeded"
+            logger.warning("Model context limit exceeded: model=%s", model)
+        self.calls.append(call)
+        return context_error
 
     # --- Anthropic / Claude ---
 
@@ -235,8 +248,10 @@ class LLMClient:
             kwargs["thinking"] = {"type": self.thinking}
         try:
             response = await self._client.messages.create(**kwargs)
-        except Exception:
-            self.calls.append({"model": kwargs["model"], "complete": False})
+        except Exception as error:
+            context_error = self._record_failure(error, kwargs["model"])
+            if context_error:
+                raise context_error from error
             raise
         text = self._extract_text(response.content)
         complete = response.stop_reason in ("end_turn", "stop_sequence") and bool(

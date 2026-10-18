@@ -68,7 +68,7 @@ def queue_library(tmp_path, monkeypatch, memory_session_factory):
             if rid < 12:
                 values.update(full_text="", has_full_text=False)
             elif rid == 12:
-                values.update(full_text="x" * (quality.MAX_REVIEW_CHARS + 1))
+                values.update(full_text="x" * 350000)
             row = Report(**values)
             if rid == 13:
                 cached = asyncio.run(quality.evaluate_paper(values, QueueModel()))
@@ -82,14 +82,14 @@ def test_missing_material_and_current_caches_do_not_starve_collection_reviews(
     queue_library,
 ):
     factory, model, fetch = queue_library
-    for expected_last_id in (25, 37):
+    for expected_last_id in (24, 36):
         before = len(model.requests)
         asyncio.run(collection_reviews.prepare_collection_reviews(max_reviews=12))
         assert len(model.requests) - before == 12
         with factory() as session:
-            for rid in range(1, 13):
+            for rid in range(1, 12):
                 assert session.get(Report, rid).evaluation_json is None
-            for rid in range(13, expected_last_id + 1):
+            for rid in range(12, expected_last_id + 1):
                 assert (
                     json.loads(session.get(Report, rid).evaluation_json)["status"]
                     == "reviewed"
@@ -136,17 +136,17 @@ def test_collection_review_budget_defaults_to_all_and_resumes(queue_library, bud
     result = asyncio.run(
         collection_reviews.prepare_collection_reviews(max_reviews=budget)
     )
-    expected = 25 if budget is None else budget
+    expected = 26 if budget is None else budget
     assert len(model.requests) == expected
     assert len(result["review_ids"]) == expected
     assert len(result["completed_ids"]) == expected
     assert result["cached_ids"] == [13]
-    assert len(result["deferred_ids"]) == 25 - expected
+    assert len(result["deferred_ids"]) == 26 - expected
     if budget is None:
         repeated = asyncio.run(collection_reviews.prepare_collection_reviews())
-        assert len(model.requests) == 25
+        assert len(model.requests) == 26
         assert repeated["review_ids"] == repeated["completed_ids"] == []
-        assert set(repeated["cached_ids"]) == set(range(13, 39))
+        assert set(repeated["cached_ids"]) == set(range(12, 39))
 
 
 @pytest.mark.parametrize("flow", ["weekly", "daily"])
@@ -176,9 +176,55 @@ def test_reports_never_download_or_review_and_preserve_library(
         assert {r.id: r.evaluation_json for r in db.query(Report)} == before
     assert result["status"] == "preview"
     text = capsys.readouterr().out
-    for rid in range(1, 13):
+    for rid in range(1, 12):
         assert f"**Portfolio study {rid}**" not in text
         assert f"[Portfolio study {rid}]" not in text
+
+
+def test_provider_context_limit_is_saved_skipped_without_blocking_or_repeating_siblings(
+    queue_library,
+):
+    from reportagent.llm.errors import ContextWindowExceeded
+
+    factory, model, fetch = queue_library
+    original = model.chat_json
+
+    async def reject_long_request(messages, **kwargs):
+        payload = json.loads(messages[-1]["content"])
+        if len("".join(payload["text_chunks"].values())) > 300000:
+            model.requests.append(messages)
+            raise ContextWindowExceeded(model.model)
+        return await original(messages, **kwargs)
+
+    model.chat_json = reject_long_request
+    result = asyncio.run(collection_reviews.prepare_collection_reviews())
+    assert len(model.requests) == 26
+    assert result["completed_ids"] == list(range(14, 39))
+    assert set(result["skipped_material_ids"]) == set(range(1, 13))
+    assert not result["failures"]
+    with factory() as session:
+        row = session.get(Report, 12)
+        saved = json.loads(row.evaluation_json)
+        assert saved["status"] == "skipped"
+        assert saved["skip_reason"] == "context_length_exceeded"
+        assert model.model in saved["validation_issues"][0]
+        assert not quality.has_review_material(row)
+    displayed = weekly.get_weekly_papers(datetime(2020, 1, 1), datetime(2030, 1, 1))
+    assert displayed and 12 not in {paper["id"] for paper in displayed}
+    repeated = asyncio.run(collection_reviews.prepare_collection_reviews())
+    assert len(model.requests) == 26
+    assert not repeated["review_ids"]
+    direct = asyncio.run(quality.review_report_ids([12]))
+    assert direct[12] == saved
+    assert len(model.requests) == 26
+    with factory() as session:
+        row = session.get(Report, 12)
+        row.full_text = "New complete evidence. " * 100
+        session.commit()
+        assert quality.has_review_material(row)
+    retried = asyncio.run(collection_reviews.prepare_collection_reviews())
+    assert retried["completed_ids"] == [12]
+    fetch.assert_not_awaited()
 
 
 def test_default_candidate_ordering_does_not_truncate_after_twelve():

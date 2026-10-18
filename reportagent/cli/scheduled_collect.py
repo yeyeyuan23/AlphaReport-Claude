@@ -32,7 +32,7 @@ def _review_summary(review):
         f"全文阅读评估（含库中待处理）：新调用 {len(calls)} 篇，完成 {count} 篇，"
         f"缓存有效 {len(review.get('cached_ids', []))} 篇，"
         f"缺材料 {len(review.get('pending_material_ids', []))} 篇，"
-        f"缺全文或超长跳过 {len(review.get('skipped_material_ids', []))} 篇，"
+        f"缺全文或模型确认上下文超限跳过 {len(review.get('skipped_material_ids', []))} 篇，"
         f"预算延期 {len(review.get('deferred_ids', []))} 篇，"
         f"新调用未完成 {unfinished} 篇"
     )

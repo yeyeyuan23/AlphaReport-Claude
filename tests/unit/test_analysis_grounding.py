@@ -42,7 +42,7 @@ class ReadingModel:
 def test_all_enabled_analysis_phases_read_the_complete_long_paper():
     llm = ReadingModel()
     text = (
-        "Opening.\n" + "x" * 114990 + "\nTAIL: only for sufficiently small temperature."
+        "Opening.\n" + "x" * 350000 + "\nTAIL: only for sufficiently small temperature."
     )
     result = asyncio.run(AnalysisAgent(llm).analyze_report_directly("理论", "", text))
     assert result.summary
@@ -53,13 +53,16 @@ def test_all_enabled_analysis_phases_read_the_complete_long_paper():
         assert "C029" in request[1]["content"]
 
 
-def test_input_over_phase_cap_fails_explicitly_instead_of_truncating():
+def test_actual_context_error_stops_analysis_without_running_remaining_phases():
+    from reportagent.llm.errors import ContextWindowExceeded
+
     llm = ReadingModel()
-    agent = AnalysisAgent(llm)
-    agent._config["analysis"]["phases"]["metadata"]["max_input_chars"] = 1000
-    with pytest.raises(ValueError, match="全文.*上限"):
-        asyncio.run(agent.analyze_report_directly("理论", "", "x" * 1001))
-    assert not llm.requests
+    llm.chat_json = AsyncMock(side_effect=ContextWindowExceeded(llm.model))
+    with pytest.raises(ContextWindowExceeded):
+        asyncio.run(
+            AnalysisAgent(llm).analyze_report_directly("理论", "", "x" * 350000)
+        )
+    assert llm.chat_json.await_count == 1
 
 
 def test_summary_uses_shared_config_budget_and_grounding_for_requested_depth(tmp_path):

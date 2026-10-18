@@ -144,11 +144,6 @@ def build_summary_request(
         if not isinstance(content, str) or not content.strip():
             raise ValueError("摘要原文材料为空")
         context = "原文材料（尚未完成结构化分析；仅依据原文总结）：\n" + content
-    limit = cfg.get("max_input_chars", 240000)
-    if len(context) > limit:
-        raise ValueError(
-            f"摘要材料 {len(context)} 字符超过输入上限 {limit}，未截取部分正文"
-        )
     profile = cfg["profiles"][depth]
     template = cfg["user_prompt_template"]
     if analysis is None:

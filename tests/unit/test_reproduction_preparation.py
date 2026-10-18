@@ -10,11 +10,15 @@ def test_preparation_preserves_evidence_and_separates_proposal():
     from reportagent.services.reproduction import prepare_reproduction
 
     model = SimpleNamespace(chat_json=AsyncMock(return_value=output()))
-    card = asyncio.run(prepare_reproduction(reviewed_paper(), llm=model))
+    paper = reviewed_paper()
+    paper["full_text"] += "\n" + "x" * 350000 + "\nTAIL: scope is limited."
+    card = asyncio.run(prepare_reproduction(paper, llm=model))
     assert card["status"] == "ready"
     assert card["fields"]["target"]["evidence"][0]["raw_quote"]
     assert card["proposal_label"] == "建议验证方案，非作者实验或已完成复现"
     assert "尚未复现" in card["notice"]
+    sent = json.loads(model.chat_json.await_args.args[0][-1]["content"])
+    assert "".join(sent["text_chunks"].values()) == paper["full_text"]
 
 
 def test_invalid_quote_gets_one_correction_before_persistable_success():

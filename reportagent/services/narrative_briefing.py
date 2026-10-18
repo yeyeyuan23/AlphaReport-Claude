@@ -3,7 +3,6 @@
 import json
 from copy import deepcopy
 
-from reportagent.services.report_quality import MAX_REVIEW_CHARS
 from reportagent.services.text_evidence import text_chunks
 from reportagent.skills.registry import skill_resource
 
@@ -16,11 +15,6 @@ def build_briefing_messages(report, analysis: dict) -> list[dict]:
     if isinstance(analysis.get("assessment"), dict):
         analysis["assessment"].pop("overall_quality_score", None)
     context = json.dumps(analysis, ensure_ascii=False)
-    if (
-        len(text) + len(context) + len(report.title or "") + len(report.abstract or "")
-        > MAX_REVIEW_CHARS
-    ):
-        raise ValueError("简报材料超过输入上限；未截断原文或结构化分析。")
     instructions = skill_resource("analyze-report", "grounding.md").read_text(
         encoding="utf-8"
     )

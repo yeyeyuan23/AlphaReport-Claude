@@ -8,6 +8,7 @@ import asyncio
 import logging
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
+from reportagent.llm.errors import ContextWindowExceeded
 
 from reportagent.services.knowledge_cards import current_review, report_snapshot
 from reportagent.services.text_evidence import locate_quote, text_chunks
@@ -166,11 +167,6 @@ async def prepare_reproduction(report, *, force=False, llm=None) -> dict:
             return {**cached, **checked}
     except (ValueError, TypeError, KeyError):
         pass
-    if len(text) > 240000:
-        return {
-            "status": "pending",
-            "notice": "全文超过本轮输入上限；请分批完整核对，未截断材料。",
-        }
     try:
         if llm is None:
             from reportagent.llm.client import LLMClient
@@ -225,6 +221,8 @@ async def prepare_reproduction(report, *, force=False, llm=None) -> dict:
                 return validate_preparation(corrected, text)
 
         result = await asyncio.wait_for(generate_checked(), timeout=GENERATION_TIMEOUT)
+    except ContextWindowExceeded as error:
+        return {"status": "skipped", "notice": str(error)}
     except asyncio.TimeoutError:
         logger.warning("Reproduction generation timed out")
         return {

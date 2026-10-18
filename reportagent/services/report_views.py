@@ -79,7 +79,7 @@ def read_evaluation(value, *, paper: dict | None = None) -> dict | None:
         from reportagent.services.report_quality import (
             SCHEMA_VERSION,
             pending_review,
-            review_fingerprint,
+            review_fingerprint_matches,
             cached_review_is_current,
         )
 
@@ -94,12 +94,12 @@ def read_evaluation(value, *, paper: dict | None = None) -> dict | None:
             same_context = (
                 parsed.get("schema_version") == SCHEMA_VERSION
                 and parsed.get("model") == model
-                and parsed.get("fingerprint") == review_fingerprint(paper, model)
+                and review_fingerprint_matches(paper, parsed, model)
             )
             current_pending = (
                 same_context
                 and parsed.get("tier") == "pending"
-                and parsed.get("status") in {"pending", "needs_verification"}
+                and parsed.get("status") in {"pending", "needs_verification", "skipped"}
             )
             current = current_pending or cached_review_is_current(paper, parsed, model)
             if not current:
