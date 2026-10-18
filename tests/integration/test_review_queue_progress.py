@@ -123,7 +123,7 @@ def test_cache_without_current_complete_material_is_not_reused(
     if invalid_field == "has_full_text":
         assert result[13]["tier"] == "pending"
         assert result[14]["status"] == "reviewed"
-        assert fetch.await_count == 1
+        fetch.assert_not_awaited()
     else:
         assert result[13]["status"] == "reviewed"
         assert 14 not in result

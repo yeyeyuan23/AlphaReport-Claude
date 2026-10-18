@@ -227,8 +227,6 @@ async def evaluate_paper(
     relevance = current_relevance(paper)
     if review["quality"] == "unknown":
         issues.append("研究质量尚无法判断，需要补充材料或重新核验。")
-    if paper.get("requires_screening_update"):
-        issues.append("原文版本或摘要已更新，需要重新进行方向相关性初筛。")
     if (
         issues
         or not review["method"]
@@ -307,11 +305,10 @@ async def review_report_ids(
     max_reviews: int | None = None,
     audit: dict | None = None,
 ) -> dict[int, dict]:
-    """Review all requested IDs by default; explicit budgets count only new model calls."""
+    """Assess stored text only; budgets count new model calls, never material fetching."""
     from reportagent.db.engine import get_session_factory
     from reportagent.models.database import Report
     from reportagent.llm.client import LLMClient
-    from reportagent.services.one_report import collect_paper
 
     fields = (
         "id",
@@ -361,7 +358,7 @@ async def review_report_ids(
                     continue
                 paper = snapshot(row)
                 raw_cache = row.evaluation_json
-            refresh_failed = False
+            review_failed = False
             cached = None
             try:
                 try:
@@ -376,61 +373,9 @@ async def review_report_ids(
                     results[rid] = cached
                     audit["cached_ids"].append(rid)
                     continue
-                needs_material = (
-                    not paper["has_full_text"]
-                    or len((paper["full_text"] or "").strip()) < 1000
-                )
                 budget_available = (
                     max_reviews is None or len(audit["review_ids"]) < max_reviews
                 )
-                if (
-                    needs_material
-                    and budget_available
-                    and paper["source"] == "arxiv"
-                    and paper["arxiv_id"]
-                ):
-                    fetched = await collect_paper(paper["arxiv_id"])
-                    with factory() as session:
-                        row = session.get(Report, rid)
-                        if row is None or snapshot(row) != paper:
-                            results[rid] = pending_review(
-                                paper, "获取期间论文或筛选结果已更新，请重新评估。"
-                            )
-                            continue
-                        from reportagent.classifiers.rule_classifier import (
-                            RuleClassifier,
-                        )
-                        from reportagent.classifiers.provenance import (
-                            classification_material,
-                        )
-                        from reportagent.db.repository import ReportRepository
-                        from reportagent.models.schemas import ClassifiedReport
-
-                        _, updated_id = ReportRepository(session).upsert_report(
-                            ClassifiedReport(
-                                search_result=fetched,
-                                classification=RuleClassifier().classify(
-                                    fetched.title, classification_material(fetched)
-                                ),
-                            ),
-                            commit=False,
-                            preserve_classification_on_same_input=True,
-                        )
-                        if updated_id != rid:
-                            session.rollback()
-                            results[rid] = pending_review(
-                                paper, "获取的论文身份不匹配，请重新评估。"
-                            )
-                            continue
-                        screening_changed = any(
-                            getattr(row, key) != paper[key]
-                            for key in ("title", "abstract", "arxiv_id")
-                        )
-                        session.commit()
-                        paper = snapshot(row)
-                    if screening_changed:
-                        paper["requires_screening_update"] = True
-                    cached = None
                 if (
                     not paper["has_full_text"]
                     or len((paper["full_text"] or "").strip()) < 1000
@@ -456,7 +401,7 @@ async def review_report_ids(
                         evaluate_paper(paper, llm), timeout=240
                     )
             except Exception as exc:
-                refresh_failed = True
+                review_failed = True
                 logger.warning("Report %s review failed: %s", rid, type(exc).__name__)
                 result = pending_review(
                     paper, f"全文评估未完成（{type(exc).__name__}），可重试。"
@@ -477,7 +422,7 @@ async def review_report_ids(
                     )
                     continue
                 if (
-                    refresh_failed
+                    review_failed
                     and cached
                     and cached.get("status") == "reviewed"
                     and cached.get("tier") != "pending"
