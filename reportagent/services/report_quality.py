@@ -9,9 +9,10 @@ import logging
 import math
 from collections import deque
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, ValidationError
 
 from reportagent.skills.registry import skill_resource
 from reportagent.utils.config import get_llm_model, get_llm_base_url, get_llm_provider
@@ -57,11 +58,32 @@ class Review(QualityJudgment):
     ]
     research_question: str = Field(min_length=1)
     method: Evidence
-    findings: list[Evidence] = Field(min_length=1, max_length=5)
-    strengths: list[Evidence] = Field(max_length=5)
-    limitations: list[str] = Field(max_length=8)
-    critical_concerns: list[str] = Field(max_length=5)
+    findings: list[Evidence] = Field(min_length=1)
+    strengths: list[Evidence]
+    limitations: list[str]
+    critical_concerns: list[str]
     reading_advice: str = Field(min_length=1)
+
+
+def _validate_review(data, llm) -> dict:
+    try:
+        return Review.model_validate(data).model_dump(exclude_none=True)
+    except ValidationError as error:
+        from reportagent.llm.diagnostics import save_validation_error
+
+        calls = getattr(llm, "calls", [])
+        response_path = calls[-1].get("response_path") if calls else None
+        if response_path:
+            try:
+                save_validation_error(Path(response_path), error, data)
+            except (OSError, TypeError, ValueError):
+                logger.warning("Could not save validation diagnostics", exc_info=True)
+        logger.warning(
+            "Full-text review validation failed: %s response_path=%s",
+            error.json(include_url=False, include_input=False),
+            response_path,
+        )
+        raise
 
 
 def review_instructions() -> str:
@@ -251,7 +273,7 @@ async def evaluate_paper(paper: dict, llm) -> dict:
             fingerprint=review_fingerprint(paper, llm.model),
         )
         return result
-    review = Review.model_validate(data).model_dump(exclude_none=True)
+    review = _validate_review(data, llm)
     issues = []
     relevance = current_relevance(paper)
     if review["quality"] == "unknown":

@@ -137,6 +137,24 @@ def test_invalid_model_schema_is_failure_not_a_default_positive_review():
         asyncio.run(module().evaluate_paper(paper(), Model({"quality": "strong"})))
 
 
+@pytest.mark.parametrize(
+    "field", ["findings", "strengths", "limitations", "critical_concerns"]
+)
+def test_valid_observations_are_not_rejected_or_truncated_by_list_length(field):
+    data = response()
+    if field in {"findings", "strengths"}:
+        data[field] = [{"claim": f"作者报告的第 {i + 1} 项观察及其条件"} for i in range(9)]
+    else:
+        data[field] = [f"原文明示的第 {i + 1} 项具体问题及依据" for i in range(9)]
+
+    result = asyncio.run(module().evaluate_paper(paper(), Model(data)))
+
+    assert result["status"] == "reviewed"
+    assert result[field] == data[field]
+    if field == "critical_concerns":
+        assert result["tier"] == "exclude"
+
+
 def test_whitespace_is_not_a_method_description():
     data = response()
     data["method"]["claim"] = " " * 30

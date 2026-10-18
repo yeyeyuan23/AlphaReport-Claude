@@ -71,3 +71,19 @@ def save_parse_error(directory: Path, error: json.JSONDecodeError):
     (directory / "parse-error.json").write_text(
         json.dumps(details, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+
+
+def save_validation_error(directory: Path, error, data):
+    (directory / "validation-input.json").write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    details = {
+        "exception": type(error).__name__,
+        "schema": error.title,
+        "errors": json.loads(error.json(include_url=False)),
+        "validation_input_file": "validation-input.json",
+        "raw_response_file": "response.txt",
+    }
+    (directory / "validation-error.json").write_text(
+        json.dumps(details, ensure_ascii=False, indent=2), encoding="utf-8"
+    )

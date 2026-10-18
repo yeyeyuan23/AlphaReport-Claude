@@ -86,3 +86,34 @@ def test_diagnostic_write_failure_does_not_hide_the_parser_error(monkeypatch):
     with pytest.raises(json.JSONDecodeError) as caught:
         client._parse_json_response('{"broken": }')
     assert caught.value.msg == "Expecting value"
+
+
+@pytest.mark.parametrize("invalid", ["field", "judgment"])
+def test_review_validation_preserves_exact_errors_and_input(
+    tmp_path, monkeypatch, caplog, invalid
+):
+    from pydantic import ValidationError
+    from tests.support.report_fixtures import Model, module, paper, response
+
+    data = response()
+    if invalid == "field":
+        data["research_type"] = "unsupported-type"
+    else:
+        data["quality_checks"][0]["status"] = "limited"
+    raw = json.dumps(data, ensure_ascii=False)
+    monkeypatch.setattr(diagnostics, "RESPONSE_ROOT", tmp_path)
+    directory = diagnostics.save_response(
+        raw, None, provider="anthropic", call={}, context={"report_id": 89}
+    )
+    llm = Model(data)
+    llm.calls = [{"response_path": str(directory)}]
+    with pytest.raises(ValidationError) as caught:
+        asyncio.run(module().evaluate_paper(paper(id=89), llm))
+
+    saved = json.loads((directory / "validation-error.json").read_text())
+    assert saved["errors"] == json.loads(caught.value.json(include_url=False))
+    assert saved["schema"] == "Review"
+    assert json.loads((directory / "validation-input.json").read_text()) == data
+    assert (directory / "response.txt").read_text() == raw
+    assert "response_path=" + str(directory) in caplog.text
+    assert caught.value.errors()[0]["msg"] in caplog.text
