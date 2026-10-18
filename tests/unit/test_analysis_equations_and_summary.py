@@ -55,9 +55,10 @@ def test_analysis_point_summary_preserves_report_title_and_top_level_analysis():
         "原始局限",
         "原始贡献总评",
         "原始实践推论",
-        "综合评分：7",
     ):
         assert expected in prompt
+    assert "综合评分" not in prompt
+    assert "overall_quality_score" not in prompt
     assert analysis == original
 
 

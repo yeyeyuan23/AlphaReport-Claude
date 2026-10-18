@@ -60,6 +60,7 @@ class WeeklyReportOptions:
 def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
     """Query papers with published_date in the inclusive calendar-date range."""
     from reportagent.sources.date_window import source_date
+
     week_start, week_end = source_date(week_start), source_date(week_end)
     init_db()
     factory = get_session_factory()

@@ -196,7 +196,6 @@ def _format_papers_for_llm(papers: list, indices=None) -> str:
     return "\n".join(
         f"### 论文 #{index}\n"
         f"标题：{_paper_value(paper, 'title')}\n"
-        f"来源：{_paper_value(paper, 'source')}\n"
         f"分类标签：{_paper_value(paper, 'topics')}\n"
         f"摘要：{_paper_value(paper, 'abstract') or ''}\n"
         for index, paper in zip(indices, papers)
@@ -373,7 +372,7 @@ async def _score_one_batch(
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.2,
-            max_tokens=4000,
+            max_tokens=max(4000, 350 * len(eligible) * len(directions)),
         )
         assessed, errors = _validate_batch_response(response, eligible, directions)
         valid.extend(

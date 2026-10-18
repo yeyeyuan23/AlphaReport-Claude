@@ -11,15 +11,15 @@ const SOURCE_CATEGORIES: Record<Evaluation['source_category'], string> = {
   academic: '学术论文',
   broker: '券商研报',
   community: '社区研究',
-  other: '其他来源',
+  other: '其他材料',
 };
 
 const RESEARCH_TYPES = {
   empirical: '实证研究',
   theoretical: '理论研究',
   methodological: '方法研究',
-  broker: '券商研究',
-  community: '社区研究',
+  review: '综述',
+  commentary: '观点讨论',
 };
 
 const QUALITY_LABELS: Record<Evaluation['quality'], string> = {
@@ -185,6 +185,30 @@ export default function ResearchEvaluation({ evaluation }: { evaluation?: Evalua
           <p className="text-[13px] leading-relaxed whitespace-pre-line">
             {evaluation.research_question}
           </p>
+        </section>
+      )}
+
+      {!!evaluation.quality_checks?.length && (
+        <section className="space-y-2">
+          <h3 className="text-sm font-semibold">质量判断依据</h3>
+          <ul className="space-y-2 text-[13px] leading-relaxed">
+            {evaluation.quality_checks.map((check) => (
+              <li key={check.dimension}>
+                <span className="font-medium">
+                  {
+                    {
+                      method: '方法',
+                      validation: '验证',
+                      scope: '适用范围',
+                      reproducibility: '复现细节',
+                    }[check.dimension]
+                  }
+                  ：
+                </span>
+                {check.basis}
+              </li>
+            ))}
+          </ul>
         </section>
       )}
 

@@ -25,6 +25,14 @@ def response():
         "limitations": ["跨市场适用性未报告"],
         "quality": "strong",
         "confidence": "high",
+        "quality_checks": [
+            {
+                "dimension": d,
+                "status": "supported",
+                "basis": "原文明示滚动样本外设计及成本条件，可核对对应方法。",
+            }
+            for d in ("method", "validation", "scope", "reproducibility")
+        ],
         "critical_concerns": [],
         "reading_advice": "精读样本外检验部分，复现成本设置。",
     }

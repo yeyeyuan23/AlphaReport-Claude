@@ -1,6 +1,5 @@
 """Report reading API backed by shared repositories and presentation services."""
 
-import json
 import logging
 from typing import Optional
 
@@ -14,7 +13,7 @@ from reportagent.sources.content_fetch import get_pdf_policy
 from reportagent.db.repository import ReportRepository
 from reportagent.models.schemas import ReportListParams
 from reportagent.utils.config import PROJECT_ROOT
-from reportagent.skills.registry import skill_resource
+from reportagent.services.narrative_briefing import build_briefing_messages
 from reportagent.services.report_views import (
     report_to_dict as _report_to_dict,
     map_analysis_to_briefing_sections as _map_analysis_to_briefing_sections,
@@ -22,10 +21,6 @@ from reportagent.services.report_views import (
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["library"])
-
-_RESEARCH_BRIEFING_PROMPT = skill_resource("analyze-report", "briefing.md").read_text(
-    encoding="utf-8"
-)
 
 
 @router.get("/reports/stats")
@@ -146,70 +141,24 @@ async def get_research_briefing(
                 },
             }
         try:
-            # Build context for LLM
-            ctx_parts = []
-            if analysis.get("research_question"):
-                ctx_parts.append(f"研究问题：{analysis['research_question']}")
-            if analysis.get("core_contribution"):
-                ctx_parts.append(f"核心贡献：{analysis['core_contribution']}")
-            if analysis.get("method_category"):
-                ctx_parts.append(f"方法类别：{analysis['method_category']}")
-            methodology = analysis.get("methodology") or {}
-            for pt in methodology.get("analysis_points", []):
-                if isinstance(pt, dict) and pt.get("analysis"):
-                    ctx_parts.append(
-                        f"分析点-{pt.get('title', '')}：{pt['analysis'][:500]}"
-                    )
-            assessment = analysis.get("assessment") or {}
-            if assessment.get("strengths"):
-                ctx_parts.append(f"优势：{'；'.join(assessment['strengths'])}")
-            if assessment.get("weaknesses"):
-                ctx_parts.append(f"不足：{'；'.join(assessment['weaknesses'])}")
-            if assessment.get("marginal_contribution_summary"):
-                ctx_parts.append(
-                    f"边际贡献：{assessment['marginal_contribution_summary']}"
-                )
-            if assessment.get("practical_implications"):
-                ctx_parts.append(
-                    f"实践启示：{'；'.join(assessment['practical_implications'])}"
-                )
+            from reportagent.llm.client import LLMClient
 
-            analysis_context = "\n".join(ctx_parts)
-
-            # If force=true, generate LLM narrative
-            if force:
-                try:
-                    from reportagent.llm.client import LLMClient
-
-                    llm = LLMClient()
-                    prompt = _RESEARCH_BRIEFING_PROMPT.format(
-                        title=report.title,
-                        abstract=report.abstract or "",
-                        analysis_context=analysis_context,
-                    )
-                    narrative = await llm.chat(
-                        [
-                            {
-                                "role": "system",
-                                "content": "你是量化金融研究简报撰写专家，仿照 QuantML 风格写叙事性研报解读。全部中文输出。",
-                            },
-                            {"role": "user", "content": prompt},
-                        ],
-                        temperature=0.5,
-                        max_tokens=3000,
-                    )
-                    return {
-                        "success": True,
-                        "data": {"content": narrative, "source": "llm"},
-                    }
-                except Exception as e:
-                    logger.warning(f"LLM briefing generation failed: {e}")
-
-            # Fallback: return mapped sections
-            sections = _map_analysis_to_briefing_sections(analysis)
-            return {"success": True, "data": {"sections": sections, "source": "mapped"}}
-        except (json.JSONDecodeError, Exception):
-            pass
+            messages = build_briefing_messages(report, analysis)
+            llm = LLMClient()
+            narrative = await llm.chat(messages, temperature=0.2, max_tokens=3000)
+            return {
+                "success": True,
+                "data": {"content": narrative, "source": "llm"},
+            }
+        except Exception as exc:
+            logger.warning("LLM briefing generation failed: %s", type(exc).__name__)
+            return {
+                "success": True,
+                "data": {
+                    "sections": _map_analysis_to_briefing_sections(analysis),
+                    "source": "mapped",
+                },
+            }
 
     # 2) No analysis available
     return {

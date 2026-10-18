@@ -92,7 +92,7 @@ def test_briefing_preserves_rich_saved_methods_formulas_and_assessment(rich_anal
         "研究背景与问题",
         "核心方法",
         "关键创新点",
-        "实证检验与评估",
+        "研究证据与评估",
         "实践启示",
         "总结",
     ]
@@ -114,7 +114,6 @@ def test_briefing_preserves_rich_saved_methods_formulas_and_assessment(rich_anal
         "10 bps per turnover",
         "$$q_t=f(x_t)$$",
         "Conditional risk forecast",
-        "8.2 / 10",
         "前视偏差：低风险",
         "幸存者偏差：中风险",
         "数据窥探：未知",
@@ -129,6 +128,8 @@ def test_briefing_preserves_rich_saved_methods_formulas_and_assessment(rich_anal
         "Risk control depends on calibration",
     ]:
         assert expected in text
+    assert "8.2 / 10" not in text
+    assert "综合评分" not in text
     assert "Auxiliary identity" not in text
 
 

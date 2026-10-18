@@ -147,6 +147,7 @@ def test_whitespace_is_not_a_method_description():
 def test_unknown_quality_is_retryable_even_when_quotes_match():
     data = response()
     data["quality"] = "unknown"
+    data["confidence"] = "low"
     result = asyncio.run(module().evaluate_paper(paper(), Model(data)))
     assert result["tier"] == "pending"
     assert result["status"] != "reviewed"

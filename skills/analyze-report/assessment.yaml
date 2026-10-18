@@ -1,0 +1,52 @@
+system_prompt: |
+  依据全文评价研究方法、证据和适用范围，遵循共享质量口径。优势、局限、贡献和复现建议有原文依据，可为空。布尔字段只在原文明示时填 true/false，未知填 null；不适用的 A 股适用性字段填 null。不生成综合数字评分。风险缺乏依据填 unknown，不把未找到当作未报告。
+max_tokens: 5000
+output_schema: |
+  {
+    "quality": "strong|sound|weak|unknown",
+    "confidence": "high|medium|low",
+    "quality_checks": [
+      {
+        "dimension": "method",
+        "status": "supported|limited|unclear|not_applicable",
+        "basis": "中文判断与原文依据或无法确认之处"
+      },
+      {
+        "dimension": "validation",
+        "status": "supported|limited|unclear|not_applicable",
+        "basis": "中文判断与原文依据或无法确认之处"
+      },
+      {
+        "dimension": "scope",
+        "status": "supported|limited|unclear|not_applicable",
+        "basis": "中文判断与原文依据或无法确认之处"
+      },
+      {
+        "dimension": "reproducibility",
+        "status": "supported|limited|unclear|not_applicable",
+        "basis": "中文判断与原文依据或无法确认之处"
+      }
+    ],
+    "strengths": [],
+    "weaknesses": [],
+    "bias_risks": {
+      "look_ahead_bias": "unknown",
+      "survivorship_bias": "unknown",
+      "data_snooping": "unknown",
+      "overfitting_concern": "无法确认时说明"
+    },
+    "reproducibility": {
+      "level": "unknown",
+      "has_data_source": null,
+      "has_code_available": null,
+      "missing_details": []
+    },
+    "a_share_applicability": {
+      "directly_applicable": null,
+      "adaptations_needed": [],
+      "key_constraints": []
+    },
+    "marginal_contribution_summary": "原文增量及比较依据；未报告则说明，不凑创新点",
+    "practical_implications": [],
+    "key_contributions": []
+  }

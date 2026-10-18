@@ -26,15 +26,19 @@ def _validate_summaries(result, expected):
         ):
             raise ValueError("Unknown or repeated direction")
         updates = group.get("updates")
-        if not isinstance(updates, list) or not updates:
-            raise ValueError("Missing research updates")
+        if not isinstance(updates, list) or len(updates) != 1:
+            raise ValueError("Each direction requires exactly one compact update")
         covered = set()
+        normalized = []
         for update in updates:
             if not isinstance(update, dict):
                 raise ValueError("Invalid research update")
             text, ids = update.get("text"), update.get("paper_ids")
             if not isinstance(text, str) or not text.strip():
                 raise ValueError("Empty summary")
+            text = " ".join(text.split())
+            if len(text) > 300:
+                raise ValueError("Direction summary exceeds 300 characters")
             if (
                 not isinstance(ids, list)
                 or not ids
@@ -44,9 +48,10 @@ def _validate_summaries(result, expected):
             if not set(ids) <= expected[direction] or len(ids) != len(set(ids)):
                 raise ValueError("Unknown or repeated paper references")
             covered.update(ids)
+            normalized.append({"text": text, "paper_ids": list(ids)})
         if covered != expected[direction]:
             raise ValueError("Summary omitted papers")
-        summaries[direction] = updates
+        summaries[direction] = normalized
     if set(summaries) != set(expected):
         raise ValueError("Summary omitted directions")
     return summaries

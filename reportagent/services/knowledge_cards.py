@@ -21,6 +21,7 @@ def report_snapshot(report) -> dict:
         "has_full_text",
         "arxiv_id",
         "source",
+        "material_type",
         "topics",
         "asset_classes",
         "analysis_json",

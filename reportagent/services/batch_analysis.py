@@ -39,7 +39,13 @@ def analysis_cache_fingerprint(report, depth: str) -> str:
     """A cache represents this purpose, source snapshot and effective model policy."""
     resources = {
         name: skill_resource("analyze-report", name).read_text(encoding="utf-8")
-        for name in ("analysis.yaml", "summary.yaml", "grounding.md")
+        for name in (
+            "analysis.yaml",
+            "assessment.yaml",
+            "quality-rubric.md",
+            "summary.yaml",
+            "grounding.md",
+        )
     }
     payload = {
         "schema": 1,

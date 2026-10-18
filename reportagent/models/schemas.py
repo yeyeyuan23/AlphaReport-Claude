@@ -4,7 +4,7 @@ from datetime import date
 from enum import Enum
 from typing import Optional, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class Market(str, Enum):
@@ -193,21 +193,57 @@ class BiasRisks(BaseModel):
     overfitting_concern: str = ""
 
 
+class QualityCheck(BaseModel):
+    dimension: Literal["method", "validation", "scope", "reproducibility"]
+    status: Literal["supported", "limited", "unclear", "not_applicable"]
+    basis: str = Field(min_length=1)
+
+    @field_validator("basis")
+    @classmethod
+    def nonempty_basis(cls, value):
+        if not value.strip():
+            raise ValueError("Quality checks require an evidence basis")
+        return value.strip()
+
+
+class QualityJudgment(BaseModel):
+    quality: Literal["strong", "sound", "weak", "unknown"]
+    confidence: Literal["high", "medium", "low"]
+    quality_checks: list[QualityCheck] = Field(min_length=4, max_length=4)
+
+    @model_validator(mode="after")
+    def consistent_judgment(self):
+        checks = {check.dimension: check.status for check in self.quality_checks}
+        if set(checks) != {"method", "validation", "scope", "reproducibility"}:
+            raise ValueError("Quality checks must cover each dimension exactly once")
+        core = [checks[key] for key in ("method", "validation", "scope")]
+        if self.quality == "strong" and any(s != "supported" for s in core):
+            raise ValueError("Strong quality requires supported core evidence")
+        if self.confidence == "high" and (
+            self.quality == "unknown" or "unclear" in core
+        ):
+            raise ValueError("High confidence requires assessable core evidence")
+        return self
+
+
 class Reproducibility(BaseModel):
     level: str = "unknown"
-    has_data_source: bool = False
-    has_code_available: bool = False
+    has_data_source: bool | None = None
+    has_code_available: bool | None = None
     missing_details: list[str] = Field(default_factory=list)
 
 
 class AShareApplicability(BaseModel):
-    directly_applicable: bool = False
+    directly_applicable: bool | None = None
     adaptations_needed: list[str] = Field(default_factory=list)
     key_constraints: list[str] = Field(default_factory=list)
 
 
 class Assessment(BaseModel):
-    overall_quality_score: float = 0.0
+    # Defaults allow reading legacy artifacts; new model responses use QualityJudgment.
+    quality: Literal["strong", "sound", "weak", "unknown"] = "unknown"
+    confidence: Literal["high", "medium", "low"] = "low"
+    quality_checks: list[QualityCheck] = Field(default_factory=list)
     strengths: list[str] = Field(default_factory=list)
     weaknesses: list[str] = Field(default_factory=list)
     bias_risks: BiasRisks = Field(default_factory=BiasRisks)

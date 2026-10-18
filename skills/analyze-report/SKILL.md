@@ -26,8 +26,8 @@ Only add `--chat-id` when the user has authorized sending to that conversation. 
 
 The shared AnalysisAgent reads `analysis.yaml` for general analysis and `one-report.yaml` for the single-paper profile. Both use [summary.yaml](summary.yaml) for purpose-specific summary instructions, concrete target lengths and generation budgets. `briefing.md` defines the optional narrative prompt; `knowledge-card.md` defines the deterministic evidence-card presentation policy. All entrypoints use these resources and the same services; do not create separate prompts in an adapter.
 
-Both analysis profiles load [grounding.md](grounding.md). The full-text reading assessment uses
-[quality-review.md](quality-review.md) through `reportagent.services.report_quality`. It records
+Both analysis profiles load [grounding.md](grounding.md), and share [assessment.yaml](assessment.yaml) plus [quality-rubric.md](quality-rubric.md) for quality levels, confidence and the four evidence checks. Do not generate an uncalibrated numeric total. Distribution channels are not model quality inputs or review-priority rules; research design comes from content. Unknown boolean facts remain null. Empty strengths/limitations are valid when there is nothing supported to list. The full-text reading assessment uses
+[quality-review.md](quality-review.md) with the same quality rubric through `reportagent.services.report_quality`. It records
 method, findings, strengths, limitations, confidence and optional source excerpts; relevance is
 kept separate from quality. Missing or partial full text cannot receive a top recommendation.
 Text chunk IDs are extraction offsets, not PDF page numbers. All available text up to the explicit 240,000 character safety cap is sent as contiguous offset chunks; exceeding a real limit fails or remains pending instead of silently reading a prefix. References are retained for readers to consult, without exact-quote matching as a screening, recommendation or display gate. Reading assessments do not independently verify a paper's conclusions or reproduce experiments.

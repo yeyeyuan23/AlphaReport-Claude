@@ -137,6 +137,7 @@ def _criteria_from_options(options: CollectionOptions) -> UserCriteria:
     elif options.days:
         from datetime import timedelta
         from reportagent.services.report_periods import REPORT_TIMEZONE
+
         date_from = datetime.now(REPORT_TIMEZONE).date() - timedelta(days=options.days)
     if options.date_to:
         date_to = date.fromisoformat(options.date_to)

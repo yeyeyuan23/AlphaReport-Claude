@@ -150,38 +150,7 @@ analysis:
       max_input_chars: 240000
       temperature: 0.3
       max_tokens: 2500
-      system_prompt: |
-        依据全文评价方法、证据和适用范围；相关性与研究质量分开。实证研究检查数据、样本外基准、泄漏风险、稳健性及适用时的成本；理论研究检查假设与推导范围；券商和社区材料关注来源、透明度与复现细节。优势与局限均需原文依据。未报告的信息不是已证实的偏差；没有证据时标为unknown。practical_implications只写复现与验证建议，不编造操作频率、交易代价或资金配置建议。overall_quality_score仅为模型阅读意见，不是实验复现或正确概率。
-
-      output_schema: |
-        {
-          "overall_quality_score": 0.85,
-          "strengths": ["优势1", "优势2"],
-          "weaknesses": ["不足1", "不足2"],
-          "bias_risks": {
-            "look_ahead_bias": "low | medium | high | none | unknown",
-            "survivorship_bias": "low | medium | high | none | unknown",
-            "data_snooping": "low | medium | high | none | unknown",
-            "overfitting_concern": "具体描述过拟合风险，如无明显风险填 'none'"
-          },
-          "reproducibility": {
-            "level": "high | medium | low | unknown",
-            "has_data_source": true,
-            "has_code_available": false,
-            "missing_details": ["缺失的细节1"]
-          },
-          "a_share_applicability": {
-            "directly_applicable": true,
-            "adaptations_needed": ["需要调整的内容"],
-            "key_constraints": ["在A股市场的关键限制"]
-          },
-          "marginal_contribution_summary": "相对现有文献的增量贡献总评（2-3句话）",
-          "practical_implications": [
-            "复现或验证建议及原文条件",
-            "推论2：..."
-          ],
-          "key_contributions": ["核心贡献1", "核心贡献2"]
-        }
+      # Shared system prompt and output schema: assessment.yaml + quality-rubric.md
 
       user_prompt_template: |
         论文标题：{title}

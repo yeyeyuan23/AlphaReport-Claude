@@ -191,7 +191,7 @@ def test_weekly_only_shows_direction_updates_without_duplicate_paper_lists():
         assert f"论文{rid}的完整发现" in text
 
 
-def test_direction_summary_is_one_paragraph_without_losing_papers(monkeypatch):
+def test_multiple_direction_updates_fall_back_without_losing_papers(monkeypatch):
     value = response()
     value["directions"][0]["updates"] = [
         {"text": "第一篇讨论约束。\n\n结论有条件。", "paper_ids": [1]},
@@ -202,8 +202,8 @@ def test_direction_summary_is_one_paragraph_without_losing_papers(monkeypatch):
         sample_papers(), "2026-10-10", "2026-10-17", summarize=True
     )
     updates = text.split("## 本周研究更新", 1)[1].split("## 收录与评估说明", 1)[0]
-    assert "第一篇讨论约束。 结论有条件。 另外两篇讨论估计。" in updates
-    assert "总结未生成" not in updates
+    assert "第一篇讨论约束" not in updates
+    assert "总结未生成" in updates
     for rid in (1, 2, 3):
         assert updates.count(f"http://localhost/library/{rid}") == 1
 

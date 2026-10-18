@@ -23,7 +23,14 @@ class ReadingModel:
             return {"research_question": "问题", "core_contribution": "贡献"}
         if len(self.requests) == 2:
             return {"analysis_points": [{"analysis": "方法"}]}
-        return {"strengths": ["优势"], "weaknesses": ["条件"]}
+        from tests.support.report_fixtures import response
+
+        judgment = response()
+        return {
+            **{k: judgment[k] for k in ("quality", "confidence", "quality_checks")},
+            "strengths": ["优势"],
+            "weaknesses": ["条件"],
+        }
 
     async def chat(self, messages, **kwargs):
         self.summary_messages = messages
@@ -39,6 +46,7 @@ def test_all_enabled_analysis_phases_read_the_complete_long_paper():
     )
     result = asyncio.run(AnalysisAgent(llm).analyze_report_directly("理论", "", text))
     assert result.summary
+    assert result.assessment.quality == "strong"
     assert len(llm.requests) == 3
     for request in llm.requests:
         assert "TAIL: only for sufficiently small temperature." in request[1]["content"]

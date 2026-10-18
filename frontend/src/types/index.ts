@@ -73,6 +73,12 @@ export interface ResearchEvidence {
   locator?: string;
 }
 
+export interface QualityCheck {
+  dimension: 'method' | 'validation' | 'scope' | 'reproducibility';
+  status: 'supported' | 'limited' | 'unclear' | 'not_applicable';
+  basis: string;
+}
+
 export interface ResearchEvaluation {
   tier: 'focus' | 'browse' | 'pending' | 'exclude';
   label: string;
@@ -80,7 +86,8 @@ export interface ResearchEvaluation {
   source_category: 'academic' | 'broker' | 'community' | 'other';
   relevance: number | null;
   relevance_reason: string;
-  research_type?: 'empirical' | 'theoretical' | 'methodological' | 'broker' | 'community';
+  research_type?: 'empirical' | 'theoretical' | 'methodological' | 'review' | 'commentary';
+  quality_checks?: QualityCheck[];
   research_question: string;
   method: ResearchEvidence | null;
   findings: ResearchEvidence[];
@@ -149,18 +156,20 @@ export interface BiasRisks {
 }
 
 export interface Assessment {
-  overall_quality_score: number;
+  quality?: ResearchEvaluation['quality'];
+  confidence?: ResearchEvaluation['confidence'];
+  quality_checks?: QualityCheck[];
   strengths: string[];
   weaknesses: string[];
   bias_risks: BiasRisks;
   reproducibility: {
     level: string;
-    has_data_source: boolean;
-    has_code_available: boolean;
+    has_data_source: boolean | null;
+    has_code_available: boolean | null;
     missing_details: string[];
   };
   a_share_applicability?: {
-    directly_applicable: boolean;
+    directly_applicable: boolean | null;
     adaptations_needed: string[];
     key_constraints: string[];
   };

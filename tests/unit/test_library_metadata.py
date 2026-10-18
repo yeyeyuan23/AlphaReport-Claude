@@ -517,7 +517,7 @@ def test_metadata_upgrade_does_not_overwrite_concurrently_committed_metadata(
         engine.dispose()
 
 
-def test_review_budget_prioritizes_stored_academic_type_not_transport():
+def test_review_budget_prioritizes_relevance_regardless_of_material_type():
     from reportagent.services.report_quality import select_candidates
 
     papers = [
@@ -534,7 +534,7 @@ def test_review_budget_prioritizes_stored_academic_type_not_transport():
             "selection_relevance": 8,
         },
     ]
-    assert [p["id"] for p in select_candidates(papers, max_reviews=1)] == [2]
+    assert [p["id"] for p in select_candidates(papers, max_reviews=1)] == [1]
 
 
 @pytest.mark.parametrize(

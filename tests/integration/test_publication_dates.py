@@ -226,16 +226,27 @@ def test_new_and_delayed_arxiv_revisions_cannot_replace_known_publication_date(l
 
 
 def test_source_page_date_persists_and_drives_report_instead_of_cited_report(library):
-    fetched = fetch(page(
-        "<p>原报告发布日期：2022年8月4日</p>",
-        head='<meta property="article:published_time" content="2026-10-09">',
-    ))
+    fetched = fetch(
+        page(
+            "<p>原报告发布日期：2022年8月4日</p>",
+            head='<meta property="article:published_time" content="2026-10-09">',
+        )
+    )
     with library() as session:
         repo = ReportRepository(session)
-        _, rid = repo.upsert_report(ClassifiedReport(search_result=fetched, classification=ClassificationResult()))
+        _, rid = repo.upsert_report(
+            ClassifiedReport(
+                search_result=fetched, classification=ClassificationResult()
+            )
+        )
         assert session.get(Report, rid).published_date == source_date("2026-10-09")
-    with (patch.object(weekly_report, "init_db"), patch.object(weekly_report, "get_session_factory", return_value=library)):
-        papers = weekly_report.get_weekly_papers(datetime(2026, 10, 5), datetime(2026, 10, 12))
+    with (
+        patch.object(weekly_report, "init_db"),
+        patch.object(weekly_report, "get_session_factory", return_value=library),
+    ):
+        papers = weekly_report.get_weekly_papers(
+            datetime(2026, 10, 5), datetime(2026, 10, 12)
+        )
         assert [p["id"] for p in papers] == [rid]
 
 

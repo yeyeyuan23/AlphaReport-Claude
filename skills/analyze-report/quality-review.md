@@ -4,10 +4,7 @@
 
 术语按金融含义翻译：long-only 是“只做多”，不是“长期”；long/short 是“多/空”，不是“长期/短期”。
 
-按材料类型检查：
-- 实证/方法论文：数据与时期、训练验证测试划分、样本外基准、潜在泄漏、稳健性、消融、复现细节；涉及交易策略时才检查成本、换手和执行约束。
-- 理论论文：假设、命题与推导的适用边界、证明和例子的对应关系，不因缺少回测就扣分。
-- 券商材料：数据出处、方法透明度、结论适用范围；社区材料：证据与可复现步骤。不能把观点文章包装为学术验证。
+研究设计与证据检查遵循随本提示加载的 quality-rubric.md；不能从分发渠道推断研究设计。
 
 method 解释方法；findings 明确使用“作者报告/证明/提出”，不要把解释写成作者结果。每条 claim 用中文、清楚易读，依据给定全文保留结论的成立条件、单位、区间和比较基准。充分小温度、固定/状态相关参数、连续路径等条件必须与结论一起保留；理论推导不得变成无条件实证优势。不要把作者设计方法的动机写成实验已验证的效果。
 
@@ -27,12 +24,18 @@ quality: strong=核心方法与主要证据充分且适用边界明确；sound=�
 
 只返回以下结构的JSON，不新增字段，不使用Markdown代码块：
 {
-  "research_type": "empirical|theoretical|methodological|broker|community",
+  "research_type": "empirical|theoretical|methodological|review|commentary",
   "research_question": "研究解决什么问题，1-2句中文",
   "method": {"claim": "用通俗中文解释核心方法，2-3句", "quote": "可选的原文引文", "chunk_id": "C001"},
   "findings": [{"claim": "作者的核心发现及条件，1-3条", "quote": "可选的原文引文", "chunk_id": "C001"}],
   "strengths": [{"claim": "有全文依据的优势", "quote": "可选的原文引文", "chunk_id": "C001"}],
   "limitations": ["原文明示/未报告/待验证：具体内容"],
+  "quality_checks": [
+    {"dimension": "method", "status": "supported|limited|unclear|not_applicable", "basis": "原文方法与判断依据"},
+    {"dimension": "validation", "status": "supported|limited|unclear|not_applicable", "basis": "实证检验、证明或论证依据"},
+    {"dimension": "scope", "status": "supported|limited|unclear|not_applicable", "basis": "结论的适用条件及依据"},
+    {"dimension": "reproducibility", "status": "supported|limited|unclear|not_applicable", "basis": "核对所需细节与可用程度"}
+  ],
   "quality": "strong|sound|weak|unknown",
   "confidence": "high|medium|low",
   "critical_concerns": [],

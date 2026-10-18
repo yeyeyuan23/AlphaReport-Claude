@@ -48,6 +48,8 @@ def analysis_fingerprint() -> str:
         name: skill_resource("analyze-report", name).read_text(encoding="utf-8")
         for name in (
             "one-report.yaml",
+            "assessment.yaml",
+            "quality-rubric.md",
             "summary.yaml",
             "quality-review.md",
             "grounding.md",
@@ -187,12 +189,8 @@ def validate_analysis(data: dict) -> AnalysisResult:
         p.get("analysis", "").strip() for p in result.methodology.analysis_points
     ):
         raise ValueError("分析不完整：方法论为空")
-    if (
-        not result.assessment
-        or not result.assessment.strengths
-        or not result.assessment.weaknesses
-    ):
-        raise ValueError("分析不完整：优势或局限评估为空")
+    if not result.assessment:
+        raise ValueError("分析不完整：研究评估为空")
     return result
 
 
@@ -323,6 +321,7 @@ def _stored_review_input(report_id: int) -> dict:
             for key in (
                 "title",
                 "source",
+                "material_type",
                 "abstract",
                 "arxiv_id",
                 "full_text",

@@ -18,10 +18,11 @@ from reportagent.utils.config import get_llm_model, get_llm_base_url, get_llm_pr
 from reportagent.services.paper_scoring import scoring_fingerprint, screening_is_current
 from reportagent.services.text_evidence import text_chunks
 from reportagent.services.document_metadata import material_type
+from reportagent.models.schemas import QualityJudgment
 
 logger = logging.getLogger(__name__)
 MAX_REVIEW_CHARS = 240000
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 TIER_LABELS = {
     "focus": "重点阅读",
     "browse": "值得浏览",
@@ -49,30 +50,30 @@ class Evidence(BaseModel):
     chunk_id: str | None = None
 
 
-class Review(BaseModel):
+class Review(QualityJudgment):
     model_config = ConfigDict(str_strip_whitespace=True)
     research_type: Literal[
-        "empirical", "theoretical", "methodological", "broker", "community"
+        "empirical", "theoretical", "methodological", "review", "commentary"
     ]
     research_question: str = Field(min_length=1)
     method: Evidence
     findings: list[Evidence] = Field(min_length=1, max_length=5)
     strengths: list[Evidence] = Field(max_length=5)
-    limitations: list[str] = Field(min_length=1, max_length=8)
-    quality: Literal["strong", "sound", "weak", "unknown"]
-    confidence: Literal["high", "medium", "low"]
+    limitations: list[str] = Field(max_length=8)
     critical_concerns: list[str] = Field(max_length=5)
     reading_advice: str = Field(min_length=1)
 
 
-def source_category(source: str) -> str:
-    if source in {"arxiv", "ssrn"}:
-        return "academic"
-    if source in {"eastmoney", "broker"}:
-        return "broker"
-    if source == "bigquant":
-        return "community"
-    return "other"
+def review_instructions() -> str:
+    return "\n\n".join(
+        skill_resource("analyze-report", name).read_text(encoding="utf-8")
+        for name in ("quality-review.md", "quality-rubric.md")
+    )
+
+
+def _display_category(paper: dict) -> str:
+    category = material_type(paper)
+    return "other" if category == "unknown" else category
 
 
 def current_relevance(paper: dict) -> float | None:
@@ -112,7 +113,6 @@ def review_fingerprint(
         "max_chars": max_chars,
         "endpoint": get_llm_base_url(),
         "provider": get_llm_provider(),
-        "source": paper.get("source"),
         "revision": paper.get("arxiv_id"),
         "text": paper.get("full_text", ""),
         "has_full_text": bool(paper.get("has_full_text")),
@@ -122,11 +122,7 @@ def review_fingerprint(
         "selection_reason": paper.get("selection_reason"),
         "selection_provenance": paper.get("selection_provenance_json"),
         "current_scoring_rubric": scoring_fingerprint(),
-        "prompt": instructions
-        if instructions is not None
-        else skill_resource("analyze-report", "quality-review.md").read_text(
-            encoding="utf-8"
-        ),
+        "prompt": instructions if instructions is not None else review_instructions(),
     }
     return hashlib.sha256(
         json.dumps(payload, ensure_ascii=False, sort_keys=True).encode()
@@ -155,7 +151,7 @@ def pending_review(paper: dict, reason: str) -> dict:
         "tier": "pending",
         "label": TIER_LABELS["pending"],
         "status": "pending",
-        "source_category": source_category(paper.get("source", "")),
+        "source_category": _display_category(paper),
         "relevance": current_relevance(paper),
         "relevance_reason": paper.get("selection_reason", ""),
         "quality": "unknown",
@@ -192,15 +188,11 @@ async def evaluate_paper(
         return result
     content = text
     chunks = text_chunks(content)
-    instructions = skill_resource("analyze-report", "quality-review.md").read_text(
-        encoding="utf-8"
-    )
+    instructions = review_instructions()
     prompt = json.dumps(
         {
             "title": paper.get("title"),
-            "source_category": source_category(paper.get("source", "")),
             "abstract": paper.get("abstract"),
-            "relevance_reason": paper.get("selection_reason"),
             "text_complete": len(content) == len(text),
             "text_chunks": chunks,
         },
@@ -249,7 +241,7 @@ async def evaluate_paper(
         "label": TIER_LABELS[tier],
         "status": "needs_verification" if tier == "pending" else "reviewed",
         "validation_issues": issues,
-        "source_category": source_category(paper.get("source", "")),
+        "source_category": _display_category(paper),
         "text_complete": complete,
         "input_chars": len(content),
         "full_text_chars": len(text),
@@ -270,11 +262,10 @@ def select_candidates(
     max_reviews: int | None = None,
     directions: list[str] | None = None,
 ) -> list[dict]:
-    """Round-robin directions after ranking within them, preserving academic priority."""
+    """Round-robin directions with relevance priority, independent of source/type."""
     ordered = sorted(
         papers,
         key=lambda p: (
-            material_type(p) != "academic",
             -(p.get("selection_relevance") or p.get("selection_score") or 0),
             p.get("published_date") or "",
         ),
@@ -312,6 +303,7 @@ async def review_report_ids(
     fields = (
         "id",
         "source",
+        "material_type",
         "title",
         "authors",
         "abstract",

@@ -75,10 +75,15 @@ def _structured_context(analysis: dict) -> str:
             if isinstance(eq, dict) and eq.get("latex"):
                 parts.append(f"公式：${eq['latex']}$ — {eq.get('meaning', '')}")
     assessment = analysis.get("assessment") or {}
-    if assessment.get("overall_quality_score") is not None:
-        parts.append(f"综合评分：{assessment['overall_quality_score']}")
+    if assessment.get("quality"):
+        parts.append(
+            f"研究质量：{assessment['quality']}；评估置信度：{assessment.get('confidence', 'unknown')}"
+        )
     # The full structured input preserves conditions, architecture, data, baselines,
     # formulas and legacy extra fields; the previous summaries silently omitted them.
+    analysis = deepcopy(analysis)
+    if isinstance(analysis.get("assessment"), dict):
+        analysis["assessment"].pop("overall_quality_score", None)
     substantive = {
         key: value
         for key, value in analysis.items()

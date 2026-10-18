@@ -106,12 +106,14 @@ arXiv 公告模式由 `arxiv_catalog` 解析官网 `/list/<category>/recent` 的
   缺材料与不相关分开处理；失败不覆盖已有成功结果，过期评分不进入候选。
   方向明细和普通评分共用批次/保存失败判定，有效同批结果先保存，失败再向 CLI 传播。
 - **分阶段分析**：`batch_analysis` 与 `one_report` 使用 `AnalysisAgent`，分别读取
-  `analysis.yaml`、`one-report.yaml`；摘要汇总共用 `summary.yaml` 和 `services.summary`。
+  `analysis.yaml`、`one-report.yaml`；综合评估共用 `assessment.yaml`、`quality-rubric.md` 和 `QualityJudgment` 验证，不生成数字总分；摘要汇总共用 `summary.yaml` 和 `services.summary`。
   批量缓存区分 quick/standard/deep、材料、模型与资源；完整性与并发检查通过后才保存。
   单篇阅读固定 arXiv 版本、提取 PDF 全文，保存产物和研报库，再按授权会话投递。
   分阶段分析与全文评估独立复用缓存；评估优先使用库中当前有效结果，再考虑有效产物缓存。
-- **全文阅读评估**：`report_quality` 使用 `quality-review.md` 和 `grounding.md`，
-  将研究问题、方法、发现、优势、局限与评估把握存入 `evaluation_json`。
+- **全文阅读评估**：`report_quality` 使用 `quality-review.md` 和 `quality-rubric.md`，
+  将研究问题、方法、发现、优势、局限、四项质量依据与评估把握存入 `evaluation_json`。
+  摘要和全文模型输入不附分发来源标签，评审排序不优先学术来源；全文不接收初筛理由以避免质量判断被相关性暗示。
+  研究类型按内容区分，不用券商/社区充当研究设计；材料类型仅用于展示。通用方法的迁移相关性须有任务与条件映射。
   材料、模型、提示词和相关性决定缓存是否有效。默认完整输入上限为 240,000 字符；
   缺全文或超限保持待核验。引文供查阅，逐字匹配不参与推荐或展示判断；
   文本块编号是提取偏移，不是 PDF 页码。模型评估不代表复现实验。
@@ -119,7 +121,7 @@ arXiv 公告模式由 `arxiv_catalog` 解析官网 `/list/<category>/recent` 的
   只读取已保存且当前有效的全文评估，缺失或过期显示待评估；随后按 `daily-report/briefing.md` 渲染，最多重点推荐 5 篇。
   来源覆盖读取最近定时采集记录，不能说成本次在线检查；过程锁和 `ReportRun` 记录本次运行。
 - **周报**：`weekly_report` 按同一 `published_date` 查询截至昨天的七天的库中在线资料，复用采集筛选和已保存全文评估，使用 `weekly_briefing` 和 `weekly-report/briefing.md` 独立排版：先将各方向全部有效评估交给配置的 DeepSeek 用一段精炼总结综合研究发现、差异与局限，并附对应论文链接。正文不再重复列出重点推荐或其他可浏览论文清单，待核验项置后；概览仍统计已保存的推荐结果。
-  不补取全文或重新评估论文，未完成评估的条目保留待核验。模型总结使用 `weekly-report/synthesis.md`；引用必须来自对应方向并覆盖全部输入论文，失败时显示明确说明并逐篇列出发现和链接，不改变推荐判断。
+  不补取全文或重新评估论文，未完成评估的条目保留待核验。模型总结使用 `weekly-report/synthesis.md`；每方向只接受一段、规范空白后最多300字符；引用列表必须来自对应方向并覆盖全部输入，表示进一步阅读，不要求正文逐篇覆盖。格式、长度或引用校验失败时显示明确说明并逐篇列出发现和链接，不改变推荐判断。
 - **采集后全文评估**：`scheduled_collection` 在入库后调用 `collection_reviews`，
   处理当前相关性达标的在线论文；有效评估直接复用，缺失、失败、过期或此前预算未覆盖的条目在后续采集中继续处理。
   单篇失败不回滚已入库论文，也不阻塞其余论文。来源采集与全文评估分别记录状态与耗时，评估不完整不冒充来源覆盖不足。
@@ -138,7 +140,8 @@ arXiv 公告模式由 `arxiv_catalog` 解析官网 `/list/<category>/recent` 的
   单篇保存和各查询入口的知识卡片都由 `knowledge_cards` 根据有效评估确定性生成，规则见 `knowledge-card.md`；
   `cli.narrative_brief` 使用同一服务，不额外调用模型，无有效评估时只显示摘要和待核验状态。
   `POST /api/v1/reports/{report_id}/research-briefing?force=true` 可调用模型生成叙事文本，
-  提示词位于 `analyze-report/briefing.md`；返回文本不写入质量评估或改变推荐。
+  提示词位于 `analyze-report/briefing.md`；`narrative_briefing` 加载共享 grounding，完整提供原文与结构化分析，不再截断分析点。
+  缺全文或总材料超限回退已有展示；研究结构随内容选择，不强制创新数、公式或实验。返回文本不写入质量评估或改变推荐。
 - **复现准备**：`reproduction` 从可用全文提取设置，原文事实须附可定位引文；
   建议方案单独标注，成功卡片保存到 `analysis_json.reproduction_preparation`。
   网页和普通聊天按需调用同一服务，不下载数据或运行实验。

@@ -85,6 +85,10 @@ def read_evaluation(value, *, paper: dict | None = None) -> dict | None:
 
         if paper is not None:
             from reportagent.utils.config import get_llm_model
+            from reportagent.services.document_metadata import material_type
+
+            category = material_type(paper)
+            parsed["source_category"] = "other" if category == "unknown" else category
 
             model = get_llm_model()
             same_context = (
@@ -236,10 +240,27 @@ def map_analysis_to_briefing_sections(analysis: dict) -> list[dict]:
 
     # 4) 实证检验
     emp_parts = []
-    if assessment.get("overall_quality_score") is not None:
-        emp_parts.append(
-            f"**综合评分：** {assessment['overall_quality_score'] * 10:.1f} / 10"
+    if assessment.get("quality"):
+        quality_label = {
+            "strong": "较强",
+            "sound": "基本扎实",
+            "weak": "较弱",
+            "unknown": "尚不确定",
+        }.get(assessment["quality"], "尚不确定")
+        confidence_label = {"high": "高", "medium": "中", "low": "低"}.get(
+            assessment.get("confidence"), "未记录"
         )
+        emp_parts.append(
+            f"**研究质量：** {quality_label} · 评估置信度：{confidence_label}"
+        )
+    for check in assessment.get("quality_checks") or []:
+        label = {
+            "method": "方法",
+            "validation": "验证",
+            "scope": "适用范围",
+            "reproducibility": "复现细节",
+        }.get(check.get("dimension"), "依据")
+        emp_parts.append(f"**{label}：** {check.get('basis', '')}")
     if assessment.get("strengths"):
         emp_parts.append(
             "**优势：**\n" + "\n".join(f"- {s}" for s in assessment["strengths"])
@@ -280,10 +301,13 @@ def map_analysis_to_briefing_sections(analysis: dict) -> list[dict]:
         emp_parts.append(text)
     applicability = assessment.get("a_share_applicability") or {}
     if applicability:
+        applicable = applicability.get("directly_applicable")
         status = (
             "可直接应用 ✅"
-            if applicability.get("directly_applicable")
+            if applicable is True
             else "需要适配 ⚠️"
+            if applicable is False
+            else "未确认"
         )
         emp_parts.append(f"**A股适用性：** {status}")
         if applicability.get("adaptations_needed"):
@@ -294,7 +318,7 @@ def map_analysis_to_briefing_sections(analysis: dict) -> list[dict]:
             emp_parts.append(f"关键限制：{'；'.join(applicability['key_constraints'])}")
     if emp_parts:
         sections.append(
-            {"title": "实证检验与评估", "icon": "📊", "content": "\n\n".join(emp_parts)}
+            {"title": "研究证据与评估", "icon": "📊", "content": "\n\n".join(emp_parts)}
         )
 
     # 5) 实践启示

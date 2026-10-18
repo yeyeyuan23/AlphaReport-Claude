@@ -13,6 +13,7 @@ from reportagent.llm.client import LLMClient
 from reportagent.models.schemas import (
     AnalysisResult,
     Assessment,
+    QualityJudgment,
     AShareApplicability,
     BiasRisks,
     DataInfo,
@@ -55,7 +56,18 @@ class AnalysisAgent:
             grounding = skill_resource("analyze-report", "grounding.md").read_text(
                 encoding="utf-8"
             )
-            for phase in config.get("analysis", {}).get("phases", {}).values():
+            phases = config.get("analysis", {}).get("phases", {})
+            if "assessment" in phases:
+                shared = yaml.safe_load(
+                    skill_resource("analyze-report", "assessment.yaml").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                phases["assessment"].update(shared)
+                phases["assessment"]["system_prompt"] += "\n" + skill_resource(
+                    "analyze-report", "quality-rubric.md"
+                ).read_text(encoding="utf-8")
+            for phase in phases.values():
                 phase["system_prompt"] = (
                     phase.get("system_prompt", "") + "\n" + grounding
                 )
@@ -361,8 +373,8 @@ class AnalysisAgent:
             rp = resp.get("reproducibility", {})
             reproducibility = Reproducibility(
                 level=rp.get("level", "unknown"),
-                has_data_source=rp.get("has_data_source", False),
-                has_code_available=rp.get("has_code_available", False),
+                has_data_source=rp.get("has_data_source"),
+                has_code_available=rp.get("has_code_available"),
                 missing_details=rp.get("missing_details", []),
             )
 
@@ -370,13 +382,13 @@ class AnalysisAgent:
             a_share = None
             if sa:
                 a_share = AShareApplicability(
-                    directly_applicable=sa.get("directly_applicable", False),
+                    directly_applicable=sa.get("directly_applicable"),
                     adaptations_needed=sa.get("adaptations_needed", []),
                     key_constraints=sa.get("key_constraints", []),
                 )
 
             result.assessment = Assessment(
-                overall_quality_score=resp.get("overall_quality_score", 0.0),
+                **QualityJudgment.model_validate(resp).model_dump(),
                 strengths=resp.get("strengths", []),
                 weaknesses=resp.get("weaknesses", []),
                 bias_risks=bias_risks,
