@@ -37,21 +37,9 @@ describe('ReportDetailPage', () => {
     );
     fireEvent.click(screen.getByRole('link', { name: '下一篇' }));
     expect(await screen.findByText('研报不存在')).toBeVisible();
+    expect(screen.queryByText('加载中...')).not.toBeInTheDocument();
     await act(async () => old.resolve(json({ success: true, data: report() })));
     expect(screen.getByText('研报不存在')).toBeVisible();
     expect(screen.queryByText('论文一')).not.toBeInTheDocument();
-  });
-
-  it('distinguishes a missing report from network failure', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ detail: 'Not found' }, 404)));
-    render(
-      <MemoryRouter initialEntries={['/library/404']}>
-        <Routes>
-          <Route path="/library/:id" element={<ReportDetailPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-    expect(await screen.findByText('研报不存在')).toBeVisible();
-    expect(screen.queryByText('加载中...')).not.toBeInTheDocument();
   });
 });

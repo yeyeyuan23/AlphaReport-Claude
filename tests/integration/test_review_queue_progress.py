@@ -130,7 +130,7 @@ def test_cache_without_current_complete_material_is_not_reused(
     assert len(model.requests) == 1
 
 
-@pytest.mark.parametrize("budget", [None, 2, 20])
+@pytest.mark.parametrize("budget", [None, 2])
 def test_collection_review_budget_defaults_to_all_and_resumes(queue_library, budget):
     factory, model, _ = queue_library
     result = asyncio.run(

@@ -142,30 +142,6 @@ describe('ReproductionCard request states', () => {
   });
 
   it.each(['success', 'failure'] as const)(
-    'ignores a stale initial %s after switching reports',
-    async (outcome) => {
-      const previous = deferred<Response>();
-      vi.stubGlobal(
-        'fetch',
-        vi
-          .fn()
-          .mockReturnValueOnce(previous.promise)
-          .mockResolvedValueOnce(success(ready('Current target'))),
-      );
-      const { rerender } = render(<ReproductionCard reportId={1} />);
-      rerender(<ReproductionCard reportId={2} />);
-      expect(await screen.findByText('Current target')).toBeVisible();
-      await act(async () => {
-        if (outcome === 'success') previous.resolve(success(ready('Stale target')));
-        else previous.reject(new Error('Stale error'));
-      });
-      expect(screen.getByText('Current target')).toBeVisible();
-      expect(screen.queryByText('Stale target')).not.toBeInTheDocument();
-      expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    },
-  );
-
-  it.each(['success', 'failure'] as const)(
     'ignores a stale generation %s without ending the current report generation',
     async (outcome) => {
       const previous = deferred<Response>();

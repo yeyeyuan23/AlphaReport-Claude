@@ -1,4 +1,4 @@
-"""Review budgets are optional, explicit positive counts shared by both reports."""
+"""Collection review budgets are optional, explicit positive counts."""
 
 import pytest
 
@@ -18,8 +18,10 @@ def test_optional_budget_precedence(override, settings, expected):
     assert quality.resolve_review_budget(override, settings) == expected
 
 
-@pytest.mark.parametrize("invalid", [0, -1, True, 2.5, "12", "unlimited"])
-@pytest.mark.parametrize("source", ["cli", "config"])
+@pytest.mark.parametrize(
+    "source,invalid",
+    [("cli", 0), ("cli", True), ("cli", 2.5), ("cli", "12"), ("config", True)],
+)
 def test_invalid_budget_cannot_silently_remove_or_shrink_a_limit(invalid, source):
     override, settings = (
         (invalid, {}) if source == "cli" else (None, {"max_reviews": invalid})

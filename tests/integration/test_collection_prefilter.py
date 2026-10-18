@@ -132,6 +132,9 @@ def test_rejected_metadata_is_never_downloaded_or_persisted(ingest):
         assert stored[0].selection_relevance == 8 and screening_is_current(stored[0])
         assert stored[0].has_full_text and Path(stored[0].pdf_path).is_file()
     assert result["storage"]["added"] == 1 and result["results_count"] == 1
+    assert result["topics"] == ["portfolio"]
+    assert result["sources"] == ["arxiv"]
+    assert json.loads(json.dumps(result))["storage"]["errors"] == []
     assert result["source_statuses"][0]["screening"]["rejected"] == 1
     assert "Low portfolio" not in json.dumps(result)
 

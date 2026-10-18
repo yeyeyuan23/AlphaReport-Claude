@@ -3,7 +3,7 @@
 import asyncio
 import json
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -178,81 +178,27 @@ def test_no_llm_preview_does_not_call_models_or_send(library, tmp_path, monkeypa
     send.assert_not_called()
 
 
-def test_weekly_only_renders_saved_evidence(library, tmp_path, monkeypatch):
-    with library() as session:
-        session.add(
-            Report(
-                title="待阅读",
-                source="arxiv",
-                content_hash="one",
-                published_date=datetime(2026, 10, 9),
-            )
-        )
-        session.commit()
-    monkeypatch.setattr(
-        weekly,
-        "get_weekly_range",
-        lambda *args: (
-            datetime(2026, 10, 5),
-            datetime(2026, 10, 11, 23, 59, 59),
-            "2026-10-05",
-            "2026-10-11",
-        ),
-    )
-    prepare = AsyncMock(return_value={"screened": 0, "review_ids": [], "failures": []})
-    from reportagent.services import report_quality
-
-    monkeypatch.setattr(report_quality, "review_report_ids", prepare)
-    result = weekly.run_weekly_report(
-        weekly.WeeklyReportOptions(dry_run=True, output=str(tmp_path / "week.md"))
-    )
-    prepare.assert_not_awaited()
-    assert result["sent"] == 0
-
-
-def test_collection_review_budget_advances_past_current_cached_papers(
-    library, monkeypatch
-):
-    from reportagent.services import report_quality, collection_reviews
-
-    with library() as session:
-        for rid in range(1, 14):
-            values = paper(
-                rid=rid,
-                title=f"Portfolio study {rid}",
-                published_date=datetime(2026, 10, 9),
-            )
-            stored = {
-                k: v for k, v in values.items() if k in Report.__table__.columns.keys()
-            }
-            row = Report(**stored, content_hash=str(rid))
-            if rid < 13:
-                review = assessed(values)["evaluation"]
-                row.evaluation_json = json.dumps(review)
-            session.add(row)
-        session.commit()
-    review = AsyncMock(return_value={13: {"tier": "browse", "status": "reviewed"}})
-    monkeypatch.setattr(report_quality, "review_report_ids", review)
-    result = asyncio.run(collection_reviews.prepare_collection_reviews(max_reviews=12))
-    assert result["review_ids"] == [13]
-    review.assert_awaited_once_with([13], force=False, max_reviews=12, audit={})
-
-
 def test_collection_review_does_not_rescore_stale_relevance(library, monkeypatch):
     from reportagent.services import paper_scoring, report_quality
 
     with library() as session:
-        values = paper(rid=1, published_date=datetime(2026, 10, 9))
+        values = paper(
+            rid=1,
+            published_date=datetime(2026, 10, 9),
+        )
         stored = {
             k: v for k, v in values.items() if k in Report.__table__.columns.keys()
         }
         row = Report(**stored, content_hash="stale")
+        assert row.published_date is not None
+        assert row.selection_relevance == 8
+        assert paper_scoring.screening_is_current(row)
         row.selection_provenance_json = None
         session.add(row)
         session.commit()
 
     async def forbidden(*args, **kwargs):
-        pytest.fail("A report cannot rescore relevance or review a stale decision")
+        pytest.fail("Collection must not rescore relevance or review a stale decision")
 
     monkeypatch.setattr(paper_scoring, "score_papers_batch", forbidden)
     monkeypatch.setattr(report_quality, "review_report_ids", forbidden)
@@ -263,29 +209,87 @@ def test_collection_review_does_not_rescore_stale_relevance(library, monkeypatch
     assert result["review_ids"] == []
 
 
-def test_weekly_direction_updates_include_every_paper_without_recommendation_lists():
+def test_weekly_direction_updates_include_every_paper_without_recommendation_lists(
+    monkeypatch,
+):
+    from reportagent.services import weekly_briefing
+
+    monkeypatch.setattr(
+        weekly_briefing,
+        "load_enabled_directions",
+        lambda: {
+            "portfolio_optimization": {"name": "组合优化"},
+            "ml_quant": {"name": "机器学习"},
+        },
+    )
+    first_claim = "作者证明：只有温度充分小时才保持凸性，过大时可能失去凸性。"
+    second_claim = "作者发现交易成本改变了最优换手率。"
+    third_claim = "其他组合发现仍须保留。"
     papers = [
         assessed(
             paper(
                 rid=i,
                 title=f"研究{i}",
-                published_date="2026-10-15T18:00:00+00:00",
-            )
+                published_date="2026-10-15",
+            ),
+            findings=[
+                {
+                    "claim": first_claim
+                    if i <= 2
+                    else second_claim
+                    if i == 3
+                    else third_claim
+                }
+            ],
         )
         for i in range(1, 8)
     ]
     papers.append(
         assessed(
-            paper(rid=8, title="较早公告", published_date="2026-10-15T01:00:00+00:00")
+            paper(
+                rid=8,
+                title="较早公告",
+                selection_direction="ml_quant",
+                published_date="2026-10-15",
+            ),
+            findings=[{"claim": "模型在分布漂移下需要重新校准。"}],
         )
     )
+    papers.extend(
+        [
+            assessed(
+                paper(rid=9, title="待核验论文"),
+                tier="pending",
+                status="needs_verification",
+                findings=[{"claim": "未经核验的发现不得进入方向概要。"}],
+            ),
+            assessed(
+                paper(rid=10, title="排除论文"),
+                tier="exclude",
+                findings=[{"claim": "已排除的发现不得进入方向概要。"}],
+            ),
+        ]
+    )
     text = weekly.generate_weekly_report(papers, "2026-10-10", "2026-10-17")
-    assert "## 本周研究更新" in text
-    assert (
-        "重点推荐 8 篇" in text
-    )  # Weekly compact recommendations are not capped at daily's five.
+    updates = text.split("## 本周研究更新", 1)[1].split("\n## ", 1)[0]
+    portfolio, machine_learning = updates.split("**机器学习 · 1 篇**")
+    assert "**组合优化 · 7 篇**" in portfolio
+    assert portfolio.count(first_claim) == 2
+    assert portfolio.count(second_claim) == 1
+    assert portfolio.count(third_claim) == 4
+    for p in papers[:7]:
+        assert f"[依据：{p['title']}]({p['ui_url']})" in portfolio
+        assert p["ui_url"] not in machine_learning
+    assert "模型在分布漂移下需要重新校准。" not in portfolio
+    assert "模型在分布漂移下需要重新校准。" in machine_learning
+    assert f"[依据：较早公告]({papers[7]['ui_url']})" in machine_learning
+    assert first_claim not in machine_learning
+    assert updates.count("[依据：") == 8
+    assert "未经核验的发现" not in updates and "已排除的发现" not in updates
+    assert papers[8]["ui_url"] not in updates and papers[9]["ui_url"] not in updates
+    assert "重点推荐 8 篇" in text
     assert "## 本周重点推荐" not in text
     assert "## 其他可浏览论文" not in text
     assert all(text.count(f"http://localhost/library/{i})") == 1 for i in range(1, 9))
     assert "**方法与发现**" not in text and "**阅读建议**" not in text
-    assert "作者证明：只有温度充分小时才保持凸性，过大时可能失去凸性。" in text
+    assert first_claim in text
