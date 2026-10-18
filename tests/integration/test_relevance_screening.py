@@ -75,6 +75,72 @@ def test_enabled_config_and_complete_abstract_reach_model(direction_config):
     assert results[0]["best_direction"] is None
 
 
+def test_short_research_abstract_is_judged_by_model(direction_config):
+    abstract = "我们研究成本约束下的多因子选股"
+    model = OfflineModel([{"index": 0, "score": 8, "reason": "Research evidence"}])
+    results, failures = asyncio.run(
+        scoring.score_papers_batch(model, [{"title": "研究", "abstract": abstract}])
+    )
+    assert not failures
+    assert results[0]["status"] == "scored"
+    assert abstract in model.prompts[0][1]["content"]
+
+
+def test_configured_batch_size_reaches_all_papers_without_changing_rubric(
+    direction_config,
+):
+    path, data = direction_config
+    fingerprint = scoring.scoring_fingerprint()
+    data["push_settings"]["llm_batch_size"] = 1
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+    assert scoring.scoring_fingerprint() == fingerprint
+    model = OfflineModel([{"index": 0, "score": 8, "reason": "Research evidence"}])
+    papers = [
+        {
+            "id": i + 1,
+            "title": f"Research {i}",
+            "abstract": "Portfolio tail risk analysis.",
+        }
+        for i in range(12)
+    ]
+    results, failures = asyncio.run(scoring.score_papers_batch(model, papers))
+    assert not failures
+    assert [r["_paper"] for r in results] == papers
+    assert len(model.prompts) == 12
+
+    from reportagent.filters.direction_filter import DirectionFilter
+
+    detail_model = OfflineModel(
+        [{"index": 0, "score": 8, "reason": "Research evidence"}]
+    )
+    detailed = asyncio.run(DirectionFilter(detail_model).score_papers(papers))
+    assert all(result.status == "scored" for result in detailed)
+    assert len(detailed) == len(detail_model.prompts) == 12
+
+
+def test_scoring_output_budget_uses_configured_coefficients(direction_config):
+    path, data = direction_config
+    data["push_settings"].update(
+        llm_min_output_tokens=17, llm_output_tokens_per_paper_direction=23
+    )
+    path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+    class BudgetModel(OfflineModel):
+        async def chat_json(self, messages, **kwargs):
+            self.options = kwargs
+            return await super().chat_json(messages, **kwargs)
+
+    model = BudgetModel(
+        [{"index": i, "score": 8, "reason": "Research evidence"} for i in range(2)]
+    )
+    papers = [
+        {"title": f"Paper {i}", "abstract": "Portfolio tail risk."} for i in range(2)
+    ]
+    results, failures = asyncio.run(scoring.score_papers_batch(model, papers))
+    assert not failures and len(results) == 2
+    assert model.options["max_tokens"] == 46
+
+
 def test_relevance_is_primary_not_composite_quality_score(direction_config):
     results, failures = score(
         [

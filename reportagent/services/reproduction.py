@@ -9,6 +9,7 @@ import logging
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from reportagent.llm.errors import ContextWindowExceeded
+from reportagent.sources.base import usable_full_text
 
 from reportagent.services.knowledge_cards import current_review, report_snapshot
 from reportagent.services.text_evidence import locate_quote, text_chunks
@@ -32,7 +33,7 @@ GENERATION_TIMEOUT = 240
 def usable_source(paper: dict) -> bool:
     return bool(
         paper.get("has_full_text")
-        and len((paper.get("full_text") or "").strip()) >= 1000
+        and usable_full_text(paper.get("full_text"))
     )
 
 

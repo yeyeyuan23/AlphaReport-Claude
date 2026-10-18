@@ -15,6 +15,60 @@ def test_missing_full_text_never_calls_model_or_becomes_focus():
     assert not llm.requests
 
 
+def test_short_complete_research_note_reaches_review_without_length_gate():
+    text = "We derive a portfolio constraint and specify its assumptions. " * 4
+    candidate = paper(full_text=text)
+    llm = Model(response())
+    assert module().has_review_material(candidate)
+    result = asyncio.run(module().evaluate_paper(candidate, llm))
+    assert result["status"] == "reviewed"
+    assert result["full_text_chars"] == len(text)
+    assert text in llm.requests[0][1]["content"]
+
+    from types import SimpleNamespace
+    from reportagent.services.narrative_briefing import build_briefing_messages
+    from reportagent.services.reproduction import usable_source
+
+    assert usable_source(candidate)
+    messages = build_briefing_messages(SimpleNamespace(**candidate), {})
+    assert text in messages[1]["content"]
+
+
+def test_review_output_budget_is_configurable_without_expiring_success(monkeypatch):
+    import copy
+    from reportagent.utils import config
+
+    candidate = paper()
+    saved = asyncio.run(module().evaluate_paper(candidate, Model(response())))
+    settings = copy.deepcopy(config.load_config())
+    settings["llm"]["full_text_review"] = {"max_output_tokens": 3210}
+    monkeypatch.setattr(config, "load_config", lambda: settings)
+
+    class BudgetModel(Model):
+        async def chat_json(self, messages, **kwargs):
+            self.options = kwargs
+            return await super().chat_json(messages, **kwargs)
+
+    llm = BudgetModel(response())
+    asyncio.run(module().evaluate_paper(candidate, llm))
+    assert llm.options["max_tokens"] == 3210
+    assert module().cached_review_is_current(candidate, saved, llm.model)
+
+
+@pytest.mark.parametrize("value", [0, True, float("nan"), "6000"])
+def test_invalid_review_budget_fails_before_a_model_call(monkeypatch, value):
+    import copy
+    from reportagent.utils import config
+
+    settings = copy.deepcopy(config.load_config())
+    settings["llm"]["full_text_review"] = {"max_output_tokens": value}
+    monkeypatch.setattr(config, "load_config", lambda: settings)
+    llm = Model(response())
+    with pytest.raises(ValueError, match="positive integer"):
+        asyncio.run(module().evaluate_paper(paper(), llm))
+    assert not llm.requests
+
+
 def test_reading_assessment_does_not_require_quotes_or_text_locators():
     data = response()
     data["method"] = {"claim": "作者使用滚动样本外检验并计入交易成本"}
@@ -143,7 +197,9 @@ def test_invalid_model_schema_is_failure_not_a_default_positive_review():
 def test_valid_observations_are_not_rejected_or_truncated_by_list_length(field):
     data = response()
     if field in {"findings", "strengths"}:
-        data[field] = [{"claim": f"作者报告的第 {i + 1} 项观察及其条件"} for i in range(9)]
+        data[field] = [
+            {"claim": f"作者报告的第 {i + 1} 项观察及其条件"} for i in range(9)
+        ]
     else:
         data[field] = [f"原文明示的第 {i + 1} 项具体问题及依据" for i in range(9)]
 

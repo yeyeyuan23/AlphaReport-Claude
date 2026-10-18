@@ -28,6 +28,12 @@ from reportagent.models.schemas import (
 )
 from reportagent.models.database import Report
 from reportagent.sources.arxiv_source import ArxivSource
+from reportagent.sources.base import usable_full_text
+from reportagent.utils.runtime_limits import (
+    positive_setting,
+    metadata_timeout_seconds,
+    review_timeout_seconds,
+)
 from reportagent.utils.config import (
     PROJECT_ROOT,
     get_db_path,
@@ -102,7 +108,7 @@ async def collect_paper(arxiv_id: str) -> SearchResult:
                     paper_id=arxiv_id,
                     byte_count=len(pdf_bytes),
                 )
-                if text and len(text.strip()) >= 1000:
+                if usable_full_text(text):
                     logger.info("Reusing collected PDF revision: %s", arxiv_id)
                     return SearchResult(
                         title=stored.title,
@@ -118,7 +124,9 @@ async def collect_paper(arxiv_id: str) -> SearchResult:
                         raw_metadata={"pdf_url": f"https://arxiv.org/pdf/{arxiv_id}"},
                     )
     url = f"https://arxiv.org/abs/{arxiv_id}"
-    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+    async with httpx.AsyncClient(
+        timeout=metadata_timeout_seconds(), follow_redirects=True
+    ) as client:
         response = await client.get(url)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, "html.parser")
@@ -166,11 +174,7 @@ async def collect_paper(arxiv_id: str) -> SearchResult:
             raw_metadata={"pdf_url": pdf_url},
         )
         paper = await ArxivSource()._fetch_one_pdf(client, paper, pdf_url)
-    if (
-        paper.abstract_only
-        or not paper.full_text
-        or len(paper.full_text.strip()) < 1000
-    ):
+    if paper.abstract_only or not usable_full_text(paper.full_text):
         raise ValueError("未取得可用 PDF 全文，停止分析")
     return paper
 
@@ -420,7 +424,9 @@ async def prepare_report(arxiv_id: str, *, force: bool = False) -> tuple[Path, d
                     depth="standard",
                     progress_cb=progress,
                 ),
-                timeout=900,
+                timeout=positive_setting(
+                    "llm", "analysis_timeout_seconds", default=900
+                ),
             )
         else:
             result = cached_result
@@ -428,7 +434,7 @@ async def prepare_report(arxiv_id: str, *, force: bool = False) -> tuple[Path, d
 
         if evaluation is None:
             evaluation = await asyncio.wait_for(
-                evaluate_paper(review_input, llm), timeout=240
+                evaluate_paper(review_input, llm), timeout=review_timeout_seconds()
             )
     finally:
         await llm._client.close()

@@ -20,6 +20,8 @@ from reportagent.db.repository import ReportRepository
 from reportagent.llm.client import LLMClient
 from reportagent.skills.registry import skill_resource
 from reportagent.utils.config import PROJECT_ROOT
+from reportagent.utils.runtime_limits import positive_number
+from reportagent.sources.base import usable_full_text
 
 load_dotenv()
 
@@ -43,8 +45,8 @@ class ScoringOptions:
     created_date: str | None = None
     published_date: str | None = None
     threshold: float | None = None
-    batch_size: int = 10
-    max_papers: int = 200
+    batch_size: int | None = None
+    max_papers: int = 0
     dry_run: bool = False
 
 
@@ -90,6 +92,15 @@ def _configured_threshold(config: dict) -> float:
         config.get("push_settings", {}).get("llm_filter_threshold", 6.0),
         "llm_filter_threshold",
     )
+
+
+def resolve_batch_size(override: int | None = None) -> int:
+    value = (
+        _load_scoring_config().get("push_settings", {}).get("llm_batch_size", 10)
+        if override is None
+        else override
+    )
+    return positive_number(value, "llm_batch_size", integer=True)
 
 
 def _scoring_context() -> tuple[dict[str, dict], str, str, str]:
@@ -177,6 +188,8 @@ def has_screening_material(paper) -> bool:
     identify an otherwise plausible abstract as insufficient.
     """
     abstract = str(_paper_value(paper, "abstract") or "").strip()
+    if not usable_full_text(abstract):
+        return False
     if abstract == str(_paper_value(paper, "title") or "").strip():
         return False
     abstract = re.sub(r"https?://\S+", "", abstract)
@@ -187,7 +200,7 @@ def has_screening_material(paper) -> bool:
         flags=re.I,
     )
     meaningful = re.sub(r"[\W_\d]+", "", abstract)
-    return len(meaningful) >= 20
+    return bool(meaningful)
 
 
 def _format_papers_for_llm(papers: list, indices=None) -> str:
@@ -369,13 +382,24 @@ async def _score_one_batch(
         direction_ids=", ".join(directions),
     )
     try:
+        settings = _load_scoring_config().get("push_settings", {})
+        minimum = positive_number(
+            settings.get("llm_min_output_tokens", 4000),
+            "llm_min_output_tokens",
+            integer=True,
+        )
+        per_direction = positive_number(
+            settings.get("llm_output_tokens_per_paper_direction", 350),
+            "llm_output_tokens_per_paper_direction",
+            integer=True,
+        )
         response = await llm_client.chat_json(
             [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.2,
-            max_tokens=max(4000, 350 * len(eligible) * len(directions)),
+            max_tokens=max(minimum, per_direction * len(eligible) * len(directions)),
         )
         assessed, errors = _validate_batch_response(response, eligible, directions)
         for index, item in assessed:
@@ -399,21 +423,17 @@ async def _score_one_batch(
 async def score_papers_batch(
     llm_client: LLMClient | None,
     papers: list,
-    batch_size: int = 10,
+    batch_size: int | None = None,
     *,
     concurrency: int | None = None,
 ) -> tuple[list[dict], list[tuple]]:
     """Bound concurrent model batches; preserve paper identity and input ordering."""
-    if type(batch_size) is not int or batch_size <= 0:
-        raise ValueError("batch_size must be a positive integer")
+    settings = _load_scoring_config().get("push_settings", {})
+    batch_size = resolve_batch_size(batch_size)
     if not papers:
         return [], []
     if concurrency is None:
-        concurrency = (
-            _load_scoring_config()
-            .get("push_settings", {})
-            .get("screening_concurrency", 4)
-        )
+        concurrency = settings.get("screening_concurrency", 4)
     if type(concurrency) is not int or concurrency <= 0:
         raise ValueError("screening_concurrency must be a positive integer")
     context = _scoring_context()
@@ -601,6 +621,7 @@ async def score_reports(options: ScoringOptions) -> None:
     if type(options.max_papers) is not int or options.max_papers < 0:
         raise ValueError("max_papers must be a nonnegative integer; 0 means unlimited")
     limit = options.max_papers or None
+    batch_size = resolve_batch_size(options.batch_size)
     from reportagent.services.report_periods import (
         get_daily_range,
         get_calendar_day_range,
@@ -711,11 +732,9 @@ async def score_reports(options: ScoringOptions) -> None:
             raise
 
         # ── Score ──
-        logger.info(
-            f"Scoring {len(papers)} papers in batches of {options.batch_size}..."
-        )
+        logger.info(f"Scoring {len(papers)} papers in batches of {batch_size}...")
         results, failed_batches = await score_papers_batch(
-            llm_client, papers, batch_size=options.batch_size
+            llm_client, papers, batch_size=batch_size
         )
 
         # ── Apply ──

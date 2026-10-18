@@ -39,6 +39,29 @@ def insert(factory, rid=1, **overrides):
         session.commit()
 
 
+def test_configured_review_timeout_leaves_paper_retryable(library, monkeypatch):
+    import copy
+    from reportagent.utils import config
+
+    settings = copy.deepcopy(config.load_config())
+    settings["llm"]["full_text_review"] = {"timeout_seconds": 0.001}
+    monkeypatch.setattr(config, "load_config", lambda: settings)
+    insert(library)
+
+    class SlowModel(PersistentModel):
+        async def chat_json(self, messages, **kwargs):
+            await asyncio.sleep(0.02)
+            return await super().chat_json(messages, **kwargs)
+
+    with (
+        patch.object(database, "get_session_factory", return_value=library),
+        patch("reportagent.llm.client.LLMClient", return_value=SlowModel()),
+    ):
+        result = asyncio.run(quality.review_report_ids([1]))[1]
+    assert result["status"] == "pending"
+    assert "TimeoutError" in result["validation_issues"][0]
+
+
 @pytest.mark.parametrize("cache", ["{broken", "[]", '"not object"'])
 def test_malformed_cache_does_not_block_sibling_reviews(library, cache):
     insert(library, 1, evaluation_json=cache)
@@ -57,7 +80,11 @@ def test_malformed_cache_does_not_block_sibling_reviews(library, cache):
 @pytest.mark.parametrize("force", [False, True])
 @pytest.mark.parametrize(
     "full_text,has_full_text",
-    [(None, False), ("short", True), (TEXT, False)],
+    [
+        (None, False),
+        ("<html><body>Service unavailable</body></html>", True),
+        (TEXT, False),
+    ],
     ids=["missing", "unusable", "incomplete"],
 )
 def test_missing_material_never_fetches_or_changes_paper_and_preserves_sibling_budget(

@@ -39,5 +39,21 @@ Web 的监听地址与端口由 `ALPHAREPORT_BIND_HOST`、`ALPHAREPORT_PORT` 环
 部署检查与运行时共用 `feishu.app_id_env`、`feishu.app_secret_env` 和 `llm.api_key_env` 的凭据配置；更换模型服务时不额外要求 DeepSeek 专属密钥。
 `push_directions.yaml` 中实际生效的 `push_settings` 包括：相关性阈值 `llm_filter_threshold`、
 摘要筛选批量 `llm_batch_size`、并发 `screening_concurrency` 和日报重点推荐数 `max_featured`。
+普通评分、方向评分及采集共用该批次配置；CLI 的 `--batch-size` 可显式覆盖。批次与并发只控制调度，不截断候选。
+评分输出额度为 `llm_min_output_tokens` 与“本批论文数 × 启用方向数 × `llm_output_tokens_per_paper_direction`”中的较大值。
 全文评估预算配置在 `app.yaml` 的 `daily_collection.max_reviews`：省略或 `null` 表示不限，正整数只限制采集阶段的新模型调用，有效缓存不占预算，缺材料不堵住后续候选。
 失败或超出预算的条目由后续采集处理。0、负数、布尔值和字符串均不接受；日/周报不再提供模型评估参数。
+
+运行保护在 `app.yaml` 配置，数值必须为有限正数，次数及输出 tokens 必须为正整数：
+
+| 配置 | 用途 |
+|---|---|
+| `collection.metadata` | HTML/JSON 大小、来源请求超时、手动 arXiv 搜索总时限，以及 arXiv 网络重试次数和退避 |
+| `collection.pdf` | PDF 大小、每次下载和解析超时、网络重试；不限制附件链接数量 |
+| `llm.request_timeout_seconds`、`llm.default_max_output_tokens` | 单次模型请求超时、未指定任务额度时的输出预算 |
+| `llm.full_text_review.timeout_seconds`、`max_output_tokens` | 批量和单篇阅读共用的全文评估保护，默认 240 秒、6000 输出 tokens |
+| `llm.analysis_timeout_seconds` | 单篇多阶段分析的总超时 |
+
+原文和摘要不按字符数截取或因短小直接淘汰；优先使用完整 Abstract、Introduction，否则保留来源全文作为筛选材料。
+空内容、错误 HTML、书目信息占位仍会被识别，材料是否充分由模型判断。运行预算不参与研究材料指纹，不使已有成功评估失效。
+手动采集和本地扫描默认不限数量；`--max` 可显式限制结果数，无 100 篇上限。手动评分默认不限，`--max-papers` 可显式设预算，0 表示不限。

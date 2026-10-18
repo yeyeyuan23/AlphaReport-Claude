@@ -217,3 +217,5 @@ push_settings:
   llm_filter_threshold: 6.0
   # LLM 每批处理论文数
   llm_batch_size: 10
+  llm_min_output_tokens: 4000
+  llm_output_tokens_per_paper_direction: 350  # 按本批论文数 × 启用方向数计算输出额度

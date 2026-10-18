@@ -21,6 +21,8 @@ from reportagent.services.text_evidence import text_chunks
 from reportagent.services.document_metadata import material_type
 from reportagent.models.schemas import QualityJudgment
 from reportagent.llm.errors import ContextWindowExceeded
+from reportagent.sources.base import usable_full_text
+from reportagent.utils.runtime_limits import positive_setting, review_timeout_seconds
 
 logger = logging.getLogger(__name__)
 SCHEMA_VERSION = 6
@@ -189,7 +191,7 @@ def has_review_material(paper) -> bool:
     if not isinstance(paper, dict):
         paper = vars(paper)
     text = paper.get("full_text") or ""
-    if not paper.get("has_full_text") or len(text.strip()) < 1000:
+    if not paper.get("has_full_text") or not usable_full_text(text):
         return False
     try:
         review = json.loads(paper.get("evaluation_json") or "null")
@@ -240,7 +242,7 @@ def pending_review(paper: dict, reason: str) -> dict:
 
 async def evaluate_paper(paper: dict, llm) -> dict:
     text = paper.get("full_text") or ""
-    if not paper.get("has_full_text") or len(text.strip()) < 1000:
+    if not paper.get("has_full_text") or not usable_full_text(text):
         return pending_review(paper, "未取得可用全文；摘要只能用于相关性初筛。")
     chunks = text_chunks(text)
     instructions = review_instructions()
@@ -260,7 +262,13 @@ async def evaluate_paper(paper: dict, llm) -> dict:
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,
-            max_tokens=6000,
+            max_tokens=positive_setting(
+                "llm",
+                "full_text_review",
+                "max_output_tokens",
+                default=6000,
+                integer=True,
+            ),
         )
     except ContextWindowExceeded as error:
         result = pending_review(paper, str(error))
@@ -430,9 +438,8 @@ async def review_report_ids(
                 budget_available = (
                     max_reviews is None or len(audit["review_ids"]) < max_reviews
                 )
-                if (
-                    not paper["has_full_text"]
-                    or len((paper["full_text"] or "").strip()) < 1000
+                if not paper["has_full_text"] or not usable_full_text(
+                    paper["full_text"]
                 ):
                     audit["pending_material_ids"].append(rid)
                     result = pending_review(
@@ -450,7 +457,7 @@ async def review_report_ids(
                     }
                     audit["review_ids"].append(rid)
                     result = await asyncio.wait_for(
-                        evaluate_paper(paper, llm), timeout=240
+                        evaluate_paper(paper, llm), timeout=review_timeout_seconds()
                     )
             except Exception as exc:
                 review_failed = True
@@ -471,9 +478,8 @@ async def review_report_ids(
                 result = pending_review(
                     paper, f"全文评估未完成（{type(exc).__name__}），可重试。"
                 )
-                if (
-                    not paper["has_full_text"]
-                    or len((paper["full_text"] or "").strip()) < 1000
+                if not paper["has_full_text"] or not usable_full_text(
+                    paper["full_text"]
                 ):
                     audit["pending_material_ids"].append(rid)
             with factory() as session:

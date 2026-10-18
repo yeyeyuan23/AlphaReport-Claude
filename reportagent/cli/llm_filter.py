@@ -40,13 +40,16 @@ def main():
         help="Relevance threshold (default: push_directions.yaml, fallback 6.0)",
     )
     parser.add_argument(
-        "--batch-size", type=int, default=10, help="Papers per LLM batch (default: 10)"
+        "--batch-size",
+        type=int,
+        default=None,
+        help="Papers per LLM batch (default: push_directions.yaml)",
     )
     parser.add_argument(
         "--max-papers",
         type=int,
-        default=200,
-        help="Maximum papers to score (default: 200; 0 = unlimited)",
+        default=0,
+        help="Optional scoring budget (default: 0 = unlimited)",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="Preview scores without writing to DB"

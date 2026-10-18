@@ -5,11 +5,12 @@ from copy import deepcopy
 
 from reportagent.services.text_evidence import text_chunks
 from reportagent.skills.registry import skill_resource
+from reportagent.sources.base import usable_full_text
 
 
 def build_briefing_messages(report, analysis: dict) -> list[dict]:
     text = getattr(report, "full_text", "") or ""
-    if not getattr(report, "has_full_text", False) or len(text.strip()) < 1000:
+    if not getattr(report, "has_full_text", False) or not usable_full_text(text):
         raise ValueError("叙事简报需要可用全文；保留已有结构化展示。")
     analysis = deepcopy(analysis)
     if isinstance(analysis.get("assessment"), dict):

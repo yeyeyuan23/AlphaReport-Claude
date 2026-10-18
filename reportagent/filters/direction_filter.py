@@ -68,9 +68,6 @@ class DirectionFilter:
     保留总分足够高的论文进入精选推送。
     """
 
-    # 批量评分：每次送 N 篇论文给 LLM
-    BATCH_SIZE = 5
-
     # 精选阈值：单方向 >= 此分才算命中
     SELECTION_THRESHOLD = 6.0
 
@@ -128,7 +125,7 @@ class DirectionFilter:
 
                 self._llm_client = LLMClient()
             assessed, self.failed_batches = await scoring.score_papers_batch(
-                self._llm_client, papers, batch_size=self.BATCH_SIZE
+                self._llm_client, papers
             )
         except Exception as error:
             self.failed_batches = [(0, len(papers), str(error)[:200])]
