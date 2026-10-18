@@ -94,6 +94,8 @@ def test_week_query_covers_more_than_100_and_retains_full_abstract(library):
                     source="arxiv",
                     content_hash=str(i),
                     abstract="完整摘要" * 300,
+                    full_text=TEXT,
+                    has_full_text=True,
                     published_date=datetime(2026, 10, 9),
                 )
                 for i in range(207)
@@ -110,7 +112,12 @@ def test_week_query_preserves_current_review_for_papers_without_arxiv_id(
     library, source
 ):
     p = assessed(
-        paper(source=source, arxiv_id=None, published_date=datetime(2026, 10, 9))
+        paper(
+            source=source,
+            arxiv_id=None,
+            abstract=None,
+            published_date=datetime(2026, 10, 9),
+        )
     )
     with library() as session:
         values = {k: v for k, v in p.items() if k in Report.__table__.columns.keys()}
@@ -124,7 +131,7 @@ def test_week_query_preserves_current_review_for_papers_without_arxiv_id(
     assert "## 待核验" not in text
 
 
-def test_week_query_keeps_saved_material_failure_instead_of_generic_stale_notice(
+def test_week_query_skips_material_failure_without_altering_saved_diagnostic(
     library,
 ):
     from reportagent.services.report_quality import pending_review
@@ -144,8 +151,11 @@ def test_week_query_keeps_saved_material_failure_instead_of_generic_stale_notice
 
     rows = weekly.get_weekly_papers(datetime(2026, 10, 5), datetime(2026, 10, 12))
     text = weekly.generate_weekly_report(rows, "2026-10-05", "2026-10-11")
-    assert reason in text
-    assert "尚无与当前原文" not in text
+    assert rows == []
+    assert "## 待核验" not in text
+    with library() as session:
+        saved = json.loads(session.get(Report, 1).evaluation_json)
+        assert saved["validation_issues"] == [reason]
 
 
 def test_weekly_never_promotes_relevance_or_legacy_summary_to_quality():
@@ -197,6 +207,8 @@ def test_no_llm_preview_does_not_call_models_or_send(library, tmp_path, monkeypa
                 title="待阅读",
                 source="arxiv",
                 content_hash="one",
+                full_text=TEXT,
+                has_full_text=True,
                 published_date=datetime(2026, 10, 9),
             )
         )

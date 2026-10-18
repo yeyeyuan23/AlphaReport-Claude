@@ -8,7 +8,7 @@ import pytest
 from reportagent.services.report_periods import get_daily_range
 from reportagent.models.database import Report
 from reportagent.services import daily_push as daily
-from tests.support.report_fixtures import Model, paper, response, module
+from tests.support.report_fixtures import TEXT, Model, paper, response, module
 
 
 def evaluated_paper(i, category="arxiv"):
@@ -195,6 +195,8 @@ def test_daily_reads_saved_reviews_before_render_and_dry_run_never_delivers(
                 title="Paper",
                 source="arxiv",
                 content_hash="one",
+                full_text=TEXT,
+                has_full_text=True,
                 is_selected=True,
                 published_date=get_daily_range()[0] + timedelta(hours=1),
             )

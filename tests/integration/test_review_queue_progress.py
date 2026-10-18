@@ -65,8 +65,10 @@ def queue_library(tmp_path, monkeypatch, memory_session_factory):
                 published_date=now,
                 selection_direction="portfolio_optimization",
             )
-            if rid <= 12:
+            if rid < 12:
                 values.update(full_text="", has_full_text=False)
+            elif rid == 12:
+                values.update(full_text="x" * (quality.MAX_REVIEW_CHARS + 1))
             row = Report(**values)
             if rid == 13:
                 cached = asyncio.run(quality.evaluate_paper(values, QueueModel()))
@@ -79,23 +81,21 @@ def queue_library(tmp_path, monkeypatch, memory_session_factory):
 def test_missing_material_and_current_caches_do_not_starve_collection_reviews(
     queue_library,
 ):
-    factory, model, _ = queue_library
+    factory, model, fetch = queue_library
     for expected_last_id in (25, 37):
         before = len(model.requests)
         asyncio.run(collection_reviews.prepare_collection_reviews(max_reviews=12))
         assert len(model.requests) - before == 12
         with factory() as session:
             for rid in range(1, 13):
-                assert (
-                    json.loads(session.get(Report, rid).evaluation_json)["tier"]
-                    == "pending"
-                )
+                assert session.get(Report, rid).evaluation_json is None
             for rid in range(13, expected_last_id + 1):
                 assert (
                     json.loads(session.get(Report, rid).evaluation_json)["status"]
                     == "reviewed"
                 )
             assert session.get(Report, expected_last_id + 1).evaluation_json is None
+    fetch.assert_not_awaited()
 
 
 def test_generic_review_entrypoint_keeps_full_requested_library_contract(queue_library):
@@ -151,7 +151,7 @@ def test_collection_review_budget_defaults_to_all_and_resumes(queue_library, bud
 
 @pytest.mark.parametrize("flow", ["weekly", "daily"])
 def test_reports_never_download_or_review_and_preserve_library(
-    queue_library, monkeypatch, flow
+    queue_library, monkeypatch, capsys, flow
 ):
     factory, model, fetch = queue_library
     monkeypatch.setattr(
@@ -175,6 +175,10 @@ def test_reports_never_download_or_review_and_preserve_library(
     with factory() as db:
         assert {r.id: r.evaluation_json for r in db.query(Report)} == before
     assert result["status"] == "preview"
+    text = capsys.readouterr().out
+    for rid in range(1, 13):
+        assert f"**Portfolio study {rid}**" not in text
+        assert f"[Portfolio study {rid}]" not in text
 
 
 def test_default_candidate_ordering_does_not_truncate_after_twelve():

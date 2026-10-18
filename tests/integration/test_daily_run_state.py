@@ -13,6 +13,7 @@ from reportagent.models.database import Report, ReportRun
 from reportagent.services import daily_push as daily
 from reportagent.services.report_quality import review_fingerprint
 from reportagent.services.paper_scoring import evidence_fingerprint
+from tests.support.report_fixtures import TEXT
 
 
 def save_offline_assessment(session, row, assessment):
@@ -66,6 +67,8 @@ def insert_paper(factory):
             source="arxiv",
             content_hash="one",
             abstract="We study portfolio allocation and compare rolling trading policies with transaction costs.",
+            full_text=TEXT,
+            has_full_text=True,
             source_url="https://arxiv.org/abs/2610.00001v1",
             arxiv_id="2610.00001v1",
             published_date=get_daily_range()[0] + timedelta(hours=1),
@@ -429,6 +432,8 @@ def test_unreviewed_candidates_are_kept_in_saved_report(
                 title="Second",
                 source="arxiv",
                 content_hash="two",
+                full_text=TEXT,
+                has_full_text=True,
                 published_date=get_daily_range()[0] + timedelta(hours=1),
             )
         )

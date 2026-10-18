@@ -160,12 +160,13 @@ async def _collect_and_review(criteria, config, result):
         review = {"status": "failed", "error": type(error).__name__}
     review["elapsed_ms"] = round((monotonic() - started) * 1000)
     logger.info(
-        "Collection full-text review finished: status=%s new_calls=%s completed=%s cached=%s pending_material=%s deferred=%s elapsed_ms=%s",
+        "Collection full-text review finished: status=%s new_calls=%s completed=%s cached=%s pending_material=%s skipped_material=%s deferred=%s elapsed_ms=%s",
         review["status"],
         len(review.get("review_ids", [])),
         len(review.get("completed_ids", [])),
         len(review.get("cached_ids", [])),
         len(review.get("pending_material_ids", [])),
+        len(review.get("skipped_material_ids", [])),
         len(review.get("deferred_ids", [])),
         review["elapsed_ms"],
     )

@@ -129,13 +129,26 @@ def review_fingerprint(
     ).hexdigest()
 
 
-def cached_review_is_current(paper: dict, review, model: str) -> bool:
-    """One cache gate for report generation and presentation."""
+def has_review_material(paper) -> bool:
+    """Automatic reviews and digests skip missing or oversized full text."""
+    if not isinstance(paper, dict):
+        paper = {
+            "full_text": paper.full_text,
+            "has_full_text": paper.has_full_text,
+        }
     text = paper.get("full_text") or ""
     return bool(
+        paper.get("has_full_text")
+        and len(text.strip()) >= 1000
+        and len(text) <= MAX_REVIEW_CHARS
+    )
+
+
+def cached_review_is_current(paper: dict, review, model: str) -> bool:
+    """One cache gate for report generation and presentation."""
+    return bool(
         isinstance(review, dict)
-        and paper.get("has_full_text")
-        and 1000 <= len(text.strip()) <= MAX_REVIEW_CHARS
+        and has_review_material(paper)
         and review.get("schema_version") == SCHEMA_VERSION
         and review.get("model") == model
         and review.get("text_complete")
@@ -182,7 +195,7 @@ async def evaluate_paper(
     if len(text) > max_chars:
         result = pending_review(
             paper,
-            f"全文 {len(text)} 字符超过可用输入上限 {max_chars}；未发送部分文本，需提高限额或分批完整阅读。",
+            f"全文 {len(text)} 字符超过可用输入上限 {max_chars}；已跳过全文评估。",
         )
         result.update(input_chars=0, full_text_chars=len(text))
         return result
@@ -429,7 +442,7 @@ async def review_report_ids(
                 elif len(paper["full_text"]) > MAX_REVIEW_CHARS:
                     result = pending_review(
                         paper,
-                        f"全文 {len(paper['full_text'])} 字符超过可用输入上限 {MAX_REVIEW_CHARS}；需提高限额或分批完整阅读。",
+                        f"全文 {len(paper['full_text'])} 字符超过可用输入上限 {MAX_REVIEW_CHARS}；已跳过全文评估。",
                     )
                     audit["pending_material_ids"].append(rid)
                 elif not budget_available:

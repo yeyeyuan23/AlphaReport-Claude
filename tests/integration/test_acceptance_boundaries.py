@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from reportagent.models.database import Report
 from tests.acceptance import workflows
+from tests.support.report_fixtures import TEXT
 
 
 def test_full_library_acceptance_rescores_old_and_already_scored_rows(
@@ -88,6 +89,8 @@ def test_weekly_preview_uses_publication_boundaries_and_cannot_deliver(
                     content_hash=str(i),
                     source="arxiv",
                     published_date=stamp,
+                    full_text=TEXT,
+                    has_full_text=True,
                     created_at=datetime(2026, 10, 16),
                 )
             )

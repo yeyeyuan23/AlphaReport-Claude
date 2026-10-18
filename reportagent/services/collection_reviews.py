@@ -5,6 +5,7 @@ from reportagent.db.engine import get_session_factory
 from reportagent.utils.config import get_llm_model
 from reportagent.services.report_quality import (
     cached_review_is_current,
+    has_review_material,
     resolve_review_budget,
 )
 
@@ -27,13 +28,16 @@ def _review_candidates(force_review):
             .all()
         )
         threshold = _configured_threshold(_load_scoring_config())
-        candidates, cached_ids = [], []
+        candidates, cached_ids, skipped_ids = [], [], []
         for row in rows:
             if (
                 not screening_is_current(row)
                 or row.selection_relevance is None
                 or row.selection_relevance < threshold
             ):
+                continue
+            if not has_review_material(row):
+                skipped_ids.append(row.id)
                 continue
             snapshot = dict(vars(row))
             try:
@@ -46,7 +50,7 @@ def _review_candidates(force_review):
                 cached_ids.append(row.id)
                 continue  # Saved reviews remain visible without consuming new-review budget.
             candidates.append(snapshot)
-    return candidates, cached_ids
+    return candidates, cached_ids, skipped_ids
 
 
 async def prepare_collection_reviews(
@@ -60,7 +64,8 @@ async def prepare_collection_reviews(
         "review_ids": [],
         "failures": [],
     }
-    candidates, cached_ids = _review_candidates(force_review)
+    candidates, cached_ids, skipped_ids = _review_candidates(force_review)
+    audit["skipped_material_ids"] = skipped_ids
     audit["unreviewed_candidates"] = len(candidates)
     selected = select_candidates(candidates, max_reviews=len(candidates))
     review_audit = {}

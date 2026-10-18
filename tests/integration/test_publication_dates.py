@@ -20,6 +20,7 @@ from reportagent.models.schemas import (
 )
 from reportagent.services import weekly_report
 from reportagent.sources.bigquant_source import BigQuantSource
+from tests.support.report_fixtures import TEXT
 
 
 def fetch(body):
@@ -232,6 +233,7 @@ def test_source_page_date_persists_and_drives_report_instead_of_cited_report(lib
             head='<meta property="article:published_time" content="2026-10-09">',
         )
     )
+    fetched = fetched.model_copy(update={"full_text": TEXT, "abstract_only": False})
     with library() as session:
         repo = ReportRepository(session)
         _, rid = repo.upsert_report(

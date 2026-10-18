@@ -22,6 +22,7 @@ from reportagent.services.report_quality import (
     pending_review,
     review_fingerprint,
     cached_review_is_current,
+    has_review_material,
 )
 from reportagent.services.feishu_markdown import card_sections
 from reportagent.services.report_periods import (
@@ -75,7 +76,10 @@ def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
         )
         q = q.order_by(desc(Report.published_date), Report.id)
         reports = [
-            r for r in q.all() if is_publication_in_range(r, week_start, week_end)
+            r
+            for r in q.all()
+            if is_publication_in_range(r, week_start, week_end)
+            and has_review_material(r)
         ]
 
         papers = []

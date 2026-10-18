@@ -6,6 +6,7 @@ import pytest
 
 from reportagent.models.database import Report
 from reportagent.services import daily_push as daily, weekly_report as weekly
+from tests.support.report_fixtures import TEXT
 
 
 @pytest.mark.parametrize(
@@ -60,6 +61,8 @@ def test_daily_uses_publication_day_regardless_of_ingestion(
                     source="arxiv",
                     content_hash=str(rid),
                     created_at=datetime.fromisoformat(created),
+                    full_text=TEXT,
+                    has_full_text=True,
                     published_date=datetime.fromisoformat(published)
                     if published
                     else None,
@@ -312,6 +315,8 @@ def test_weekly_publication_query_excludes_cutoff_and_partial_dates(
                     source="arxiv",
                     content_hash=str(rid),
                     published_date=published if info is None else None,
+                    full_text=TEXT,
+                    has_full_text=True,
                     publication_date_info_json=json.dumps(info) if info else None,
                 )
             )

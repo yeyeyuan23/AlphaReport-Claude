@@ -23,6 +23,7 @@ from reportagent.services.report_quality import (
     select_candidates,
     pending_review,
     review_fingerprint,
+    has_review_material,
 )
 from reportagent.services.report_briefing import render_briefing
 from reportagent.services.report_views import read_saved_reviews
@@ -128,7 +129,11 @@ def _refresh_candidate_metadata(
         refreshed = []
         for paper in candidates:
             row = current.get(paper["id"])
-            if row is None or not is_daily_publication(row, report_date=report_date):
+            if (
+                row is None
+                or not is_daily_publication(row, report_date=report_date)
+                or not has_review_material(row)
+            ):
                 continue
             snapshot = {
                 field: getattr(row, field)

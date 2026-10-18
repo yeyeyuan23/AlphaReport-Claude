@@ -18,6 +18,7 @@ from reportagent.db.repository import ReportRepository
 from reportagent.processors.metadata_extractor import MetadataExtractor
 from reportagent.processors.pdf_extractor import PDFContent
 from reportagent.services import daily_push
+from tests.support.report_fixtures import TEXT
 
 
 @pytest.mark.parametrize(
@@ -415,6 +416,8 @@ def test_weekly_snapshot_preserves_material_type_for_shared_renderer(factory):
             source="local_pdf",
             material_type="broker",
             content_hash="weekly",
+            full_text=TEXT,
+            has_full_text=True,
             published_date=datetime(2024, 2, 3),
         )
         session.add(row)

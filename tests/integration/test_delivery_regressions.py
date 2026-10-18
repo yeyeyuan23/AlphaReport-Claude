@@ -19,6 +19,7 @@ from reportagent.models.schemas import (
 from reportagent.services import daily_push as daily
 from reportagent.services.paper_scoring import evidence_fingerprint
 from tests.support.database import memory_database
+from tests.support.report_fixtures import TEXT
 
 
 class DeliveryTests(unittest.TestCase):
@@ -66,6 +67,8 @@ class DeliveryTests(unittest.TestCase):
                     source="arxiv",
                     content_hash=f"hash-{i}",
                     abstract="We study portfolio allocation and compare rolling trading policies with transaction costs.",
+                    full_text=TEXT,
+                    has_full_text=True,
                     published_date=get_daily_range()[0] + timedelta(hours=1),
                     is_selected=True,
                     selection_relevance=8,

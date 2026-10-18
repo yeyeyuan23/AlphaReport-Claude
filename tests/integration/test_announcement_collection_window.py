@@ -25,6 +25,7 @@ from reportagent.services import (
 from reportagent.services.report_periods import get_daily_range
 from reportagent.db.repository import ReportRepository
 from tests.support.collection_scoring import RelevanceModel
+from tests.support.report_fixtures import TEXT
 
 
 def test_schedule_enumerates_all_announcements_in_daily_window(tmp_path, monkeypatch):
@@ -66,6 +67,8 @@ def test_announcements_survive_hydration_and_drive_both_reports(
         authors=["A"],
         source=SourceType.ARXIV,
         arxiv_id="2610.00001v1",
+        full_text=TEXT,
+        abstract_only=False,
         abstract="We study portfolio allocation and rolling out-of-sample financial risk.",
         published_date=start + timedelta(hours=1),
         raw_metadata={
