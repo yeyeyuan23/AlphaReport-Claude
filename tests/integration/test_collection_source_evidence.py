@@ -1,5 +1,8 @@
 """Date windows and acquired research text must reflect source evidence."""
 
+from reportagent.sources.date_window import source_date
+
+
 import asyncio
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -37,10 +40,8 @@ def test_collection_end_date_covers_last_day_in_utc(collect):
     source = fake(SourceType.ARXIV)
     collect([source], date_from="2026-10-05", date_to="2026-10-11")
     criteria = source.search.call_args.args[0]
-    assert criteria.date_from == datetime(2026, 10, 5, tzinfo=timezone.utc)
-    assert criteria.date_to == datetime(
-        2026, 10, 11, 23, 59, 59, 999999, tzinfo=timezone.utc
-    )
+    assert criteria.date_from.isoformat() == "2026-10-05"
+    assert criteria.date_to.isoformat() == "2026-10-11"
 
 
 @pytest.mark.parametrize("broad", [False, True])
@@ -87,7 +88,9 @@ def test_arxiv_original_publication_does_not_change_with_requested_revision(vers
         + "</feed>"
     )[0]
     row = ArxivSource._parse_atom_entry(entry)
-    assert row.published_date == datetime(2020, 1, 3, 12, tzinfo=timezone.utc)
+    assert row.published_date == source_date(
+        datetime(2020, 1, 3, 12, tzinfo=timezone.utc)
+    )
     assert row.raw_metadata["updated_date"] == "2026-10-16T00:00:00+00:00"
 
 
@@ -103,10 +106,10 @@ def test_arxiv_date_filter_converts_offsets_and_excludes_unknown_dates():
     ]
     selected = ArxivSource()._filter_by_date(
         rows,
-        datetime(2026, 10, 11, tzinfo=timezone.utc),
-        datetime(2026, 10, 11, 23, 59, 59, tzinfo=timezone.utc),
+        datetime(2026, 10, 12, tzinfo=timezone.utc),
+        datetime(2026, 10, 12, 23, 59, 59, tzinfo=timezone.utc),
     )
-    assert selected == rows[:1]
+    assert selected == [rows[0], rows[2]]
 
 
 def test_bigquant_date_window_applies_before_limit_and_unknown_is_excluded(monkeypatch):
@@ -115,9 +118,9 @@ def test_bigquant_date_window_applies_before_limit_and_unknown_is_excluded(monke
             return bigquant_info()
         return bigquant_page(
             [
-                bigquant_document("old", original="2020-01-01"),
-                bigquant_document("unknown"),
-                bigquant_document("in-range", original="2026-10-11T23:30:00Z"),
+                bigquant_document("in-range", published="2026-10-11T23:30:00Z"),
+                bigquant_document("unknown", published=None),
+                bigquant_document("old", published="2020-01-01"),
             ]
         )
 
@@ -182,11 +185,10 @@ def test_bigquant_skips_out_of_window_and_undated_pdfs_before_download(
 
     monkeypatch.setattr(content_fetch, "PDF_DIRECTORY", tmp_path)
     dates = {
-        "old": "2020-01-01",
-        "unknown": None,
         "future": "2026-10-12",
-        "lower": "2026-10-05T00:00:00Z",
         "upper": "2026-10-11T23:59:59Z",
+        "lower": "2026-10-05T00:00:00Z",
+        "old": "2020-01-01",
     }
     downloads = []
     attachment = pdf_bytes(
@@ -203,7 +205,7 @@ def test_bigquant_skips_out_of_window_and_undated_pdfs_before_download(
                     bigquant_document(
                         name,
                         title=f"Portfolio {name}",
-                        original=day,
+                        published=day,
                         text=f'<a href="/pdf/{name}.pdf">PDF</a>',
                     )
                     for name, day in dates.items()
@@ -229,8 +231,8 @@ def test_bigquant_skips_out_of_window_and_undated_pdfs_before_download(
         )
     )
 
-    assert downloads == ["/pdf/lower.pdf", "/pdf/upper.pdf"]
-    assert [row.title for row in rows] == ["Portfolio lower", "Portfolio upper"]
+    assert downloads == ["/pdf/upper.pdf", "/pdf/lower.pdf"]
+    assert [row.title for row in rows] == ["Portfolio upper", "Portfolio lower"]
     assert all(row.full_text and not row.abstract_only for row in rows)
     assert (
         len(list(tmp_path.glob("*.pdf"))) == 1
@@ -283,7 +285,10 @@ def test_bigquant_undated_pdf_is_available_without_a_date_window(
                 )
             )
         )
-    assert row.published_date is None
+    if entrypoint == "search":
+        assert row.published_date == source_date("2026-10-15")
+    else:
+        assert row.published_date is None
     assert row.full_text and not row.abstract_only
     assert Path(row.pdf_path).is_file()
     assert not source.last_search.errors
@@ -480,7 +485,7 @@ def test_arxiv_offset_publication_is_normalized_before_database_storage():
         + "</feed>"
     )[0]
     row = ArxivSource._parse_atom_entry(entry)
-    assert row.published_date.isoformat() == "2026-10-11T23:00:00+00:00"
+    assert row.published_date.isoformat() == "2026-10-12"
 
 
 def test_bigquant_bad_pdf_does_not_remove_valid_sibling(collect, monkeypatch, tmp_path):

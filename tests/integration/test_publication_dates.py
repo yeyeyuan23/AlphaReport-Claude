@@ -1,5 +1,8 @@
 """Dates must survive source parsing and re-import without turning reposts into new work."""
 
+from reportagent.sources.date_window import source_date
+
+
 import asyncio
 from datetime import datetime
 from unittest.mock import patch
@@ -63,7 +66,7 @@ def library(memory_session_factory):
     yield memory_session_factory
 
 
-def test_original_report_date_wins_over_page_publication_and_update_dates():
+def test_source_publication_date_wins_over_cited_original_and_update_dates():
     result = fetch(
         page(
             "<p>本文来自方正证券研究所于2022年8月4日发布的报告《多因子研究》。</p>",
@@ -71,8 +74,8 @@ def test_original_report_date_wins_over_page_publication_and_update_dates():
             time='<time datetime="1767060353">更新于2025-12-30 02:05</time>',
         )
     )
-    assert result.published_date == datetime(2022, 8, 4)
-    assert result.raw_metadata["published_date_source"] == "original_report_text"
+    assert result.published_date == source_date(datetime(2024, 6, 18))
+    assert result.raw_metadata["published_date_source"] == "meta:article:published_time"
 
 
 @pytest.mark.parametrize(
@@ -84,7 +87,7 @@ def test_original_report_date_wins_over_page_publication_and_update_dates():
         ),
         (
             '<meta name="citation_publication_date" content="2023/2/15">',
-            datetime(2023, 2, 15),
+            None,
         ),
         (
             '<script type="application/ld+json">{"@type":"Article","datePublished":"2023-02-15","dateModified":"2026-10-16"}</script>',
@@ -93,7 +96,7 @@ def test_original_report_date_wins_over_page_publication_and_update_dates():
     ],
 )
 def test_explicit_publication_metadata_is_supported(head, expected):
-    assert fetch(page(head=head)).published_date == expected
+    assert fetch(page(head=head)).published_date == source_date(expected)
 
 
 def test_explicit_published_time_tag_is_supported():
@@ -102,7 +105,7 @@ def test_explicit_published_time_tag_is_supported():
             time='<time itemprop="datePublished" datetime="2023-02-15">发表于2023-02-15</time>'
         )
     )
-    assert result.published_date == datetime(2023, 2, 15)
+    assert result.published_date == source_date(datetime(2023, 2, 15))
 
 
 @pytest.mark.parametrize(
@@ -146,7 +149,7 @@ def test_reimport_backfills_date_without_clearing_analysis_or_relevance(library)
         session.expire_all()
         row = session.get(Report, rid)
         assert action == "updated" and same_id == rid
-        assert row.published_date == datetime(2022, 8, 4)
+        assert row.published_date == source_date(datetime(2022, 8, 4))
         assert (row.analysis_json, row.evaluation_json, row.knowledge_card_json) == (
             "saved analysis",
             "saved evaluation",
@@ -192,7 +195,7 @@ def test_reimport_local_pdf_repairs_legacy_creation_date_and_fake_abstract(
         session.commit()
         repo.upsert_report(local(new_date, None, checked=True))
         row = session.get(Report, rid)
-        assert row.published_date == new_date
+        assert row.published_date == source_date(new_date)
         assert row.abstract is None
 
 
@@ -202,7 +205,9 @@ def test_unknown_or_repost_date_does_not_replace_known_same_revision_date(librar
         _, rid = repo.upsert_report(report(datetime(2022, 8, 4)))
         repo.upsert_report(report(None))
         repo.upsert_report(report(datetime(2025, 12, 30)))
-        assert session.get(Report, rid).published_date == datetime(2022, 8, 4)
+        assert session.get(Report, rid).published_date == source_date(
+            datetime(2022, 8, 4)
+        )
 
 
 def test_new_and_delayed_arxiv_revisions_cannot_replace_known_publication_date(library):
@@ -210,78 +215,28 @@ def test_new_and_delayed_arxiv_revisions_cannot_replace_known_publication_date(l
         repo = ReportRepository(session)
         _, rid = repo.upsert_report(report(datetime(2025, 1, 1), "2501.00001v1"))
         repo.upsert_report(report(datetime(2026, 10, 9), "2501.00001v2"))
-        assert session.get(Report, rid).published_date == datetime(2025, 1, 1)
+        assert session.get(Report, rid).published_date == source_date(
+            datetime(2025, 1, 1)
+        )
         assert session.get(Report, rid).arxiv_id == "2501.00001v2"
         repo.upsert_report(report(datetime(2025, 1, 1), "2501.00001v1"))
-        assert session.get(Report, rid).published_date == datetime(2025, 1, 1)
-
-
-def test_reposted_old_report_preserves_original_date_and_requires_announcement(library):
-    fetched = fetch(
-        page(
-            "<p>本文来自方正证券研究所于2022年8月4日发布的报告《多因子研究》。</p>",
-            time='<time datetime="2026-10-09">更新于2026-10-09</time>',
+        assert session.get(Report, rid).published_date == source_date(
+            datetime(2025, 1, 1)
         )
-    )
-    classified = ClassifiedReport(
-        search_result=fetched, classification=ClassificationResult()
-    )
+
+
+def test_source_page_date_persists_and_drives_report_instead_of_cited_report(library):
+    fetched = fetch(page(
+        "<p>原报告发布日期：2022年8月4日</p>",
+        head='<meta property="article:published_time" content="2026-10-09">',
+    ))
     with library() as session:
         repo = ReportRepository(session)
-        # Simulate re-import into a database created by the previous parser.
-        old = fetched.model_copy(update={"published_date": None})
-        _, rid = repo.upsert_report(
-            ClassifiedReport(search_result=old, classification=ClassificationResult())
-        )
-        assert session.get(Report, rid).published_date is None
-        repo.upsert_report(classified)
-    # Read a fresh session: the parser's original date must actually persist.
-    with library() as session:
-        row = session.get(Report, rid)
-        assert row.published_date == datetime(2022, 8, 4)
-        assert row.announced_at is None
-    with (
-        patch.object(weekly_report, "init_db"),
-        patch.object(weekly_report, "get_session_factory", return_value=library),
-    ):
-        assert (
-            weekly_report.get_weekly_papers(
-                datetime(2026, 10, 5), datetime(2026, 10, 12)
-            )
-            == []
-        )
-        papers = weekly_report.get_weekly_papers(
-            datetime(2022, 8, 1), datetime(2022, 8, 8)
-        )
-        # Original cited dates remain in the library but are not evidence of
-        # when this BigQuant page became public.
-        assert papers == []
-
-        # A verified recent announcement makes the old report eligible now,
-        # while its original research date must remain unchanged.
-        announced = fetched.model_copy(
-            update={"announced_at": datetime(2026, 10, 9, 1)}
-        )
-        with library() as session:
-            _, updated_id = ReportRepository(session).upsert_report(
-                ClassifiedReport(
-                    search_result=announced, classification=ClassificationResult()
-                )
-            )
-            assert updated_id == rid
-        with library() as session:
-            row = session.get(Report, rid)
-            assert row.published_date == datetime(2022, 8, 4)
-            assert row.announced_at == datetime(2026, 10, 9, 1)
-        papers = weekly_report.get_weekly_papers(
-            datetime(2026, 10, 5), datetime(2026, 10, 12)
-        )
-        assert [paper["id"] for paper in papers] == [rid]
-        assert papers[0]["published_date"] == "2022-08-04T00:00:00"
-        assert (
-            weekly_report.get_weekly_papers(datetime(2022, 8, 1), datetime(2022, 8, 8))
-            == []
-        )
+        _, rid = repo.upsert_report(ClassifiedReport(search_result=fetched, classification=ClassificationResult()))
+        assert session.get(Report, rid).published_date == source_date("2026-10-09")
+    with (patch.object(weekly_report, "init_db"), patch.object(weekly_report, "get_session_factory", return_value=library)):
+        papers = weekly_report.get_weekly_papers(datetime(2026, 10, 5), datetime(2026, 10, 12))
+        assert [p["id"] for p in papers] == [rid]
 
 
 def test_invalid_optional_jsonld_type_does_not_drop_the_article():
@@ -302,7 +257,7 @@ def test_invalid_original_report_date_does_not_fall_back_to_repost_date():
             head='<meta property="article:published_time" content="2026-10-16">',
         )
     )
-    assert result.published_date is None
+    assert result.published_date == source_date("2026-10-16")
 
 
 def test_jsonld_uses_current_article_instead_of_cited_paper():
@@ -314,7 +269,7 @@ def test_jsonld_uses_current_article_instead_of_cited_paper():
             "]}</script>"
         )
     )
-    assert result.published_date == datetime(2024, 3, 4)
+    assert result.published_date == source_date(datetime(2024, 3, 4))
 
 
 def test_comment_publication_time_is_not_the_article_publication_time():
@@ -334,7 +289,7 @@ def test_reference_publication_date_is_not_original_report_date():
             head='<meta property="article:published_time" content="2024-03-04">',
         )
     )
-    assert result.published_date == datetime(2024, 3, 4)
+    assert result.published_date == source_date(datetime(2024, 3, 4))
 
 
 def test_ambiguous_anonymous_article_dates_are_not_guessed():

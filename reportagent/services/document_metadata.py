@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 
 from reportagent.utils.publication_dates import is_cited_conference_prose
 
@@ -88,24 +88,24 @@ def has_precise_publication_date(paper) -> bool:
 def merge_document_metadata(row, search_result) -> None:
     """Fill metadata without erasing supported values on inconclusive reparses."""
     raw = search_result.raw_metadata
-    # Source announcements are separate from original submission/publication dates.
-    # Hydration/reimports without this evidence must not erase an observed announcement.
-    if search_result.announced_at is not None:
-        stamp = search_result.announced_at
-        stamp = (
-            stamp.astimezone(timezone.utc).replace(tzinfo=None)
-            if stamp.tzinfo
-            else stamp
-        )
-        current = row.announced_at
-        if current is not None and current.tzinfo:
-            current = current.astimezone(timezone.utc).replace(tzinfo=None)
-        if current is None or stamp > current:
-            row.announced_at = stamp
-            info = raw.get("announcement_info")
-            row.announcement_info_json = (
-                json.dumps(info, ensure_ascii=False) if info else None
-            )
+    from reportagent.sources.date_window import source_date
+
+    # Online sources own their publication date. Accept evidenced corrections in
+    # either direction; a missing date during PDF hydration cannot erase it.
+    new_info = metadata_dict(raw.get("publication_date_info"))
+    incoming = source_date(search_result.published_date)
+    if (
+        search_result.source.value in {"arxiv", "eastmoney", "bigquant"}
+        and incoming is not None
+    ):
+        if row.published_date is None or (
+            row.source == search_result.source.value and new_info.get("source")
+        ):
+            row.published_date = incoming
+            if new_info:
+                row.publication_date_info_json = json.dumps(
+                    new_info, ensure_ascii=False
+                )
     old = metadata_dict(row.publication_date_info_json)
     new = metadata_dict(raw.get("publication_date_info"))
     legacy = old.get("source") in {
@@ -118,7 +118,7 @@ def merge_document_metadata(row, search_result) -> None:
         row.published_date = None
         old = {}
         row.publication_date_info_json = None
-    incoming_date = search_result.published_date
+    incoming_date = source_date(search_result.published_date)
     # Repair a positively identified citation-year inference only when
     # the same record receives explicit, evidenced publication metadata.
     # Missing metadata or a conflicting *supported* date must remain stable.
@@ -150,7 +150,7 @@ def merge_document_metadata(row, search_result) -> None:
         if key in old
     )
     if row.published_date is None and incoming_date is not None and compatible_date:
-        row.published_date = search_result.published_date
+        row.published_date = incoming_date
         if new:
             row.publication_date_info_json = json.dumps(new, ensure_ascii=False)
     elif row.published_date is None:

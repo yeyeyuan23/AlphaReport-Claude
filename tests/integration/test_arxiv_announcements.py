@@ -1,5 +1,8 @@
 """Replay real dated arXiv lists captured after Saturday's RSS rollover."""
 
+from reportagent.sources.date_window import source_date
+
+
 import asyncio
 from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
@@ -30,7 +33,6 @@ def criteria(**updates):
             "date_basis": "announcement",
             "date_from": datetime(2026, 10, 16, 8, tzinfo=timezone(timedelta(hours=8))),
             "date_to": datetime(2026, 10, 17, 8, tzinfo=timezone(timedelta(hours=8))),
-            "date_to_exclusive": True,
             "max_results_per_source": None,
             **updates,
         },
@@ -61,9 +63,9 @@ def test_weekend_rerun_reads_complete_previous_public_batch(monkeypatch):
     rows = asyncio.run(source.search_broad(criteria()))
     assert len(rows) == 17
     assert all(
-        r.announced_at == datetime(2026, 10, 16, tzinfo=timezone.utc) for r in rows
+        r.published_date == source_date(datetime(2026, 10, 16, tzinfo=timezone.utc))
+        for r in rows
     )
-    assert all(r.published_date < r.announced_at for r in rows)
     assert all(r.abstract_only and r.abstract for r in rows)
     assert any(r.arxiv_id == "2609.34004v2" for r in rows)
     assert source.last_search.errors == []
@@ -106,7 +108,7 @@ def test_unavailable_history_is_not_complete_empty(monkeypatch):
         )
     )
     assert rows == []
-    assert "outside available recent lists" in str(source.last_search.errors)
+    assert "unavailable in recent lists" in str(source.last_search.errors)
 
 
 def test_weekend_empty_still_checks_actual_list(monkeypatch):
@@ -130,15 +132,11 @@ def test_weekend_empty_still_checks_actual_list(monkeypatch):
     assert len(calls) == source.last_search.successful_requests == 1
 
 
-def test_half_open_window_and_daylight_saving():
-    assert list(requested_days(criteria())) == [date(2026, 10, 16)]
-    assert AnnouncementBatch(date(2026, 10, 16), 0, 0).released_at.hour == 0
-    assert AnnouncementBatch(date(2026, 11, 2), 0, 0).released_at.hour == 1
+def test_date_window_includes_both_endpoints_without_daylight_saving_conversion():
+    assert list(requested_days(criteria())) == [date(2026, 10, 16), date(2026, 10, 17)]
     assert list(
-        requested_days(
-            criteria(date_to=datetime(2026, 10, 16, 0, 0, 1, tzinfo=timezone.utc))
-        )
-    ) == [date(2026, 10, 16)]
+        requested_days(criteria(date_from=date(2026, 11, 1), date_to=date(2026, 11, 2)))
+    ) == [date(2026, 11, 1), date(2026, 11, 2)]
 
 
 def test_abstract_fallback_preserves_submission_date_separately():
@@ -149,10 +147,9 @@ def test_abstract_fallback_preserves_submission_date_separately():
 
     paper = asyncio.run(read_abstract_page(HTTP(), "2610.21867v1"))
     assert paper.arxiv_id == "2610.21867v1" and paper.abstract_only
-    assert paper.published_date == datetime(
-        2026, 10, 15, 13, 39, 41, tzinfo=timezone.utc
+    assert paper.published_date == source_date(
+        datetime(2026, 10, 15, 13, 39, 41, tzinfo=timezone.utc)
     )
-    assert paper.announced_at is None
     assert "Q-learning" in paper.abstract
 
 
@@ -175,7 +172,8 @@ def test_query_failure_uses_official_abstract_page():
     asyncio.run(announcements._fetch_abstracts(HTTP(), [entry], results, diagnostics))
     assert len(results) == 1 and diagnostics.errors == []
     assert (
-        results[0].raw_metadata["announcement_info"]["source"] == "arxiv_dated_listing"
+        results[0].raw_metadata["publication_date_info"]["source"]
+        == "arxiv_dated_listing"
     )
 
 

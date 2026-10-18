@@ -24,7 +24,7 @@ def main():
     parser.add_argument(
         "--report-ids",
         default="",
-        help="指定库中论文 ID（逗号分隔），仍须满足日报公开时间窗口且有来源时间证据",
+        help="指定库中论文 ID（逗号分隔），仍须符合日报日期范围且有来源日期证据",
     )
     args = parser.parse_args()
 

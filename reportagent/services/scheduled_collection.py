@@ -191,7 +191,7 @@ def run_scheduled_collection() -> dict:
             result["publication_window"] = {
                 "start": start.isoformat(),
                 "end": end.isoformat(),
-                "end_exclusive": True,
+                "end_exclusive": False,
             }
             result["report_date"] = report_date
             criteria = UserCriteria(
@@ -204,7 +204,6 @@ def run_scheduled_collection() -> dict:
                 date_from=start,
                 date_to=end,
                 date_basis="announcement",
-                date_to_exclusive=True,
                 max_results_per_source=None,
             )
             asyncio.run(_collect_and_review(criteria, config, result))

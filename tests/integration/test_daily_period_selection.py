@@ -33,7 +33,6 @@ def legacy_library(monkeypatch):
                 source="arxiv",
                 content_hash=str(rid),
                 published_date=date,
-                announced_at=date,
                 selection_relevance=score,
                 abstract="We study portfolio allocation and test financial return prediction.",
             )

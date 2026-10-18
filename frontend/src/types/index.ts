@@ -27,7 +27,6 @@ export interface ReportSummary {
   doi?: string;
   arxiv_id?: string;
   published_date?: string | null;
-  announced_at?: string | null;
   publication_date_info?: {
     precision?: 'day' | 'month' | 'year' | 'unknown';
     year?: number;

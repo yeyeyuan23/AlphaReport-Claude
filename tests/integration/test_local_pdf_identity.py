@@ -1,5 +1,8 @@
 """Native and OCR front matter must describe one paper, not a cited paper."""
 
+from reportagent.sources.date_window import source_date
+
+
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -74,7 +77,7 @@ def test_scanned_front_matter_fills_each_missing_identity_field(
     assert row.title == "Factor portfolio research"
     assert row.arxiv_id == "2501.12345"
     assert row.doi == "10.1234/portfolio"
-    assert row.published_date == datetime(2026, 1, 15)
+    assert row.published_date == source_date(datetime(2026, 1, 15))
     assert row.raw_metadata["publication_date_source"] == "labelled_publication_date"
     assert (
         row.raw_metadata["publication_date_info"]["evidence"] == "Published: 2026-01-15"
@@ -111,7 +114,7 @@ def test_valid_native_title_is_preserved_while_ocr_fills_other_fields(
     assert row.title == "Verified native title"
     assert row.arxiv_id == "2501.12345"
     assert row.doi == "10.1234/portfolio"
-    assert row.published_date == datetime(2026, 1, 15)
+    assert row.published_date == source_date(datetime(2026, 1, 15))
     if embedded_title:
         assert row.authors == ["Original Author"]
 
@@ -155,7 +158,7 @@ def test_publication_date_keeps_native_evidence_and_only_refines_compatible_date
 
     row = source._process_pdf(path, UserCriteria(topics=["factor"]))
 
-    assert row.published_date == expected_date
+    assert row.published_date == source_date(expected_date)
     assert row.raw_metadata["publication_date_info"]["precision"] == precision
     if native_date == "August 2025":
         assert row.raw_metadata["publication_date_info"]["year"] == 2025
@@ -332,7 +335,7 @@ def test_same_arxiv_id_with_different_versions_still_allows_missing_fields(
 
     assert row.arxiv_id == "2501.12345"
     assert row.doi == "10.1234/portfolio"
-    assert row.published_date == datetime(2026, 1, 15)
+    assert row.published_date == source_date(datetime(2026, 1, 15))
 
 
 def test_known_blank_structured_first_page_never_uses_later_page_metadata(

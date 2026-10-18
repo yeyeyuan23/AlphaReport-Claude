@@ -1,18 +1,16 @@
 """Parse arXiv's dated recent-announcement lists, independently of RSS rollover."""
 
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import date, datetime, timedelta
 import re
 from urllib.parse import parse_qs, urlsplit
-from zoneinfo import ZoneInfo
 
 from bs4 import BeautifulSoup
 
 from reportagent.sources.base import SourceParseError
-from reportagent.sources.date_window import in_criteria_window, utc_datetime
+from reportagent.sources.date_window import source_date
 
 
-EASTERN = ZoneInfo("America/New_York")
 IDENTIFIER = r"(?:\d{4}\.\d{4,5}|[a-z][a-z.\-]*/\d{7})"
 
 
@@ -22,27 +20,16 @@ class AnnouncementBatch:
     offset: int
     count: int
 
-    @property
-    def released_at(self):
-        # Listing/mail dates follow the previous evening's public release.
-        # https://info.arxiv.org/help/availability.html#announcement-schedule
-        evening = datetime.combine(self.day - timedelta(days=1), time(20), EASTERN)
-        return evening.astimezone(timezone.utc)
-
 
 def requested_days(criteria):
-    if not criteria.date_from or not criteria.date_to:
-        raise SourceParseError("announcement search requires a bounded date window")
-    start, end = utc_datetime(criteria.date_from), utc_datetime(criteria.date_to)
-    if start >= end:
-        raise SourceParseError("announcement search requires start before end")
-    day = start.astimezone(EASTERN).date()
-    last = end.astimezone(EASTERN).date() + timedelta(days=1)
-    while day <= last:
-        batch = AnnouncementBatch(day, 0, 0)
-        if day.weekday() < 5 and in_criteria_window(batch.released_at, criteria):
-            yield day
-        day += timedelta(days=1)
+    first, last = source_date(criteria.date_from), source_date(criteria.date_to)
+    if first is None or last is None:
+        raise SourceParseError("announcement search requires a bounded date range")
+    if first > last:
+        raise SourceParseError("announcement search requires start on or before end")
+    while first <= last:
+        yield first
+        first += timedelta(days=1)
 
 
 def parse_recent_index(content, category):

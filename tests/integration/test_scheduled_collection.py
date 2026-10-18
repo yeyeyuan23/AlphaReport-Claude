@@ -46,7 +46,7 @@ def test_scheduled_collection_saves_source_results_without_generating_reports(
         ]
         assert kwargs == {"no_analysis": True, "broad": True}
         assert options.max_results_per_source is None
-        assert options.date_basis == "announcement" and options.date_to_exclusive
+        assert options.date_basis == "announcement"
         if outcome == "exception":
             raise RuntimeError("temporary source failure")
         return {"status": outcome, "source_statuses": statuses, "storage": {"added": 0}}

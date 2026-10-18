@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from reportagent.sources.date_window import source_date
+
 import json
 import re
 from typing import Optional
@@ -218,7 +220,7 @@ class ReportRepository:
             source_item_id=identities(sr)["source_id"] or None,
             doi=sr.doi,
             arxiv_id=sr.arxiv_id,
-            published_date=sr.published_date,
+            published_date=source_date(sr.published_date),
             publication_date_info_json=json.dumps(
                 sr.raw_metadata.get("publication_date_info"), ensure_ascii=False
             )
@@ -451,16 +453,16 @@ class ReportRepository:
         if created_until:
             q = q.filter(Report.created_at <= created_until)
         if published_since:
-            q = q.filter(Report.published_date >= published_since)
+            q = q.filter(Report.published_date >= source_date(published_since))
             if published_until is not None:
-                q = q.filter(Report.published_date < published_until)
+                q = q.filter(Report.published_date <= source_date(published_until))
             else:
-                q = q.filter(Report.published_date <= datetime.now(timezone.utc))
+                q = q.filter(Report.published_date <= datetime.now(timezone.utc).date())
         if report_window:
             from reportagent.services.report_periods import publication_column
 
-            start, end = report_window
-            q = q.filter(publication_column() >= start, publication_column() < end)
+            start, end = (source_date(value) for value in report_window)
+            q = q.filter(publication_column() >= start, publication_column() <= end)
         q = q.order_by(desc(Report.created_at))
         if scoring_fingerprint is None:
             return q.limit(limit).all()

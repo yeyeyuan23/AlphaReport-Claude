@@ -1,5 +1,8 @@
 """Startup imports real local PDFs once, preserving retries and service availability."""
 
+from reportagent.sources.date_window import source_date
+
+
 import asyncio
 import sys
 from types import ModuleType, SimpleNamespace
@@ -353,7 +356,7 @@ def test_real_pdf_import_persists_content_type_and_supported_publication_date(im
         row = session.query(Report).one()
         assert row.source == "local_pdf"
         assert row.material_type == "broker"
-        assert row.published_date == datetime(2024, 2, 3)
+        assert row.published_date == source_date(datetime(2024, 2, 3))
         assert (
             json.loads(row.material_type_info_json)["evidence"]
             == "Securities Research Report"

@@ -1,6 +1,6 @@
 import type { ReportSummary } from '../types';
 
-/** Keep source announcement, publication precision and ingestion distinct. */
+/** Show the source date at its actual precision. */
 export function ReportDates({ report }: { report: ReportSummary }) {
   const info = report.publication_date_info;
   let publication: string | undefined;
@@ -18,7 +18,6 @@ export function ReportDates({ report }: { report: ReportSummary }) {
     publication = report.published_date.slice(0, 10);
   }
   const labels: string[] = [];
-  if (report.announced_at) labels.push(`公告：${report.announced_at.slice(0, 10)}`);
   if (publication) labels.push(`发表：${publication}`);
   if (!labels.length) {
     labels.push('发表日期未知');

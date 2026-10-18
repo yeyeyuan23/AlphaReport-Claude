@@ -69,7 +69,6 @@ def insert_paper(factory):
             source_url="https://arxiv.org/abs/2610.00001v1",
             arxiv_id="2610.00001v1",
             published_date=get_daily_range()[0] + timedelta(hours=1),
-            announced_at=get_daily_range()[0] + timedelta(hours=1),
             selection_score=8,
             selection_relevance=8,
             selection_direction="portfolio",
@@ -431,7 +430,6 @@ def test_unreviewed_candidates_are_kept_in_saved_report(
                 source="arxiv",
                 content_hash="two",
                 published_date=get_daily_range()[0] + timedelta(hours=1),
-                announced_at=get_daily_range()[0] + timedelta(hours=1),
             )
         )
         session.commit()
@@ -532,8 +530,8 @@ def test_daily_artifact_shows_the_exact_publication_window(offline_daily):
     assert result["publication_window"] == {
         "start": start.isoformat(),
         "end": end.isoformat(),
-        "end_exclusive": True,
+        "end_exclusive": False,
     }
     text = Path(result["artifact_path"]).read_text()
-    assert "公开发布时间范围：" in text
-    assert "08:00" in text and "北京时间，含起点、不含截止点" in text
+    assert "来源日期范围：" in text
+    assert "来源日期，含起止日期" in text and "08:00" not in text

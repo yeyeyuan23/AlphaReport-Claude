@@ -1,5 +1,8 @@
 """Exercise configured scope through real dated-list and Atom parsers."""
 
+from reportagent.sources.date_window import source_date
+
+
 import asyncio
 from datetime import datetime, timezone
 
@@ -99,7 +102,6 @@ def test_configured_sources_keep_all_qfin_add_topic_matches_and_deduplicate(
                 date_basis="announcement",
                 date_from=datetime(2026, 10, 16, tzinfo=timezone.utc),
                 date_to=datetime(2026, 10, 17, tzinfo=timezone.utc),
-                date_to_exclusive=True,
                 max_results_per_source=None,
             )
         )
@@ -112,11 +114,12 @@ def test_configured_sources_keep_all_qfin_add_topic_matches_and_deduplicate(
     assert source.discovery_stats["added_by_topics"] == 123
     assert set(source.discovery_stats["categories"]) == set(categories)
     assert all(
-        r.announced_at == datetime(2026, 10, 16, tzinfo=timezone.utc) for r in rows
+        r.published_date == source_date(datetime(2026, 10, 16, tzinfo=timezone.utc))
+        for r in rows
     )
     assert not any("/pdf/" in path for path in paths)
     cross = next(r for r in rows if r.arxiv_id == qfin + "v1")
-    assert cross.raw_metadata["announcement_info"]["listed_categories"] == [
+    assert cross.raw_metadata["publication_date_info"]["listed_categories"] == [
         "q-fin",
         "cs.LG",
     ]
@@ -158,8 +161,8 @@ def test_candidate_cli_only_reads_metadata_and_writes_requested_output(
     assert receipt["status"] == "ok"
     assert len(receipt["candidates"]) == 17
     assert receipt["publication_window"] == {
-        "start": "2026-10-16T00:00:00+00:00",
-        "end": "2026-10-17T00:00:00+00:00",
-        "end_exclusive": True,
+        "start": "2026-10-16",
+        "end": "2026-10-17",
+        "end_exclusive": False,
     }
     assert json.loads(capsys.readouterr().out)["candidate_count"] == 17

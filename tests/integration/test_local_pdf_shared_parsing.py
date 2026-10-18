@@ -1,5 +1,8 @@
 """Local structured parsing keeps the actual PDF's metadata and section evidence."""
 
+from reportagent.sources.date_window import source_date
+
+
 import json
 from datetime import datetime
 from types import SimpleNamespace
@@ -63,7 +66,7 @@ def test_optional_structured_parsing_preserves_pdf_metadata_date_and_abstract(
     assert row is not None
     assert row.title == "Verified PDF title"
     assert row.authors == ["Original Author"]
-    assert row.published_date == datetime(2026, 1, 15)
+    assert row.published_date == source_date(datetime(2026, 1, 15))
     assert row.abstract == "Verified structured abstract."
     assert json.loads(row.tables_json) == [{"table_body": "structured table"}]
     assert json.loads(row.equations_json)[0]["latex"] == "x^2"

@@ -48,9 +48,8 @@ def init_db():
     # Add columns if missing (SQLite doesn't support ADD COLUMN IF NOT EXISTS).
     # Idempotent: inspect PRAGMA table_info first, skip columns that already exist.
     _new_columns = [
+        ("published_date", "DATE"),
         ("source_item_id", "VARCHAR(1100)"),
-        ("announced_at", "DATETIME"),
-        ("announcement_info_json", "TEXT"),
         ("knowledge_card_json", "TEXT"),
         ("selection_score", "FLOAT DEFAULT 0.0"),
         ("selection_reason", "TEXT"),
@@ -91,8 +90,11 @@ def init_db():
         conn.exec_driver_sql(
             "CREATE INDEX IF NOT EXISTS ix_reports_source_item_id ON reports (source_item_id)"
         )
+        from reportagent.db.date_migration import migrate_source_dates
+
+        migrate_source_dates(conn)
         conn.exec_driver_sql(
-            "CREATE INDEX IF NOT EXISTS ix_reports_announced_at ON reports (announced_at)"
+            "CREATE INDEX IF NOT EXISTS ix_reports_published_date ON reports (published_date)"
         )
 
         # Backfill only known typed adapters; a PDF's transport says nothing about its content.

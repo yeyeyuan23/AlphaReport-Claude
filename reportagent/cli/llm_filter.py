@@ -27,7 +27,7 @@ def main():
     )
     parser.add_argument(
         "--published-date",
-        help="Score public announcements in the 24 hours before this Beijing date at 08:00 (YYYY-MM-DD)",
+        help="Score source publications dated yesterday through this report date (YYYY-MM-DD)",
     )
     parser.add_argument(
         "--created-date",

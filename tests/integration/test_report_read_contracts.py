@@ -40,8 +40,6 @@ BASE_FIELDS = {
     "updated_at",
 }
 CURRENT_FIELDS = {
-    "announced_at",
-    "announcement_info",
     "publication_date_info",
     "material_type",
     "material_type_info",
@@ -282,7 +280,7 @@ def test_list_and_detail_preserve_their_wire_fields(reader):
     for key in fields:
         assert detail[key] == listed[key]
     assert listed["authors"] == ["First Author", "Second Author"]
-    assert listed["published_date"] == "2026-10-10T00:00:00"
+    assert listed["published_date"] == "2026-10-10"
     assert listed["custom_tags"] == ["reading-list"]
     assert listed["markets"] == ["us"]
     assert listed["asset_classes"] == ["equity"]

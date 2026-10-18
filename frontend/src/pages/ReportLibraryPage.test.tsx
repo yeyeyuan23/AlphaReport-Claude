@@ -22,12 +22,7 @@ describe('ReportLibraryPage', () => {
       '发表：2024（精确到年）',
     ],
     [{ published_date: '2024-02-03T00:00:00' }, '发表：2024-02-03'],
-    [{ published_date: null, announced_at: '2026-10-16T04:00:00Z' }, '公告：2026-10-16'],
     [{ published_date: null }, '发表日期未知 · 入库：2026-10-17'],
-    [
-      { published_date: '2024-02-03T00:00:00', announced_at: '2026-10-16T04:00:00Z' },
-      '公告：2026-10-16 · 发表：2024-02-03',
-    ],
     [
       {
         published_date: '2024-02-01T00:00:00',

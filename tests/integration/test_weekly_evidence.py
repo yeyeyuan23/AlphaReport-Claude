@@ -95,7 +95,6 @@ def test_week_query_covers_more_than_100_and_retains_full_abstract(library):
                     content_hash=str(i),
                     abstract="完整摘要" * 300,
                     published_date=datetime(2026, 10, 9),
-                    announced_at=datetime(2026, 10, 9),
                 )
                 for i in range(207)
             ]
@@ -156,7 +155,6 @@ def test_no_llm_preview_does_not_call_models_or_send(library, tmp_path, monkeypa
                 source="arxiv",
                 content_hash="one",
                 published_date=datetime(2026, 10, 9),
-                announced_at=datetime(2026, 10, 9),
             )
         )
         session.commit()
@@ -188,7 +186,6 @@ def test_weekly_only_renders_saved_evidence(library, tmp_path, monkeypatch):
                 source="arxiv",
                 content_hash="one",
                 published_date=datetime(2026, 10, 9),
-                announced_at=datetime(2026, 10, 9),
             )
         )
         session.commit()
@@ -224,7 +221,6 @@ def test_collection_review_budget_advances_past_current_cached_papers(
                 rid=rid,
                 title=f"Portfolio study {rid}",
                 published_date=datetime(2026, 10, 9),
-                announced_at=datetime(2026, 10, 9),
             )
             stored = {
                 k: v for k, v in values.items() if k in Report.__table__.columns.keys()
@@ -273,15 +269,14 @@ def test_weekly_direction_updates_include_every_paper_without_recommendation_lis
             paper(
                 rid=i,
                 title=f"研究{i}",
-                announced_at="2026-10-15T18:00:00+00:00",
-                published_date="2021-01-01",
+                published_date="2026-10-15T18:00:00+00:00",
             )
         )
         for i in range(1, 8)
     ]
     papers.append(
         assessed(
-            paper(rid=8, title="较早公告", announced_at="2026-10-15T01:00:00+00:00")
+            paper(rid=8, title="较早公告", published_date="2026-10-15T01:00:00+00:00")
         )
     )
     text = weekly.generate_weekly_report(papers, "2026-10-10", "2026-10-17")

@@ -67,7 +67,6 @@ class DeliveryTests(unittest.TestCase):
                     content_hash=f"hash-{i}",
                     abstract="We study portfolio allocation and compare rolling trading policies with transaction costs.",
                     published_date=get_daily_range()[0] + timedelta(hours=1),
-                    announced_at=get_daily_range()[0] + timedelta(hours=1),
                     is_selected=True,
                     selection_relevance=8,
                 )
@@ -183,7 +182,6 @@ class RepositoryRecoveryTests(unittest.TestCase):
                         content_hash="retry",
                         created_at=now - timedelta(days=2),
                         published_date=now - timedelta(days=1),
-                        announced_at=now - timedelta(days=1),
                     ),
                     Report(
                         title="expired",
@@ -191,7 +189,6 @@ class RepositoryRecoveryTests(unittest.TestCase):
                         content_hash="expired",
                         created_at=now,
                         published_date=now - timedelta(days=10),
-                        announced_at=now - timedelta(days=10),
                     ),
                 ]
             )

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 
@@ -133,19 +133,13 @@ def _criteria_from_options(options: CollectionOptions) -> UserCriteria:
     date_from = None
     date_to = None
     if options.date_from:
-        date_from = datetime.strptime(options.date_from, "%Y-%m-%d").replace(
-            tzinfo=timezone.utc
-        )
+        date_from = date.fromisoformat(options.date_from)
     elif options.days:
         from datetime import timedelta
-
-        date_from = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        ) - timedelta(days=options.days)
+        from reportagent.services.report_periods import REPORT_TIMEZONE
+        date_from = datetime.now(REPORT_TIMEZONE).date() - timedelta(days=options.days)
     if options.date_to:
-        date_to = datetime.strptime(options.date_to, "%Y-%m-%d").replace(
-            hour=23, minute=59, second=59, microsecond=999999, tzinfo=timezone.utc
-        )
+        date_to = date.fromisoformat(options.date_to)
 
     if date_from:
         logger.info(
@@ -297,9 +291,9 @@ async def collect_reports(
                                 candidate_in_window,
                             )
 
-                            if sr.announced_at is None:
+                            if sr.published_date is None:
                                 errors.append(
-                                    "announcement date unavailable; metadata not stored and PDF not downloaded"
+                                    "publication date unavailable; metadata not stored and PDF not downloaded"
                                 )
                                 continue
                             if not candidate_in_window(sr, criteria):

@@ -18,7 +18,14 @@ def _review_candidates(force_review):
     from reportagent.models.database import Report
 
     with get_session_factory()() as session:
-        rows = session.query(Report).filter(Report.announced_at.isnot(None)).all()
+        rows = (
+            session.query(Report)
+            .filter(
+                Report.published_date.isnot(None),
+                Report.source.in_(["arxiv", "eastmoney", "bigquant"]),
+            )
+            .all()
+        )
         threshold = _configured_threshold(_load_scoring_config())
         candidates = []
         for row in rows:

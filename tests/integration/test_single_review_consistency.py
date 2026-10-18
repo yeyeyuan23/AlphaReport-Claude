@@ -1,5 +1,8 @@
 """Offline cache policy regressions across daily and explicit paper reviews."""
 
+from reportagent.sources.date_window import source_date
+
+
 import asyncio
 import hashlib
 import json
@@ -222,7 +225,7 @@ def test_storing_paper_preserves_known_date_across_revision_policy(
     with factory() as session:
         row = session.get(Report, rid)
         assert row.arxiv_id == revision
-        assert row.published_date == known
+        assert row.published_date == source_date(known)
 
 
 def test_single_automatic_classification_uses_canonical_abstract_material(

@@ -6,6 +6,7 @@ from sqlalchemy import (
     String,
     Text,
     DateTime,
+    Date,
     Boolean,
     Float,
     ForeignKey,
@@ -13,7 +14,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.orm import DeclarativeBase, relationship
+from sqlalchemy.orm import DeclarativeBase, relationship, validates
 
 
 class Base(DeclarativeBase):
@@ -49,9 +50,7 @@ class Report(Base):
     source_item_id = Column(String(1100), index=True)
     doi = Column(String(200), index=True)
     arxiv_id = Column(String(50), index=True)
-    published_date = Column(DateTime)
-    announced_at = Column(DateTime, index=True)
-    announcement_info_json = Column(Text)
+    published_date = Column(Date, index=True)
     publication_date_info_json = Column(Text)
     material_type = Column(String(20), default="unknown")
     material_type_info_json = Column(Text)
@@ -84,6 +83,12 @@ class Report(Base):
 
     created_at = Column(DateTime, server_default=func.now())
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    @validates("published_date")
+    def _source_date(self, key, value):
+        from reportagent.sources.date_window import source_date
+
+        return source_date(value)
 
     tags = relationship("Tag", secondary=report_tags, back_populates="reports")
 

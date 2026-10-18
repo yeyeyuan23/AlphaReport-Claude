@@ -6,9 +6,7 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-import re
 from typing import Optional
-from zoneinfo import ZoneInfo
 
 import httpx
 from bs4 import BeautifulSoup
@@ -20,7 +18,7 @@ from reportagent.sources.base import (
     deduplicate_results,
     usable_full_text,
 )
-from reportagent.sources.date_window import candidate_in_window, utc_datetime
+from reportagent.sources.date_window import candidate_in_window, source_date
 from reportagent.sources.content_fetch import (
     MAX_HTML_BYTES,
     article_text,
@@ -190,14 +188,9 @@ class EastMoneySource(BaseSource):
 
         dated = []
         for row in deduplicate_results(all_results):
-            stamp = (
-                row.announced_at
-                if criteria.date_basis == "announcement"
-                else row.published_date
-            )
-            if criteria.date_basis == "announcement" and stamp is None:
+            if row.published_date is None and (criteria.date_from or criteria.date_to):
                 self.last_search.record_error(
-                    SourceParseError("announcement date unavailable"), "report date"
+                    SourceParseError("publication date unavailable"), "report date"
                 )
                 continue
             if not candidate_in_window(row, criteria):
@@ -486,27 +479,7 @@ class EastMoneySource(BaseSource):
         )
 
         pub_date_str = item.get("publishDate", "")
-        pub_date = None
-        announced_at = None
-        if pub_date_str:
-            try:
-                pub_date = datetime.strptime(pub_date_str[:10], "%Y-%m-%d")
-            except ValueError:
-                pass
-            try:
-                # A calendar date cannot locate an announcement within an
-                # intraday window. Require a clock supplied by the source.
-                if not re.match(r"^\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}", pub_date_str):
-                    raise ValueError("publishDate has no announcement time")
-                stamp = datetime.fromisoformat(pub_date_str.replace("Z", "+00:00"))
-                announced_at = (
-                    stamp.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
-                    if stamp.tzinfo is None
-                    else stamp
-                ).astimezone(timezone.utc)
-            except (ValueError, TypeError):
-                pass
-
+        pub_date = source_date(pub_date_str)
         stock_name = item.get("stockName", "")
         stock_code = item.get("stockCode", "")
         industry_name = item.get("indvInduName", "")
@@ -527,10 +500,10 @@ class EastMoneySource(BaseSource):
             source=SourceType.EASTMONEY,
             source_url=source_url,
             published_date=pub_date,
-            announced_at=announced_at,
             raw_metadata={
-                "announcement_info": {
-                    "source": "publishDate" if announced_at else None,
+                "publication_date_info": {
+                    "precision": "day" if pub_date else "unknown",
+                    "source": "publishDate" if pub_date else None,
                     "evidence": pub_date_str or None,
                 },
                 "info_code": info_code,
@@ -568,16 +541,6 @@ class EastMoneySource(BaseSource):
         return sorted(q_types)
 
     def _resolve_dates(self, criteria: UserCriteria) -> tuple[str, str]:
-        # The list API accepts calendar days in the site's own timezone. Exact
-        # intraday bounds are applied to publishDate after metadata enumeration.
-        if criteria.date_basis == "announcement":
-            site_zone = ZoneInfo("Asia/Shanghai")
-            end = utc_datetime(criteria.date_to or datetime.now(timezone.utc))
-            start = utc_datetime(criteria.date_from or end - timedelta(days=180))
-            return (
-                start.astimezone(site_zone).strftime("%Y-%m-%d"),
-                end.astimezone(site_zone).strftime("%Y-%m-%d"),
-            )
         if criteria.date_to:
             date_to = criteria.date_to.strftime("%Y-%m-%d")
         else:

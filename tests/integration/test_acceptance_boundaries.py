@@ -28,7 +28,6 @@ def test_full_library_acceptance_rescores_old_and_already_scored_rows(
                     selection_relevance=9,
                     is_selected=True,
                     published_date=datetime(2000, 1, 1),
-                    announced_at=datetime(2000, 1, 1),
                 )
                 for i in range(207)
             ]
@@ -77,9 +76,9 @@ def test_weekly_preview_uses_publication_boundaries_and_cannot_deliver(
     with factory() as session:
         for i, stamp in enumerate(
             (
-                start - timedelta(microseconds=1),
+                start - timedelta(days=1),
                 start,
-                end - timedelta(microseconds=1),
+                end - timedelta(days=1),
                 end,
             )
         ):
@@ -89,7 +88,6 @@ def test_weekly_preview_uses_publication_boundaries_and_cannot_deliver(
                     content_hash=str(i),
                     source="arxiv",
                     published_date=stamp,
-                    announced_at=stamp,
                     created_at=datetime(2026, 10, 16),
                 )
             )
@@ -104,7 +102,7 @@ def test_weekly_preview_uses_publication_boundaries_and_cannot_deliver(
     send = MagicMock(side_effect=AssertionError("Acceptance must not send"))
     monkeypatch.setattr(weekly, "send_feishu_card", send)
     result = workflows.weekly(SimpleNamespace(run_dir=tmp_path, label="weekly"))
-    assert result["paper_ids"] == [3, 2]
+    assert result["paper_ids"] == [4, 3, 2]
     assert result["sent"] is False
     assert result["llm_requested"] is False
     assert result["renderer"] == "saved_evidence"

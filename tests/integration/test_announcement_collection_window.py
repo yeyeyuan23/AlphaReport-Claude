@@ -1,7 +1,10 @@
 """Collection and delivery share verified public announcements, not submission dates."""
 
+from reportagent.sources.date_window import source_date
+
+
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -47,10 +50,10 @@ def test_schedule_enumerates_all_announcements_in_daily_window(tmp_path, monkeyp
     start, end, _, _ = get_daily_range()
     assert isinstance(criteria, UserCriteria)
     assert criteria.max_results_per_source is None
-    assert criteria.date_basis == "announcement" and criteria.date_to_exclusive
+    assert criteria.date_basis == "announcement"
     assert (criteria.date_from, criteria.date_to) == (start, end)
     assert options == {"no_analysis": True, "broad": True}
-    assert result["publication_window"]["end_exclusive"] is True
+    assert result["publication_window"]["end_exclusive"] is False
 
 
 def test_announcements_survive_hydration_and_drive_both_reports(
@@ -64,10 +67,9 @@ def test_announcements_survive_hydration_and_drive_both_reports(
         source=SourceType.ARXIV,
         arxiv_id="2610.00001v1",
         abstract="We study portfolio allocation and rolling out-of-sample financial risk.",
-        published_date=datetime(2021, 1, 1, tzinfo=timezone.utc),
-        announced_at=start + timedelta(hours=1),
+        published_date=start + timedelta(hours=1),
         raw_metadata={
-            "announcement_info": {
+            "publication_date_info": {
                 "source": "arxiv_dated_listing",
                 "evidence": "Fri, 16 Oct 2026 01:00:00 +0000",
             }
@@ -83,20 +85,19 @@ def test_announcements_survive_hydration_and_drive_both_reports(
         repo.upsert_report(
             ClassifiedReport(
                 search_result=result.model_copy(
-                    update={"announced_at": None, "raw_metadata": {}}
+                    update={"published_date": None, "raw_metadata": {}}
                 ),
                 classification=ClassificationResult(),
             )
         )
         row = db.get(Report, rid)
-        assert row.announced_at == datetime(2026, 10, 16, 1)
-        assert row.published_date.year == 2021
+        assert row.published_date == source_date(datetime(2026, 10, 16, 1))
     for module in (daily_push, weekly_report):
         monkeypatch.setattr(module, "init_db", lambda: None)
         monkeypatch.setattr(module, "get_session_factory", lambda: factory)
     rows, _, _ = daily_push.get_todays_papers([rid], report_date="2026-10-17")
     assert [r["id"] for r in rows] == [rid]
-    assert rows[0]["announced_at"].startswith("2026-10-16T01:00")
+    assert rows[0]["published_date"] == "2026-10-16"
     assert [
         r["id"] for r in weekly_report.get_weekly_papers(start - timedelta(days=6), end)
     ] == [rid]
@@ -111,10 +112,10 @@ def test_unknown_arxiv_announcement_is_not_replaced_by_submission(
         db.add(
             Report(
                 id=1,
-                title="Only submission date",
+                title="Unknown source date",
                 source="arxiv",
                 content_hash="one",
-                published_date=start + timedelta(hours=1),
+                published_date=None,
             )
         )
         db.commit()
@@ -136,12 +137,11 @@ def test_collection_checks_window_before_scoring_or_downloading(
             source=SourceType.ARXIV,
             arxiv_id=f"2610.{i:05d}v1",
             abstract="We study portfolio allocation and rolling out-of-sample financial risk models.",
-            published_date=datetime(2021, 1, 1, tzinfo=timezone.utc),
-            announced_at=stamp,
+            published_date=stamp,
             abstract_only=True,
         )
         for i, stamp in enumerate(
-            [start - timedelta(microseconds=1), end, None]
+            [start - timedelta(days=1), end + timedelta(days=1), None]
             + [start + timedelta(hours=1)] * 20,
             1,
         )
@@ -178,7 +178,6 @@ def test_collection_checks_window_before_scoring_or_downloading(
         date_from=start,
         date_to=end,
         date_basis="announcement",
-        date_to_exclusive=True,
     )
     result = asyncio.run(collection.collect_reports(criteria, no_analysis=True))
     with factory() as db:
@@ -199,12 +198,10 @@ def test_briefing_separates_public_announcement_from_original_submission():
     text = _publication_date(
         {
             "source": "arxiv",
-            "announced_at": "2026-10-16T04:00:00+00:00",
-            "published_date": "2021-06-25T17:00:00+00:00",
+            "published_date": "2026-10-16",
         }
     )
-    assert "来源公告时间：2026-10-16 12:00（北京时间）" in text
-    assert "原始提交日期（UTC）：2021-06-25" in text
+    assert text == "来源日期：2026-10-16"
 
 
 def test_later_cross_announcement_updates_window_without_changing_original_date(
@@ -215,10 +212,9 @@ def test_later_cross_announcement_updates_window_without_changing_original_date(
         title="Portfolio method",
         source=SourceType.ARXIV,
         arxiv_id="2610.00001v1",
-        published_date=datetime(2021, 1, 1),
-        announced_at=start - timedelta(days=1),
+        published_date=start - timedelta(days=1),
         raw_metadata={
-            "announcement_info": {
+            "publication_date_info": {
                 "source": "arxiv_dated_listing",
                 "announce_type": "new",
             }
@@ -231,9 +227,9 @@ def test_later_cross_announcement_updates_window_without_changing_original_date(
         )
         newer = sr.model_copy(
             update={
-                "announced_at": start + timedelta(hours=1),
+                "published_date": start + timedelta(hours=1),
                 "raw_metadata": {
-                    "announcement_info": {
+                    "publication_date_info": {
                         "source": "arxiv_dated_listing",
                         "announce_type": "cross",
                     }
@@ -244,9 +240,8 @@ def test_later_cross_announcement_updates_window_without_changing_original_date(
             ClassifiedReport(search_result=newer, classification=ClassificationResult())
         )
         row = db.get(Report, rid)
-        assert row.announced_at == datetime(2026, 10, 16, 1)
-        assert row.published_date == datetime(2021, 1, 1)
+        assert row.published_date == source_date(datetime(2026, 10, 16, 1))
         repo.upsert_report(
             ClassifiedReport(search_result=sr, classification=ClassificationResult())
         )
-        assert row.announced_at == datetime(2026, 10, 16, 1)
+        assert row.published_date == source_date(start - timedelta(days=1))

@@ -25,7 +25,6 @@ async def inspect_candidates(report_date=None):
             date_basis="announcement",
             date_from=start,
             date_to=end,
-            date_to_exclusive=True,
             max_results_per_source=None,
         )
     )
@@ -35,7 +34,7 @@ async def inspect_candidates(report_date=None):
         "publication_window": {
             "start": start.isoformat(),
             "end": end.isoformat(),
-            "end_exclusive": True,
+            "end_exclusive": False,
         },
         "started_at": started_at.isoformat(),
         "completed_at": datetime.now(timezone.utc).isoformat(),
@@ -49,9 +48,9 @@ async def inspect_candidates(report_date=None):
                 "arxiv_id": r.arxiv_id,
                 "title": r.title,
                 "abstract": r.abstract,
-                "announced_at": r.announced_at.isoformat(),
+                "published_date": r.published_date.isoformat(),
                 "scope": r.raw_metadata.get("arxiv_search_scope"),
-                "listing": r.raw_metadata.get("announcement_info"),
+                "listing": r.raw_metadata.get("publication_date_info"),
             }
             for r in rows
         ],
@@ -64,7 +63,7 @@ def main():
     )
     parser.add_argument(
         "--report-date",
-        help="北京时间报告日期 YYYY-MM-DD，默认今天；查询此前 08:00 至当日 08:00",
+        help="北京时间报告日期 YYYY-MM-DD，默认今天；查询昨天至今天，包含起止日期",
     )
     parser.add_argument("--output", help="保存完整候选和计时 JSON")
     args = parser.parse_args()

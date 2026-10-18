@@ -58,7 +58,9 @@ class WeeklyReportOptions:
 
 
 def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
-    """Query papers with published_date in [week_start, week_end)."""
+    """Query papers with published_date in the inclusive calendar-date range."""
+    from reportagent.sources.date_window import source_date
+    week_start, week_end = source_date(week_start), source_date(week_end)
     init_db()
     factory = get_session_factory()
     session = factory()
@@ -68,7 +70,7 @@ def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
 
         q = session.query(Report).filter(
             publication_column() >= week_start,
-            publication_column() < week_end,
+            publication_column() <= week_end,
         )
         q = q.order_by(desc(Report.published_date), Report.id)
         reports = [
@@ -86,12 +88,6 @@ def get_weekly_papers(week_start: datetime, week_end: datetime) -> list[dict]:
                     "full_text": r.full_text or "",
                     "source": r.source or "",
                     "material_type": r.material_type or "unknown",
-                    "announced_at": r.announced_at.isoformat()
-                    if r.announced_at
-                    else "",
-                    "announcement_info": json.loads(r.announcement_info_json)
-                    if r.announcement_info_json
-                    else {},
                     "publication_date_info": json.loads(r.publication_date_info_json)
                     if r.publication_date_info_json
                     else {},
@@ -295,7 +291,7 @@ def run_weekly_report(options: WeeklyReportOptions) -> dict:
         "publication_window": {
             "start": week_start.isoformat(),
             "end": week_end.isoformat(),
-            "end_exclusive": True,
+            "end_exclusive": False,
         },
         "week_start": start_label,
         "week_end": end_label,

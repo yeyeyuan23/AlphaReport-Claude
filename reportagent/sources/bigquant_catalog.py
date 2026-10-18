@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
-import re
+from datetime import date
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -12,7 +11,7 @@ import httpx
 from reportagent.models.schemas import UserCriteria
 from reportagent.sources.base import SearchDiagnostics, SourceParseError
 from reportagent.sources.content_fetch import MAX_HTML_BYTES
-from reportagent.sources.date_window import in_criteria_window, utc_datetime
+from reportagent.sources.date_window import in_criteria_window, source_date
 
 API_URL = "https://bigquant.com/wiki/api"
 COLLECTION_SLUG = "dLopDVBB53"
@@ -45,23 +44,14 @@ async def _collection_id(client, diagnostics) -> str:
     return identity
 
 
-def _announcement_date(value) -> datetime:
-    if not isinstance(value, str) or not re.match(
-        r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", value
-    ):
-        raise SourceParseError("catalog announcement date unavailable")
-    try:
-        stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if stamp.tzinfo is None:
-            raise ValueError
-        return utc_datetime(stamp)
-    except ValueError:
-        raise SourceParseError("catalog announcement date unavailable") from None
+def _announcement_date(value) -> date:
+    day = source_date(value)
+    if day is None:
+        raise SourceParseError("catalog publication date unavailable")
+    return day
 
 
-def _records(
-    rows: list, previous: datetime | None, diagnostics
-) -> list[tuple[dict, datetime]]:
+def _records(rows: list, previous: date | None, diagnostics) -> list[tuple[dict, date]]:
     records = []
     for row in rows:
         try:
@@ -161,7 +151,7 @@ async def discover_catalog(
         if (
             criteria.date_basis == "announcement"
             and criteria.date_from
-            and previous < utc_datetime(criteria.date_from)
+            and previous < source_date(criteria.date_from)
         ):
             return
         next_offset = _next_offset(payload, offset, len(rows))

@@ -18,7 +18,7 @@ from reportagent.sources.base import (
     usable_full_text,
 )
 from reportagent.utils.topic_expansion import expand_topics
-from reportagent.sources.date_window import in_date_window, utc_datetime
+from reportagent.sources.date_window import in_date_window, source_date
 from reportagent.sources import content_fetch
 
 logger = logging.getLogger(__name__)
@@ -182,13 +182,16 @@ class ArxivSource(BaseSource):
                 # The API supports submittedDate (GMT), not updatedDate. Apply the
                 # range before paging so older windows aren't hidden by newest N.
                 start = (
-                    utc_datetime(criteria.date_from).strftime("%Y%m%d%H%M")
+                    source_date(criteria.date_from).strftime("%Y%m%d") + "0000"
                     if criteria.date_from
                     else "199101010000"
                 )
-                end = utc_datetime(
-                    criteria.date_to or datetime.now(timezone.utc)
-                ).strftime("%Y%m%d%H%M")
+                end = (
+                    source_date(
+                        criteria.date_to or datetime.now(timezone.utc)
+                    ).strftime("%Y%m%d")
+                    + "2359"
+                )
                 query = f"({query}) AND submittedDate:[{start} TO {end}]"
             results = await asyncio.wait_for(
                 asyncio.to_thread(
@@ -513,7 +516,7 @@ class ArxivSource(BaseSource):
             source_url=values["id"],
             arxiv_id=values["id"].split("/abs/", 1)[1],
             doi=entry.findtext(arxiv_ns + "doi"),
-            published_date=utc_datetime(published),
+            published_date=published.date(),
             raw_metadata={
                 "updated_date": updated.isoformat(),
                 "categories": [

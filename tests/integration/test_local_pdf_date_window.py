@@ -1,7 +1,7 @@
 """Local collection applies the same inclusive UTC date window as web sources."""
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import fitz
 import pytest
@@ -58,7 +58,7 @@ def write_pdf(path, date_label):
         (
             "Published: 2026-01-01",
             datetime(2026, 1, 1, 8, tzinfo=timezone(timedelta(hours=8))),
-            datetime(2025, 12, 31, 16, tzinfo=timezone(timedelta(hours=-8))),
+            datetime(2026, 1, 1, 16, tzinfo=timezone(timedelta(hours=-8))),
             True,
         ),
         ("", datetime(2026, 1, 1), None, False),
@@ -103,6 +103,6 @@ def test_date_rejections_do_not_consume_result_limit_or_ignore_override(tmp_path
         )
     )
 
-    assert [row.published_date for row in results] == [datetime(2026, 3, 1)]
+    assert [row.published_date for row in results] == [date(2026, 3, 1)]
     assert source.last_search.fetched == 2
     assert source.last_search.successful_requests == 2

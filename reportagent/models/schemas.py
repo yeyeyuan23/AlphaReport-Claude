@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date
 from enum import Enum
 from typing import Optional, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class Market(str, Enum):
@@ -63,14 +63,25 @@ class UserCriteria(BaseModel):
         ],
     )
     keywords: list[str] = Field(default_factory=list)
-    date_from: Optional[datetime] = None
-    date_to: Optional[datetime] = None
+    date_from: Optional[date] = None
+    date_to: Optional[date] = None
     max_results_per_source: int | None = Field(default=20, ge=1, le=100)
     date_basis: Literal["publication", "announcement"] = "publication"
-    date_to_exclusive: bool = False
     journals: list[str] = Field(default_factory=list)
     brokers: list[str] = Field(default_factory=list)
     local_pdf_path: Optional[str] = None
+
+    @field_validator("date_from", "date_to", mode="before")
+    @classmethod
+    def calendar_date(cls, value):
+        from reportagent.sources.date_window import source_date
+
+        if value is None:
+            return None
+        day = source_date(value)
+        if day is None:
+            raise ValueError("Expected a source calendar date (YYYY-MM-DD)")
+        return day
 
 
 class SearchResult(BaseModel):
@@ -83,12 +94,23 @@ class SearchResult(BaseModel):
     source_url: Optional[str] = None
     doi: Optional[str] = None
     arxiv_id: Optional[str] = None
-    published_date: Optional[datetime] = None
-    announced_at: Optional[datetime] = None
+    published_date: Optional[date] = None
     pdf_path: Optional[str] = None
     raw_metadata: dict = Field(default_factory=dict)
     tables_json: Optional[str] = None
     equations_json: Optional[str] = None
+
+    @field_validator("published_date", mode="before")
+    @classmethod
+    def calendar_date(cls, value):
+        from reportagent.sources.date_window import source_date
+
+        if value is None:
+            return None
+        day = source_date(value)
+        if day is None:
+            raise ValueError("Expected a source calendar date (YYYY-MM-DD)")
+        return day
 
 
 class ClassificationResult(BaseModel):

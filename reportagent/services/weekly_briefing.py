@@ -95,7 +95,7 @@ def render_weekly_briefing(
     focus = [p for p in reviewed if _evaluation(p).get("tier") == "focus"]
     overview = f"本周收录 {len(papers)} 篇，已完成全文评估 {len(reviewed)} 篇，重点推荐 {len(focus)} 篇。"
     if publication_window:
-        overview = f"公开发布时间范围：{publication_window}\n\n{overview}"
+        overview = f"来源日期范围：{publication_window}\n\n{overview}"
     sources = Counter(p.get("source") or "未知来源" for p in papers)
     coverage = (
         "、".join(f"{source} {count} 篇" for source, count in sorted(sources.items()))

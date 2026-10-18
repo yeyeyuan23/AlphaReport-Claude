@@ -77,15 +77,17 @@ async def _category_announcements(http, category, days, diagnostics):
     diagnostics.successful_requests += 1
     entries = []
     for day in days:
-        if day < batches[-1].day or day > batches[0].day:
+        batch = next((b for b in batches if b.day == day), None)
+        if batch is None and (
+            day < batches[-1].day or (day > batches[0].day and day.weekday() < 5)
+        ):
             diagnostics.record_error(
                 SourceParseError(
-                    "requested announcement day outside available recent lists; coverage incomplete"
+                    "requested announcement date unavailable in recent lists; coverage incomplete"
                 ),
                 f"announcements {category}",
             )
             continue
-        batch = next((b for b in batches if b.day == day), None)
         if batch and batch.count:
             try:
                 entries.extend(
@@ -180,7 +182,9 @@ async def fetch_announcements(
             decision = scope.match(categories, paper.title, paper.abstract)
             if not decision:
                 continue
-            paper.raw_metadata["announcement_info"]["listed_categories"] = categories
+            paper.raw_metadata["publication_date_info"]["listed_categories"] = (
+                categories
+            )
             paper.raw_metadata["arxiv_search_scope"] = decision
             partial_results.append(paper)
             for category in categories:
@@ -263,17 +267,20 @@ def _with_announcement(paper, entry):
     identifier, batch, category, kind, url = entry
     return paper.model_copy(
         update={
-            "announced_at": batch.released_at,
+            "published_date": batch.day,
             "raw_metadata": {
                 **paper.raw_metadata,
-                "announcement_info": {
+                "publication_date_info": {
+                    "precision": "day",
+                    "year": batch.day.year,
+                    "month": batch.day.month,
+                    "day": batch.day.day,
+                    "evidence": batch.day.isoformat(),
                     "source": "arxiv_dated_listing",
                     "listing_date": batch.day.isoformat(),
                     "category": category,
                     "announce_type": kind,
                     "listing_url": url,
-                    "release_rule": "previous calendar day 20:00 America/New_York",
-                    "schedule_url": "https://info.arxiv.org/help/availability.html#announcement-schedule",
                     "metadata_version": paper.arxiv_id,
                     "source_id": identifier,
                 },

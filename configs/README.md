@@ -15,7 +15,7 @@
 
 `llm.thinking` 控制 Python Anthropic 兼容请求的思考模式；当前 DeepSeek 结构化流程设为
 `disabled`，避免分类预算被思考内容耗尽。单次调用可显式覆盖；OpenAI 路径不传此参数。
-`daily_collection.enabled` 和 `daily_report.enabled` 默认分别开启，调度器由 Web 后端承载；单独启动飞书机器人不会启动调度器。默认每天北京时间 08:00 多来源采集入库，09:00 从论文库生成日报，周末也执行。两项开关独立，`schedule_cron` 为 `HH:MM`。自动采集与日报共用报告当天北京时间 08:00 前 24 小时的公告窗口，`max_results_per_source=None` 表示完整枚举；不再配置候选数量或独立3天回查窗口。周报查询同一截止点前 168 小时的库中公告。均包含起点、不含截止点，与入库时间无关；修改任务执行时间不会自动改变 08:00 报告截止点。在线报告按独立持久化的 `announced_at` 筛选，原始 `published_date` 不改写；缺少精确公告时间的来源提示证据不足。arXiv RSS 仅有最近批次，过期或无法覆盖所需窗口时记录部分完成。日/周报不调用采集，不记录逐篇已推送标记。
+`daily_collection.enabled` 和 `daily_report.enabled` 默认分别开启，调度器由 Web 后端承载；单独启动飞书机器人不会启动调度器。默认每天北京时间 08:00 多来源采集入库，09:00 从论文库生成日报，周末也执行。两项开关独立，`schedule_cron` 为 `HH:MM`。自动采集与日报共用昨天至今天的来源日期范围，包含起止日期；相邻日报可能包含同一日期的资料。周报查询含今天在内最近七个日期的库中资料。`max_results_per_source=None` 表示完整枚举；不再配置候选数量或独立3天回查窗口。统一按 `published_date` 筛选，保留来源原始日期，不补具体时刻或按时区挪动日期；任务执行时刻与日期筛选独立。arXiv 根据官方带日期的列表查询各批次，东方财富使用 `publishDate` 的日期，BigQuant 使用 `publishedAt` 的日期。缺少可靠来源日期的条目记录证据不足。日/周报不调用采集，不记录逐篇已推送标记。
 
 `weekly_report` 与上述两项调度独立，默认 `enabled: true`、`day_of_week: "fri"`、
 `schedule_cron: "09:00"`、`timezone: "Asia/Shanghai"`，即每周五北京时间 09:00 从库中生成并推送周报。

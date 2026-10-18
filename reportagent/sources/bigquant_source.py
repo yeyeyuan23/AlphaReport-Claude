@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime
 import json
 import logging
 from pathlib import Path
 import re
 from typing import Optional
 from urllib.parse import urljoin, urlsplit
-from zoneinfo import ZoneInfo
 
 import httpx
 from bs4 import BeautifulSoup
@@ -40,7 +39,7 @@ AUTHOR_PATTERN = re.compile(r"由(.+?)创建")
 DATE_TEXT = r"\d{4}\s*(?:年|[-/])\s*\d{1,2}\s*(?:月|[-/])\s*\d{1,2}\s*日?"
 
 
-def _parse_publication_date(value) -> Optional[datetime]:
+def _parse_publication_date(value) -> Optional[date]:
     if not isinstance(value, str):
         return None
     value = value.strip()
@@ -49,12 +48,7 @@ def _parse_publication_date(value) -> Optional[datetime]:
             stamp = datetime(*(int(n) for n in re.findall(r"\d+", value)))
         else:
             stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        # SQLite stores naive datetimes; normalize explicit offsets before saving.
-        return (
-            stamp.astimezone(timezone.utc).replace(tzinfo=None)
-            if stamp.tzinfo
-            else stamp
-        )
+        return stamp.date()
     except ValueError:
         return None
 
@@ -66,26 +60,11 @@ def _publication_date(
     *,
     own_page_only: bool = False,
     evidence: dict | None = None,
-) -> tuple[Optional[datetime], Optional[str]]:
+) -> tuple[Optional[date], Optional[str]]:
     """Read original-report evidence, or explicitly the source page's own date."""
 
     def parse(value):
-        if not own_page_only:
-            return _parse_publication_date(value)
-        if not isinstance(value, str):
-            return None
-        try:
-            value = value.strip()
-            # Date-only evidence remains a publication date; it does not
-            # establish when this source announced the page during that day.
-            if not re.match(r"^\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}", value):
-                return None
-            stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            if stamp.tzinfo is None:
-                stamp = stamp.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
-            return stamp.astimezone(timezone.utc)
-        except ValueError:
-            return None
+        return _parse_publication_date(value)
 
     text = article.get_text(" ", strip=True) if article and not own_page_only else ""
     text = re.split(r"参考文献|引用文献|\bReferences\b", text, maxsplit=1, flags=re.I)[
@@ -317,7 +296,6 @@ class BigQuantSource(BaseSource):
         links = self._catalog_links(raw, soup, url)
         text = self._catalog_text(raw)
         abstract = extract_paper_sections(text or "")["abstract"] or text
-        original, date_source = _publication_date(soup, soup, url)
         if not abstract and not links:
             raise SourceParseError(
                 "catalog document has no research text or public PDF"
@@ -329,15 +307,14 @@ class BigQuantSource(BaseSource):
             abstract=abstract,
             full_text=text if usable_full_text(text) else None,
             abstract_only=bool(links) or not usable_full_text(text),
-            published_date=original,
-            announced_at=stamp,
+            published_date=stamp,
             raw_metadata={
                 "doc_path": f"/wiki/doc/{slug}",
                 "source_item_id": row["id"],
                 "pdf_link": links[0] if links else None,
                 "pdf_links": links,
-                "published_date_source": date_source,
-                "announcement_info": {
+                "publication_date_info": {
+                    "precision": "day",
                     "source": "bigquant_api:publishedAt",
                     "evidence": row["publishedAt"],
                 },
@@ -378,7 +355,6 @@ class BigQuantSource(BaseSource):
         date_from: Optional[datetime] = None,
         date_to: Optional[datetime] = None,
         date_basis: str = "publication",
-        date_to_exclusive: bool = False,
         download_pdfs: bool | None = None,
         pdf_directory: Path | None = None,
     ) -> Optional[SearchResult]:
@@ -408,28 +384,20 @@ class BigQuantSource(BaseSource):
         if not h1 or not title.strip() or not article:
             raise SourceParseError("unrecognized HTML article or missing title")
 
-        published_date, date_source = _publication_date(soup, article, url)
-        announcement_info = {"evidence": None}
-        announced_at, announcement_source = _publication_date(
-            soup, article, url, own_page_only=True, evidence=announcement_info
+        date_info = {"evidence": None}
+        published_date, date_source = _publication_date(
+            soup, article, url, own_page_only=True, evidence=date_info
         )
-        announcement_info["source"] = announcement_source
-        eligibility_date = (
-            announced_at if date_basis == "announcement" else published_date
+        date_info.update(
+            source=date_source, precision="day" if published_date else "unknown"
         )
-        if date_basis == "announcement" and announced_at is None:
+        if published_date is None and (date_from or date_to):
             self.last_search.record_error(
-                SourceParseError("announcement date unavailable"), "article date"
+                SourceParseError("publication date unavailable"), "article date"
             )
             return None
-        # Determine eligibility from page evidence before downloading attachments.
-        # With no date bounds, explicit single-report reads can still hydrate an
-        # undated paper; a dated collection must exclude unknown publication dates.
-        if not in_date_window(
-            eligibility_date, date_from, date_to, end_exclusive=date_to_exclusive
-        ):
+        if not in_date_window(published_date, date_from, date_to):
             return None
-
         text = article_text(article)
         abstract = (text[:1500] if text else None) or abstract
         links = pdf_links(article, url)
@@ -443,13 +411,12 @@ class BigQuantSource(BaseSource):
             source=SourceType.BIGQUANT,
             source_url=url,
             published_date=published_date,
-            announced_at=announced_at,
             raw_metadata={
                 "doc_path": doc_path,
                 "pdf_link": links[0] if links else None,
                 "pdf_links": links,
                 "published_date_source": date_source,
-                "announcement_info": announcement_info,
+                "publication_date_info": date_info,
                 "content_kind": "html" if text else "metadata_only",
                 "text_scope": "html_article" if text else "metadata_only",
             },

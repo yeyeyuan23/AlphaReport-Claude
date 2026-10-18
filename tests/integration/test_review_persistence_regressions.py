@@ -1,3 +1,4 @@
+from reportagent.sources.date_window import source_date
 import asyncio
 import json
 from unittest.mock import patch
@@ -266,7 +267,7 @@ def test_hydration_preserves_known_publication_date(library):
         results = asyncio.run(quality.review_report_ids([1]))
     assert results[1]["status"] == "reviewed"
     with library() as session:
-        assert session.get(Report, 1).published_date == known
+        assert session.get(Report, 1).published_date == source_date(known)
 
 
 def test_hydration_cannot_downgrade_an_existing_arxiv_revision(library):

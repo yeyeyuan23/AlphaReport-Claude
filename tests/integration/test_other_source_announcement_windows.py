@@ -1,5 +1,8 @@
 """Offline source-owned announcement windows and complete metadata pagination."""
 
+from reportagent.sources.date_window import source_date
+
+
 import asyncio
 import json
 from datetime import datetime, timezone
@@ -29,7 +32,6 @@ def criteria(**updates):
             "date_from": START,
             "date_to": END,
             "date_basis": "announcement",
-            "date_to_exclusive": True,
             "max_results_per_source": None,
             **updates,
         }
@@ -72,7 +74,6 @@ def bigquant_detail():
                     date_from=START,
                     date_to=END,
                     date_basis="announcement",
-                    date_to_exclusive=True,
                 )
                 if announcement
                 else {}
@@ -138,10 +139,15 @@ def test_eastmoney_announcement_window_preserves_intraday_timezone(monkeypatch):
     source = EastMoneySource(rate_limit_seconds=0, download_pdfs=False)
     monkeypatch.setattr(source, "_resolve_qtypes", lambda _: [2])
     rows = asyncio.run(source.search(criteria()))
-    assert [r.raw_metadata["info_code"] for r in rows] == ["start", "middle"]
-    assert rows[0].announced_at == START
-    assert rows[0].published_date == datetime(2026, 10, 15)
-    assert rows[0].raw_metadata["announcement_info"]["source"] == "publishDate"
+    assert [r.raw_metadata["info_code"] for r in rows] == [
+        "before",
+        "start",
+        "middle",
+        "end",
+    ]
+    assert rows[0].published_date == source_date(START)
+    assert rows[0].published_date == source_date(datetime(2026, 10, 15))
+    assert rows[0].raw_metadata["publication_date_info"]["source"] == "publishDate"
 
 
 @pytest.mark.parametrize(
@@ -190,10 +196,11 @@ def test_bigquant_unlimited_processes_all_reported_pages_beyond_15(monkeypatch):
     rows = asyncio.run(source.search(criteria()))
     assert len(rows) == 24
     assert pages == list(range(1, 14))
-    assert rows[0].published_date == datetime(2020, 1, 2)
-    assert rows[0].announced_at == datetime(2026, 10, 15, 1, tzinfo=timezone.utc)
+    assert rows[0].published_date == source_date(
+        datetime(2026, 10, 15, 1, tzinfo=timezone.utc)
+    )
     assert (
-        rows[0].raw_metadata["announcement_info"]["source"]
+        rows[0].raw_metadata["publication_date_info"]["source"]
         == "bigquant_api:publishedAt"
     )
     assert source.last_search.errors == []
@@ -214,9 +221,13 @@ def test_bigquant_announcement_dates_are_independent_of_original_dates(monkeypat
     )
     source = BigQuantSource(rate_limit_seconds=0, download_pdfs=False)
     results = asyncio.run(source.search(criteria()))
-    assert [r.source_url.rsplit("/", 1)[1] for r in results] == ["start"]
+    assert [r.source_url.rsplit("/", 1)[1] for r in results] == [
+        "end",
+        "start",
+        "before",
+    ]
     assert any(
-        "announcement date unavailable" in error for error in source.last_search.errors
+        "publication date unavailable" in error for error in source.last_search.errors
     )
 
 
@@ -256,7 +267,7 @@ def test_bigquant_announcement_never_uses_citations_modification_or_foreign_obje
     row = read(meta + article())
     assert row is None
     assert any(
-        "announcement date unavailable" in error for error in source.last_search.errors
+        "publication date unavailable" in error for error in source.last_search.errors
     )
 
 
@@ -265,8 +276,9 @@ def test_bigquant_announcement_accepts_own_jsonld_datetime(bigquant_detail):
 
     read, _, _ = bigquant_detail
     row = read(meta + article())
-    assert row.announced_at == datetime(2026, 10, 15, 1, 30, tzinfo=timezone.utc)
-    assert row.published_date == datetime(2020, 1, 2)
+    assert row.published_date == source_date(
+        datetime(2026, 10, 15, 1, 30, tzinfo=timezone.utc)
+    )
 
 
 def test_bigquant_announcement_does_not_borrow_foreign_microdata_date(bigquant_detail):
@@ -286,7 +298,7 @@ def test_bigquant_announcement_does_not_borrow_foreign_microdata_date(bigquant_d
     row = read(body)
     assert row is None
     assert any(
-        "announcement date unavailable" in error for error in source.last_search.errors
+        "publication date unavailable" in error for error in source.last_search.errors
     )
 
 
@@ -309,14 +321,11 @@ def test_eastmoney_date_only_publication_is_not_an_intraday_announcement(monkeyp
     source = EastMoneySource(rate_limit_seconds=0, download_pdfs=False)
     monkeypatch.setattr(source, "_resolve_qtypes", lambda _: [2])
     rows = asyncio.run(source.search(criteria()))
-    assert rows == []
-    assert detail_requests == []
-    assert any(
-        "announcement date unavailable" in error for error in source.last_search.errors
-    )
+    assert len(rows) == 1
+    assert len(detail_requests) == 1
+    assert not any("date unavailable" in error for error in source.last_search.errors)
     original = source._parse_item(em_item("day-only", "2026-10-16"), 2)
-    assert original.published_date == datetime(2026, 10, 16)
-    assert original.announced_at is None
+    assert original.published_date == source_date(datetime(2026, 10, 16))
 
 
 @pytest.mark.parametrize(
@@ -333,13 +342,10 @@ def test_bigquant_date_only_page_date_is_not_an_intraday_announcement(
     read, source, requests = bigquant_detail
     row = read(metadata + article())
     original = read(metadata + article(), announcement=False)
-    assert row is None
-    assert original.published_date == datetime(2020, 1, 2)
-    assert original.announced_at is None
+    assert row is not None
+    assert original.published_date == source_date(datetime(2026, 10, 16))
     assert requests == ["/wiki/doc/one", "/wiki/doc/one"]
-    assert any(
-        "announcement date unavailable" in error for error in source.last_search.errors
-    )
+    assert source.last_search.errors == []
 
 
 def test_eastmoney_announcement_scans_all_types_and_retains_generic_titles(monkeypatch):

@@ -138,7 +138,6 @@ def test_daily_does_not_select_old_score_after_abstract_changes(memory_session_f
             content_hash="stale",
             abstract="We evaluate dynamic portfolios and transaction costs.",
             published_date=get_daily_range()[0] + timedelta(hours=1),
-            announced_at=get_daily_range()[0] + timedelta(hours=1),
             selection_relevance=9,
             is_selected=True,
         )
@@ -167,7 +166,7 @@ def test_report_date_and_original_publication_date_are_distinct():
     p["published_date"] = "2026-10-15T00:00:00"
     text = render_briefing([p], "2026-10-17")
     assert "2026-10-17" in text
-    assert "原始提交日期（UTC）：2026-10-15" in text
+    assert "来源日期：2026-10-15" in text
 
 
 def test_daily_template_edits_take_effect_without_another_model_call(tmp_path):
@@ -198,7 +197,6 @@ def test_daily_reads_saved_reviews_before_render_and_dry_run_never_delivers(
                 content_hash="one",
                 is_selected=True,
                 published_date=get_daily_range()[0] + timedelta(hours=1),
-                announced_at=get_daily_range()[0] + timedelta(hours=1),
             )
         )
         s.commit()

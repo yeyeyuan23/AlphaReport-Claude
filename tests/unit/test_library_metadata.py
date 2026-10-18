@@ -1,3 +1,4 @@
+from reportagent.sources.date_window import source_date
 import json
 from datetime import datetime
 from unittest.mock import patch
@@ -91,7 +92,7 @@ def test_repository_persists_material_metadata_without_changing_source(factory):
         assert row.source == "local_pdf"
         assert getattr(row, "material_type", None) == "broker"
         assert json.loads(row.material_type_info_json)["evidence"] == "证券研究报告"
-        assert row.published_date == datetime(2024, 2, 3)
+        assert row.published_date == source_date(datetime(2024, 2, 3))
 
 
 def test_inconclusive_reimport_preserves_supported_date_and_material_type(factory):
@@ -119,7 +120,7 @@ def test_inconclusive_reimport_preserves_supported_date_and_material_type(factor
         _, rid = repo.upsert_report(first)
         repo.upsert_report(incoming())
         row = session.get(Report, rid)
-        assert row.published_date == datetime(2024, 2, 3)
+        assert row.published_date == source_date(datetime(2024, 2, 3))
         assert getattr(row, "material_type", None) == "academic"
 
 
@@ -193,7 +194,7 @@ def test_legacy_creation_date_is_removed_but_unproven_existing_date_is_preserved
         row.publication_date_info_json = None
         session.commit()
         repo.upsert_report(incoming())
-        assert row.published_date == datetime(2024, 2, 3)
+        assert row.published_date == source_date(datetime(2024, 2, 3))
 
 
 @pytest.mark.parametrize("previous_version", [None, 1])
@@ -280,7 +281,7 @@ def test_old_unchanged_pdf_gets_metadata_once_without_model_calls(
     with factory() as session:
         row = session.query(Report).one()
         assert row.material_type == "broker"
-        assert row.published_date == datetime(2024, 2, 3)
+        assert row.published_date == source_date(datetime(2024, 2, 3))
         assert row.abstract == "Original abstract"
         assert row.classification_method == "llm"
     assert run()["unchanged"] == 1
@@ -401,7 +402,7 @@ def test_refining_partial_date_requires_compatible_year_and_month(
             )
         )
         row = session.get(Report, rid)
-        assert row.published_date == (new_date if accepted else None)
+        assert row.published_date == (source_date(new_date) if accepted else None)
         assert json.loads(row.publication_date_info_json)["year"] == 2023
 
 
@@ -508,7 +509,10 @@ def test_metadata_upgrade_does_not_overwrite_concurrently_committed_metadata(
         )
         with factory() as session:
             row = session.get(Report, report_id)
-            assert (row.published_date, row.material_type) == expected
+            assert (row.published_date, row.material_type) == (
+                source_date(expected[0]),
+                expected[1],
+            )
     finally:
         engine.dispose()
 
@@ -574,7 +578,7 @@ def test_explicit_date_repairs_stored_citation_year_on_the_same_record(factory, 
         row = session.get(Report, rid)
         assert (action, same_id) == ("updated", rid)
         assert session.query(Report).count() == 1
-        assert row.published_date == datetime(2026, 10, 16)
+        assert row.published_date == source_date(datetime(2026, 10, 16))
         assert json.loads(row.publication_date_info_json) == {
             "precision": "day",
             "year": 2026,
@@ -589,7 +593,7 @@ def test_explicit_date_repairs_stored_citation_year_on_the_same_record(factory, 
         saved_info = row.publication_date_info_json
         repo.upsert_report(incoming())
         session.expire_all()
-        assert row.published_date == datetime(2026, 10, 16)
+        assert row.published_date == source_date(datetime(2026, 10, 16))
         assert row.publication_date_info_json == saved_info
 
 
