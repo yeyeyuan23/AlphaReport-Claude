@@ -22,6 +22,23 @@
 
 `acceptance/` 用于单独的真实材料验收，不纳入默认 pytest。人工需要对照原文检查研究问题、方法与结论是否准确，证据是否支持主张，局限是否具体，阅读建议是否有用，并比较学术论文、券商研报与社区文章的差异。查看完整分析和最终简报，不能只看状态、分数或引文匹配。真实发送需另行显式授权。
 
+## 本地检查与 CI
+
+完整开发检查从仓库根目录执行：
+
+```bash
+.venv/bin/python -m pip install -r requirements/test.txt -r requirements/lint.txt
+.venv/bin/python -m ruff format --check .
+.venv/bin/python -m ruff check .
+.venv/bin/python -m pytest -q
+bash -n start.sh deploy/deploy.sh scripts/ops/*.sh
+(cd frontend && npm ci && npm run format:check && npm run lint && npm test && npm run build)
+```
+
+GitHub Actions 在推送、PR 或手动触发时执行同一组检查，使用 Python 3.12 和 Node 22；
+不发布网站，不需要模型或飞书密钥。测试不能依赖本机额外安装的可选 SDK。
+格式、静态检查、离线测试和构建通过，不代表真实来源覆盖或研究结论已验收。
+
 ## 显式执行真实验收
 
 从仓库根目录运行，下列命令使用当前 `.env` 与实际研报库，会联网、调用模型并更新资料。每次验收换一个目录；目录首次使用时保存 `before.sqlite` 备份。结果、分类、评分、完整分析、提取文本与周报预览都留在该目录，不提交 Git。脚本始终只预览，不发送飞书消息。

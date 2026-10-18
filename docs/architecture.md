@@ -38,6 +38,15 @@ WebSocket 和 HTTP inbox 只提取消息字段，交给 `handle_incoming_message
 该设计不改造 HTTP inbox 消费机制、不协调多个机器人进程，也不取消已运行的子进程；
 外部操作与本地完成记录之间的崩溃窗口不具备全局恰好一次保证。
 
+### 可选 HTTP 接入
+
+默认使用 WebSocket。备用 HTTP 接入需在 `.env` 设置
+`FEISHU_HTTP_CALLBACK_ENABLED=true`、真实的 `FEISHU_VERIFICATION_TOKEN`，
+以及独立的 `FEISHU_INBOX_TOKEN`。
+`POST /api/v1/feishu/callback` 校验令牌和发送者，URL challenge 同样校验令牌；
+仅支持未加密 JSON。机器人通过独立 Bearer 凭据调用
+`POST /api/v1/feishu/inbox`，消费按消息 ID 去重的 SQLite 队列。
+
 ## 配置、技能与实现的边界
 
 | 位置 | 管理的内容 |
@@ -96,7 +105,7 @@ arXiv 公告模式由 `arxiv_catalog` 解析官网 `/list/<category>/recent` 的
   仍不足则标为待补，不提前下载 PDF。返回整体 `status`、逐源 `source_statuses` 和入库统计，
   区分空结果、失败和部分成功。`local_pdf_import` 在启动时增量导入整个配置目录，
   共用分类与 repository，使用文件指纹和进程锁避免重复导入；元数据版本变化时对未变文件只复查日期/类型，不重新分类。日期未知或仅明确到年/月时不具备日/周报资格，不影响保留在库中；日期精度和证据、材料类型分别持久化，类型不等于来源；与手动采集共用不区分 PDF 扩展名大小写、只返回文件的目录扫描。
-  单篇保存和报告补全文同样遵守 repository 的日期、版本及派生状态合并规则；
+  单篇保存和采集材料更新同样遵守 repository 的日期、版本及派生状态合并规则；
   仅补材料且分类输入不变时保留当前分类与标签，不能用全文关键词重写摘要分类。
   导入与批量重分类共用分类材料解析：优先完整摘要，缺摘要时只读标明的 Introduction；
   从正文提取的 Introduction 参与输入指纹和并发保护。
@@ -251,5 +260,5 @@ Web 中三项定时任务独立配置：`daily_collection` 默认每天北京时
 空研报 ID、多候选与参数错误须明确处理，不能默默选择第一项；单条入库失败须先回滚再处理后续记录。
 干净 checkout 缺少 `frontend/dist/` 时应能导入应用和运行后端测试。
 
-检查命令见 [README](../README.md#维护与排查)，离线测试和真实材料验收的分工见
-[tests/README.md](../tests/README.md)。前端构建与 lint、程序正确性与研究内容质量分别验证。
+检查命令及离线测试与真实材料验收的分工见 [tests/README.md](../tests/README.md)。
+前端构建与 lint、程序正确性与研究内容质量分别验证。
