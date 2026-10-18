@@ -12,6 +12,47 @@ from reportagent.llm import diagnostics
 
 
 @pytest.mark.parametrize("provider", ["anthropic", "openai"])
+def test_default_output_budget_reaches_provider_request(monkeypatch, provider):
+    import copy
+    from reportagent.utils import config
+
+    settings = copy.deepcopy(config.load_config())
+    settings["llm"]["default_max_output_tokens"] = 987
+    monkeypatch.setattr(config, "load_config", lambda: settings)
+    requests = []
+
+    async def create(**kwargs):
+        requests.append(kwargs)
+        return SimpleNamespace(
+            model="fixture",
+            stop_reason="end_turn",
+            content=[SimpleNamespace(type="text", text="Complete answer")],
+            choices=[
+                SimpleNamespace(
+                    finish_reason="stop",
+                    message=SimpleNamespace(content="Complete answer"),
+                )
+            ],
+            usage=SimpleNamespace(
+                input_tokens=1, output_tokens=1, prompt_tokens=1, completion_tokens=1
+            ),
+        )
+
+    client = LLMClient.__new__(LLMClient)
+    client.provider, client.model, client.thinking = provider, "fixture", None
+    client.calls = []
+    client._client = SimpleNamespace(
+        messages=SimpleNamespace(create=create),
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+    )
+    assert (
+        asyncio.run(client.chat([{"role": "user", "content": "Read"}]))
+        == "Complete answer"
+    )
+    assert requests[0]["max_tokens"] == 987
+
+
+@pytest.mark.parametrize("provider", ["anthropic", "openai"])
 @pytest.mark.parametrize("valid", [True, False])
 def test_full_response_and_exact_parser_input_are_saved(
     tmp_path, monkeypatch, provider, valid

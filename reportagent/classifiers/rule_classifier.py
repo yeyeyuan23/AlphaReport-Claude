@@ -21,7 +21,7 @@ _MATCH_THRESHOLD = 0.3
 
 class RuleClassifier:
     def classify(self, title: str, text: str) -> ClassificationResult:
-        search_text = (title + " " + text[:3000]).lower()
+        search_text = (title + " " + text).lower()
 
         all_scores: dict[str, dict[str, float]] = {}
         matched_values: dict[str, list] = {}

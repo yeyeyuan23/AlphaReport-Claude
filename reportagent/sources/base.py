@@ -47,8 +47,21 @@ class SearchDiagnostics:
 
 
 def usable_full_text(text: str | None) -> bool:
-    """Reject empty/HTML error payloads; content coverage is assessed downstream."""
-    if not text or len(text.strip()) < 100:
+    """Reject absent material and error pages, without judging by character count."""
+    if not text or not text.strip():
+        return False
+    if text.strip().casefold().rstrip("。.!！") in {
+        "未提供摘要",
+        "暂无摘要",
+        "无摘要",
+        "摘要缺失",
+        "未提供全文",
+        "全文缺失",
+        "no abstract",
+        "abstract unavailable",
+        "abstract not provided",
+        "n/a",
+    }:
         return False
     return not re.search(r"<(?:!doctype\s+html|html|body)\b", text[:1000], re.I)
 

@@ -20,13 +20,18 @@ from reportagent.sources.base import (
 )
 from reportagent.sources.date_window import candidate_in_window, source_date
 from reportagent.sources.content_fetch import (
-    MAX_HTML_BYTES,
     article_text,
     bounded_download,
     hydrate_pdf,
     pdf_links,
 )
 from reportagent.utils.topic_expansion import expand_topics
+from reportagent.processors.paper_sections import research_excerpt
+
+from reportagent.utils.runtime_limits import (
+    metadata_max_bytes,
+    metadata_timeout_seconds,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +149,6 @@ AMBIGUOUS_TERMS = {"量化", "quant", "alpha", "因子"}
 LIST_API = "https://reportapi.eastmoney.com/report/list"
 DETAIL_BASE = "https://data.eastmoney.com/report/info/{info_code}.html"
 
-FETCH_PAGES_PER_QTYPE = 8
 FETCH_PAGE_SIZE = 100
 
 
@@ -167,7 +171,7 @@ class EastMoneySource(BaseSource):
 
         all_results: list[SearchResult] = []
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=metadata_timeout_seconds()) as client:
             for qt in q_types:
                 try:
                     results = await self._fetch_reports(
@@ -175,9 +179,7 @@ class EastMoneySource(BaseSource):
                         qt,
                         date_from,
                         date_to,
-                        None
-                        if criteria.max_results_per_source is None
-                        else FETCH_PAGE_SIZE * FETCH_PAGES_PER_QTYPE,
+                        None,
                     )
                     all_results.extend(results)
                     await asyncio.sleep(self.rate_limit_seconds)
@@ -209,7 +211,9 @@ class EastMoneySource(BaseSource):
             len(filtered),
         )
         selected = filtered[: criteria.max_results_per_source]
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=metadata_timeout_seconds(), follow_redirects=True
+        ) as client:
             for index, result in enumerate(selected):
                 try:
                     selected[index] = await self._fetch_detail(client, result)
@@ -224,7 +228,9 @@ class EastMoneySource(BaseSource):
         pdf_directory: Path | None = None,
     ) -> SearchResult:
         """Fetch public research evidence without models or database writes."""
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=metadata_timeout_seconds(), follow_redirects=True
+        ) as client:
             links = result.raw_metadata.get("pdf_links") or []
             if not links and result.raw_metadata.get("pdf_link"):
                 links = [result.raw_metadata["pdf_link"]]
@@ -246,7 +252,7 @@ class EastMoneySource(BaseSource):
     ) -> SearchResult:
         if not result.source_url:
             raise SourceParseError("missing report detail URL")
-        data = await bounded_download(client, result.source_url, MAX_HTML_BYTES)
+        data = await bounded_download(client, result.source_url, metadata_max_bytes())
         soup = BeautifulSoup(data, "html.parser")
         article = soup.select_one(
             ".ctx-content, .newsContent, .news-content, .report-content, article"
@@ -254,7 +260,7 @@ class EastMoneySource(BaseSource):
         text = article_text(article)
         links = pdf_links(soup, result.source_url)
         updates = {
-            "abstract": text[:1500] if text else None,
+            "abstract": research_excerpt(text) or result.abstract,
             "raw_metadata": {
                 **result.raw_metadata,
                 "content_kind": "html" if text else "metadata_only",
@@ -340,15 +346,6 @@ class EastMoneySource(BaseSource):
         page_size = (
             min(max_results, FETCH_PAGE_SIZE) if max_results else FETCH_PAGE_SIZE
         )
-        page_cap = (
-            None
-            if max_results is None
-            else min(
-                (max_results + page_size - 1) // page_size,
-                FETCH_PAGES_PER_QTYPE,
-            )
-        )
-
         page_no = 1
         seen_codes: set[str] = set()
         seen_pages: set[bytes] = set()
@@ -452,13 +449,6 @@ class EastMoneySource(BaseSource):
                 return results[:max_results]
             if not items or page_no >= expected_pages:
                 break
-            if page_cap is not None and page_no >= page_cap:
-                self.last_search.record_error(
-                    SourceParseError("pagination stopped at configured page limit"),
-                    f"qType {q_type} page {page_no}",
-                )
-                break
-
             await asyncio.sleep(self.rate_limit_seconds)
             page_no += 1
 

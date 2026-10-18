@@ -20,6 +20,7 @@ from reportagent.sources.base import (
 from reportagent.utils.topic_expansion import expand_topics
 from reportagent.sources.date_window import in_date_window, source_date
 from reportagent.sources import content_fetch
+from reportagent.utils.runtime_limits import metadata_timeout_seconds, positive_setting
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +203,9 @@ class ArxivSource(BaseSource):
                     partial_results=partial_results,
                     stop=stop,
                 ),
-                timeout=120,
+                timeout=positive_setting(
+                    "collection", "metadata", "search_timeout_seconds", default=120
+                ),
             )
         except Exception as error:
             stop.set()
@@ -233,7 +236,7 @@ class ArxivSource(BaseSource):
         import httpx
 
         updated = []
-        timeout = httpx.Timeout(connect=15.0, read=30.0, write=10.0, pool=5.0)
+        timeout = metadata_timeout_seconds()
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
             for r in results:
                 pdf_url = r.raw_metadata.get("pdf_url")
@@ -414,7 +417,9 @@ class ArxivSource(BaseSource):
         offset = 0
         # Parse actual responses here: the SDK silently skips some malformed entries
         # but raises on others, losing their valid siblings and hiding raw counts.
-        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+        with httpx.Client(
+            timeout=metadata_timeout_seconds(), follow_redirects=True
+        ) as client:
             while (max_results is None or offset < max_results) and not stop.is_set():
                 try:
                     response = client.get(

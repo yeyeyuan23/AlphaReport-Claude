@@ -47,7 +47,7 @@ class CollectionOptions:
     topics: str
     sources: str = "arxiv,eastmoney,bigquant"
     keywords: str = ""
-    max_results: int = 20
+    max_results: int | None = None
     days: int = 60
     date_from: str | None = None
     date_to: str | None = None

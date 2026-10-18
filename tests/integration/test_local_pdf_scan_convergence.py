@@ -42,7 +42,9 @@ def test_startup_and_source_search_share_uppercase_and_nested_pdf_inventory(
 
     monkeypatch.setattr(LocalPDFSource, "_process_pdf", process)
     results = asyncio.run(
-        LocalPDFSource(str(tmp_path)).search(UserCriteria(topics=["portfolio"]))
+        LocalPDFSource(str(tmp_path)).search(
+            UserCriteria(topics=["portfolio"], max_results_per_source=None)
+        )
     )
     assert set(observed) == set(paths)
     assert len(results) == 2

@@ -267,7 +267,7 @@ def compute_quant_score(
     Uses stem-based matching: keyword stems like 'predict' match 'prediction',
     'predictive', 'predicting' etc.
     """
-    text = f"{title} {abstract}"[:8000].lower()
+    text = f"{title} {abstract}".lower()
     cat_scores: dict[str, float] = {}
 
     for cat, stems in QUANT_SIGNALS.items():
@@ -366,7 +366,7 @@ async def is_quant_finance_llm(
             "- 金融监管政策、法律合规（纯定性研究）\n"
             "- 纯宏观经济评论（不用定量方法）\n\n"
             f"标题：{title}\n\n"
-            f"摘要：{abstract[:1500]}\n\n"
+            f"摘要：{abstract}\n\n"
             '返回 JSON: {{"is_quant": true/false, "reason": "一句话理由"}}'
         )
         client = LLMClient()

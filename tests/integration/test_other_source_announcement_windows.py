@@ -462,7 +462,7 @@ def test_eastmoney_parse_failure_with_duplicate_sibling_does_not_end_pagination(
     [
         (False, None, [1, 2, 3], None),
         (True, None, [1, 2], "progress"),
-        (False, 100, [1], "configured page limit"),
+        (False, 100, [1, 2, 3], None),
     ],
 )
 def test_eastmoney_unparseable_pages_retain_exhaustion_and_loop_guards(
@@ -499,3 +499,51 @@ def test_eastmoney_unparseable_pages_retain_exhaustion_and_loop_guards(
         assert any(reason in error for error in source.last_search.errors)
     else:
         assert len(source.last_search.errors) == len(requests)
+
+
+def test_manual_search_finds_relevant_item_after_eight_pages(monkeypatch):
+    requested = []
+
+    def respond(request):
+        if "report/list" not in request.url.path:
+            return httpx.Response(
+                200, text="<article>Portfolio optimization research.</article>"
+            )
+        page = int(request.url.params["pageNo"])
+        requested.append(page)
+        return httpx.Response(
+            200,
+            json={
+                "data": [
+                    {
+                        "title": "Portfolio optimization"
+                        if page == 9
+                        else f"Unrelated item {page}",
+                        "infoCode": f"REPORT{page}",
+                        "publishDate": "2026-10-17",
+                    }
+                ],
+                "TotalPage": 9,
+            },
+        )
+
+    client_type = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda **kwargs: client_type(transport=httpx.MockTransport(respond), **kwargs),
+    )
+    source = EastMoneySource(rate_limit_seconds=0, download_pdfs=False)
+    monkeypatch.setattr(source, "_resolve_qtypes", lambda _: [2])
+    rows = asyncio.run(
+        source.search(
+            UserCriteria(
+                topics=["portfolio"],
+                date_from="2026-10-17",
+                date_to="2026-10-17",
+                max_results_per_source=101,
+            )
+        )
+    )
+    assert requested == list(range(1, 10))
+    assert [row.title for row in rows] == ["Portfolio optimization"]

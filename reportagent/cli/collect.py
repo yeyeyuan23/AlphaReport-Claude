@@ -25,9 +25,9 @@ def main():
     parser.add_argument(
         "--max",
         type=int,
-        default=20,
+        default=None,
         dest="max_results",
-        help="Max results per source (default: 20)",
+        help="Optional positive result budget per source (default: unlimited)",
     )
     parser.add_argument(
         "--days",

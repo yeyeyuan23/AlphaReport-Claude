@@ -18,16 +18,20 @@ from reportagent.sources.date_window import (
     candidate_in_window,
     in_date_window,
 )
-from reportagent.processors.paper_sections import extract_paper_sections
+from reportagent.processors.paper_sections import research_excerpt
 from reportagent.sources.bigquant_catalog import discover_catalog
 from reportagent.sources.base import usable_full_text
 from reportagent.sources.content_fetch import (
-    MAX_HTML_BYTES,
     article_text,
     bounded_download,
     hydrate_pdf,
     meaningful_excerpt,
     pdf_links,
+)
+
+from reportagent.utils.runtime_limits import (
+    metadata_max_bytes,
+    metadata_timeout_seconds,
 )
 
 logger = logging.getLogger(__name__)
@@ -218,7 +222,9 @@ class BigQuantSource(BaseSource):
         pdf_directory: Path | None = None,
     ) -> SearchResult:
         """Re-fetch one public article's evidence without models or database access."""
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=metadata_timeout_seconds(), follow_redirects=True
+        ) as client:
             links = result.raw_metadata.get("pdf_links") or []
             if not links and result.raw_metadata.get("pdf_link"):
                 links = [result.raw_metadata["pdf_link"]]
@@ -242,7 +248,9 @@ class BigQuantSource(BaseSource):
             for t in expand_topics(criteria.topics, criteria.keywords, lang="all")
         ]
         results = []
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            timeout=metadata_timeout_seconds(), follow_redirects=True
+        ) as client:
             try:
                 async for row, stamp in discover_catalog(
                     client, criteria, self.last_search, self.rate_limit_seconds
@@ -295,7 +303,7 @@ class BigQuantSource(BaseSource):
         soup = BeautifulSoup(raw, "html.parser")
         links = self._catalog_links(raw, soup, url)
         text = self._catalog_text(raw)
-        abstract = extract_paper_sections(text or "")["abstract"] or text
+        abstract = research_excerpt(text)
         if not abstract and not links:
             raise SourceParseError(
                 "catalog document has no research text or public PDF"
@@ -359,7 +367,7 @@ class BigQuantSource(BaseSource):
         pdf_directory: Path | None = None,
     ) -> Optional[SearchResult]:
         url = f"{BASE_URL}{doc_path}" if doc_path.startswith("/") else doc_path
-        body = await bounded_download(client, url, MAX_HTML_BYTES)
+        body = await bounded_download(client, url, metadata_max_bytes())
         soup = BeautifulSoup(body, "html.parser")
 
         h1 = soup.find("h1")
@@ -399,7 +407,7 @@ class BigQuantSource(BaseSource):
         if not in_date_window(published_date, date_from, date_to):
             return None
         text = article_text(article)
-        abstract = (text[:1500] if text else None) or abstract
+        abstract = research_excerpt(text) or abstract
         links = pdf_links(article, url)
 
         result = SearchResult(

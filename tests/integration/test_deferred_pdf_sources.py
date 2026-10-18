@@ -1,6 +1,7 @@
 """Metadata discovery and explicit full-document reads remain separate offline."""
 
 import asyncio
+import sys
 from pathlib import Path
 
 import httpx
@@ -122,6 +123,61 @@ def public_source(kind, monkeypatch, **kwargs):
     source = EastMoneySource(rate_limit_seconds=0, **kwargs)
     monkeypatch.setattr(source, "_resolve_qtypes", lambda _: [2])
     return source
+
+
+@pytest.mark.parametrize("kind", ["eastmoney", "bigquant"])
+def test_relevance_material_keeps_evidence_beyond_old_prefix(
+    offline, monkeypatch, kind
+):
+    marker = "TAIL: net returns remain positive after transaction costs."
+    text = "Research setup and scope. " * 100 + marker
+    monkeypatch.setattr(sys.modules[__name__], "PREVIEW", text)
+    source = public_source(kind, monkeypatch, download_pdfs=False)
+    rows = asyncio.run(source.search(UserCriteria(topics=["portfolio"])))
+    assert marker in rows[0].abstract
+
+
+def test_fourth_pdf_attachment_is_tried_after_three_dead_links(offline):
+    requests, _, root = offline
+    links = [f"https://example.org/first.pdf?copy={i}" for i in range(3)]
+    links.append("https://example.org/second.pdf")
+    record = SearchResult(
+        title="Portfolio research",
+        source=SourceType.EASTMONEY,
+        abstract=PREVIEW,
+        raw_metadata={"pdf_links": links},
+    )
+    result = asyncio.run(EastMoneySource().hydrate_result(record))
+    assert not result.abstract_only
+    assert "Complete PDF evidence" in result.full_text
+    assert Path(result.pdf_path).parent == root / "pdfs"
+    assert any(request.url.path == "/second.pdf" for request in requests)
+
+
+def test_metadata_download_honours_configured_size_protection(monkeypatch):
+    import copy
+    from reportagent.utils import config
+    from reportagent.sources.base import SourceParseError
+
+    settings = copy.deepcopy(config.load_config())
+    settings["collection"]["metadata"] = {"max_size_mb": 100 / 1024 / 1024}
+    monkeypatch.setattr(config, "load_config", lambda: settings)
+    body = "<article>" + "Research evidence. " * 20 + "</article>"
+
+    async def read():
+        transport = httpx.MockTransport(lambda _: httpx.Response(200, text=body))
+        async with httpx.AsyncClient(transport=transport) as client:
+            return await EastMoneySource(download_pdfs=False)._fetch_detail(
+                client,
+                SearchResult(
+                    title="Research",
+                    source=SourceType.EASTMONEY,
+                    source_url="https://example.org/research",
+                ),
+            )
+
+    with pytest.raises(SourceParseError, match="size limit"):
+        asyncio.run(read())
 
 
 def is_pdf(request):

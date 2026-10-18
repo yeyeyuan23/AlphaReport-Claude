@@ -10,7 +10,7 @@ import httpx
 
 from reportagent.models.schemas import UserCriteria
 from reportagent.sources.base import SearchDiagnostics, SourceParseError
-from reportagent.sources.content_fetch import MAX_HTML_BYTES
+from reportagent.utils.runtime_limits import metadata_max_bytes
 from reportagent.sources.date_window import in_criteria_window, source_date
 
 API_URL = "https://bigquant.com/wiki/api"
@@ -21,7 +21,7 @@ PAGE_SIZE = 100  # HTTP page size, not an overall candidate or download quota.
 async def _request(client, endpoint, payload, diagnostics) -> dict:
     response = await client.post(f"{API_URL}/{endpoint}", json=payload)
     response.raise_for_status()
-    if len(response.content) > MAX_HTML_BYTES:
+    if len(response.content) > metadata_max_bytes():
         raise SourceParseError("catalog response exceeds metadata size limit")
     try:
         value = response.json()

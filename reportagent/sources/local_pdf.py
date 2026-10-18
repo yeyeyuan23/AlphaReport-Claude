@@ -97,7 +97,10 @@ class LocalPDFSource(BaseSource):
                 self.last_search.record_error(error, "PDF parse")
                 continue
 
-            if len(results) >= criteria.max_results_per_source:
+            if (
+                criteria.max_results_per_source is not None
+                and len(results) >= criteria.max_results_per_source
+            ):
                 break
 
         return results
@@ -172,7 +175,7 @@ class LocalPDFSource(BaseSource):
         if not in_date_window(meta.get("date"), criteria.date_from, criteria.date_to):
             return None
 
-        search_text = (meta.get("title", "") + " " + text[:3000]).lower()
+        search_text = (meta.get("title", "") + " " + text).lower()
 
         # Only filter if the user provided explicit keywords; topics alone
         # are English enum values that won't match Chinese PDF content.

@@ -65,7 +65,7 @@ class UserCriteria(BaseModel):
     keywords: list[str] = Field(default_factory=list)
     date_from: Optional[date] = None
     date_to: Optional[date] = None
-    max_results_per_source: int | None = Field(default=20, ge=1, le=100)
+    max_results_per_source: int | None = Field(default=None, ge=1)
     date_basis: Literal["publication", "announcement"] = "publication"
     journals: list[str] = Field(default_factory=list)
     brokers: list[str] = Field(default_factory=list)

@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from reportagent.llm.errors import context_window_error
+from reportagent.utils.runtime_limits import positive_setting, positive_number
 
 from reportagent.utils.config import (
     get_config,
@@ -44,7 +45,10 @@ class LLMClient:
     def _build_openai_client(self):
         from openai import AsyncOpenAI
 
-        kwargs: dict[str, Any] = {"api_key": self._api_key}
+        kwargs: dict[str, Any] = {
+            "api_key": self._api_key,
+            "timeout": positive_setting("llm", "request_timeout_seconds", default=600),
+        }
         if self._base_url:
             kwargs["base_url"] = self._base_url
         return AsyncOpenAI(**kwargs)
@@ -52,7 +56,10 @@ class LLMClient:
     def _build_anthropic_client(self):
         from anthropic import AsyncAnthropic
 
-        kwargs: dict[str, Any] = {"api_key": self._api_key}
+        kwargs: dict[str, Any] = {
+            "api_key": self._api_key,
+            "timeout": positive_setting("llm", "request_timeout_seconds", default=600),
+        }
         if self._base_url:
             kwargs["base_url"] = self._base_url
         return AsyncAnthropic(**kwargs)
@@ -61,9 +68,10 @@ class LLMClient:
         self,
         messages: list[dict[str, str]],
         temperature: float = 0.3,
-        max_tokens: int = 2000,
+        max_tokens: int | None = None,
         model: str | None = None,
     ) -> str:
+        max_tokens = self._output_budget(max_tokens)
         if self.provider == "anthropic":
             return await self._chat_anthropic(
                 messages, temperature, max_tokens, model=model
@@ -74,9 +82,10 @@ class LLMClient:
         self,
         messages: list[dict[str, str]],
         temperature: float = 0.1,
-        max_tokens: int = 2000,
+        max_tokens: int | None = None,
         model: str | None = None,
     ) -> dict[str, Any]:
+        max_tokens = self._output_budget(max_tokens)
         if self.provider == "anthropic":
             return await self._chat_json_anthropic(
                 messages, temperature, max_tokens, model=model
@@ -84,6 +93,14 @@ class LLMClient:
         return await self._chat_json_openai(
             messages, temperature, max_tokens, model=model
         )
+
+    @staticmethod
+    def _output_budget(value):
+        if value is None:
+            return positive_setting(
+                "llm", "default_max_output_tokens", default=2000, integer=True
+            )
+        return positive_number(value, "max_tokens", integer=True)
 
     @staticmethod
     def _safe_json_parse(text: str) -> dict[str, Any]:

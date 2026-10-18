@@ -36,3 +36,8 @@ def test_english_score_remains_calibrated():
         "Portfolio optimization with transaction costs",
         "A quantitative finance model predicts portfolio returns and risk.",
     )
+
+
+def test_domain_gate_keeps_research_evidence_after_long_background():
+    material = "Background. " * 900 + " Portfolio optimization with transaction costs."
+    assert is_quant_finance("Research methods", material)

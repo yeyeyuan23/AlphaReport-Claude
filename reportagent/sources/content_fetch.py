@@ -30,10 +30,10 @@ from reportagent.sources.base import (
     usable_full_text,
 )
 from reportagent.utils.config import PROJECT_ROOT, get_config
+from reportagent.processors.paper_sections import research_excerpt
 
 logger = logging.getLogger(__name__)
 PDF_DIRECTORY = PROJECT_ROOT / "data" / "pdfs"
-MAX_HTML_BYTES = 5 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -331,7 +331,7 @@ def meaningful_excerpt(value: str | None) -> str | None:
     if not value:
         return None
     text = value.strip()
-    if len(re.sub(r"[\W_]+", "", text, flags=re.UNICODE)) < 20:
+    if not re.search(r"[^\W_]", text, flags=re.UNICODE):
         return None
     if re.search(r"<(?:html|body|!doctype)\b", text[:500], re.I):
         return None
@@ -398,7 +398,7 @@ async def hydrate_pdf(
 ) -> SearchResult:
     policy = get_pdf_policy()
     identity, source = paper_identifier(result), result.source.value
-    for url in urls[:3]:
+    for url in dict.fromkeys(urls):
         try:
             data = await bounded_download(
                 client,
@@ -451,7 +451,7 @@ async def hydrate_pdf(
                 updates.update(
                     full_text=text,
                     abstract_only=False,
-                    abstract=result.abstract or text[:1500].strip(),
+                    abstract=result.abstract or research_excerpt(text),
                 )
             result = result.model_copy(update=updates)
             if text:

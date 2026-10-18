@@ -8,6 +8,7 @@ from email.utils import parsedate_to_datetime
 from xml.etree import ElementTree as ET
 
 import httpx
+from reportagent.utils.runtime_limits import metadata_timeout_seconds, positive_setting
 
 from reportagent.sources.arxiv_catalog import (
     parse_recent_index,
@@ -29,7 +30,10 @@ class AnnouncementHTTP:
         self.requests = 0
 
     async def get(self, url, **kwargs):
-        for attempt in range(3):
+        attempts = positive_setting(
+            "collection", "metadata", "max_attempts", default=3, integer=True
+        )
+        for attempt in range(attempts):
             if self.started and self.interval:
                 await asyncio.sleep(self.interval)
             self.started = True
@@ -44,7 +48,7 @@ class AnnouncementHTTP:
                     if isinstance(error, httpx.HTTPStatusError)
                     else None
                 )
-                if attempt == 2 or (
+                if attempt == attempts - 1 or (
                     status is not None and status not in {429, 500, 502, 503, 504}
                 ):
                     raise
@@ -52,7 +56,9 @@ class AnnouncementHTTP:
 
 
 def _retry_delay(error, attempt):
-    delay = 3 * 2**attempt
+    delay = positive_setting(
+        "collection", "metadata", "retry_backoff_seconds", default=3
+    ) * 2**attempt
     if isinstance(error, httpx.HTTPStatusError):
         value = error.response.headers.get("Retry-After", "")
         try:
@@ -66,7 +72,10 @@ def _retry_delay(error, attempt):
             delay = max(delay, after)
         except (ValueError, TypeError, OverflowError):
             pass
-    return min(delay, 60)
+    maximum = positive_setting(
+        "collection", "metadata", "max_retry_delay_seconds", default=60
+    )
+    return min(delay, maximum)
 
 
 async def _category_announcements(http, category, days, diagnostics):
@@ -150,7 +159,7 @@ async def fetch_announcements(
         selected_by_category={category: 0 for category in scope.categories},
     )
     days = list(requested_days(criteria))
-    timeout = httpx.Timeout(30.0, connect=15.0)
+    timeout = metadata_timeout_seconds()
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         http = AnnouncementHTTP(client, rate_limit_seconds)
         found, listed = {}, {}

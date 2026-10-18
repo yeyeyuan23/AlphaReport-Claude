@@ -59,3 +59,11 @@ def extract_paper_sections(text: str) -> dict[str, str | None]:
                 sections[name] = value
                 break
     return sections
+
+
+def research_excerpt(text: str | None) -> str | None:
+    """Prefer labelled research sections, otherwise keep the complete source text."""
+    if not text or not text.strip():
+        return None
+    sections = extract_paper_sections(text)
+    return sections["abstract"] or sections["introduction"] or text.strip()
