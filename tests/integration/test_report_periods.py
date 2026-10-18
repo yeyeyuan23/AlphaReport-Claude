@@ -1,4 +1,4 @@
-"""Daily and weekly publication windows end at the Beijing collection cutoff."""
+"""Daily and weekly source-date ranges end yesterday, independent of job time."""
 
 from datetime import date, datetime, timezone
 
@@ -11,10 +11,10 @@ from reportagent.services import daily_push as daily, weekly_report as weekly
 @pytest.mark.parametrize(
     "now,first,last",
     [
-        (datetime(2026, 10, 17, 4, tzinfo=timezone.utc), "2026-10-11", "2026-10-17"),
-        (datetime(2026, 10, 18, 16, tzinfo=timezone.utc), "2026-10-13", "2026-10-19"),
-        (datetime(2027, 1, 1, tzinfo=timezone.utc), "2026-12-26", "2027-01-01"),
-        (datetime(2024, 3, 1, tzinfo=timezone.utc), "2024-02-24", "2024-03-01"),
+        (datetime(2026, 10, 17, 4, tzinfo=timezone.utc), "2026-10-10", "2026-10-16"),
+        (datetime(2026, 10, 18, 16, tzinfo=timezone.utc), "2026-10-12", "2026-10-18"),
+        (datetime(2027, 1, 1, tzinfo=timezone.utc), "2026-12-25", "2026-12-31"),
+        (datetime(2024, 3, 1, tzinfo=timezone.utc), "2024-02-23", "2024-02-29"),
     ],
 )
 def test_weekly_period_contains_seven_calendar_dates(now, first, last):
@@ -32,7 +32,7 @@ def test_weekly_backfill_offsets_the_rolling_window_by_seven_days():
     _, _, first, last = get_weekly_range(
         1, now=datetime(2026, 10, 17, 4, tzinfo=timezone.utc)
     )
-    assert (first, last) == ("2026-10-04", "2026-10-10")
+    assert (first, last) == ("2026-10-03", "2026-10-09")
     with pytest.raises(ValueError):
         get_weekly_range(-1)
 
@@ -183,7 +183,7 @@ def test_daily_precise_publication_boundaries(
     rows, _, _ = daily.get_todays_papers(
         list(range(1, 9)) if explicit else None, report_date="2026-10-17"
     )
-    assert {r["id"] for r in rows} == {1, 2, 4}
+    assert {r["id"] for r in rows} == {1, 2}
     with factory() as db:
         assert db.query(Report).count() == 8
 
@@ -244,7 +244,7 @@ def test_relevance_refresh_uses_exact_publication_day(
             )
         )
     )
-    assert set(observed) == {1, 2, 4}
+    assert set(observed) == {1, 2}
 
 
 @pytest.mark.parametrize("published", [None, datetime(2021, 1, 1)])
@@ -273,13 +273,12 @@ def test_daily_refresh_drops_changed_publication_date(
 
 
 @pytest.mark.parametrize("report_date", ["2026-10-17", "2027-01-01", "2024-03-01"])
-def test_daily_window_includes_yesterday_and_report_date(report_date):
+def test_daily_window_is_yesterday_only_and_keeps_report_date_label(report_date):
     from datetime import timedelta
     from reportagent.services.report_periods import get_daily_range
 
     start, end, label, _ = get_daily_range(report_date)
-    assert end == date.fromisoformat(report_date)
-    assert end - start == timedelta(days=1)
+    assert start == end == date.fromisoformat(report_date) - timedelta(days=1)
     assert label == report_date
 
 
@@ -304,6 +303,7 @@ def test_weekly_publication_query_excludes_cutoff_and_partial_dates(
             (4, end, None),
             (5, start, {"precision": "month"}),
             (6, start, {"source": "pdf_creation_date"}),
+            (7, end + timedelta(days=1), None),
         ]:
             db.add(
                 Report(
@@ -331,5 +331,5 @@ def test_weekly_body_displays_the_actual_date_range():
     text = weekly.generate_weekly_report(
         [], first, last, publication_window=format_publication_window(start, end)
     )
-    assert "来源日期范围：2026-10-11 ~ 2026-10-17" in text
+    assert "来源日期范围：2026-10-10 ~ 2026-10-16" in text
     assert "来源日期，含起止日期" in text

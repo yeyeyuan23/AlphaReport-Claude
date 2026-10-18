@@ -24,24 +24,25 @@ def get_calendar_day_range(
 
 
 def get_daily_range(report_date: str | None = None) -> tuple[date, date, str, str]:
-    """Yesterday through today, inclusive, matching source date-list requests."""
+    """Yesterday only, shared by collection and daily reporting."""
     day = (
         date.fromisoformat(report_date)
         if report_date
         else datetime.now(REPORT_TIMEZONE).date()
     )
-    return day - timedelta(days=1), day, day.isoformat(), day.isoformat()
+    yesterday = day - timedelta(days=1)
+    return yesterday, yesterday, day.isoformat(), day.isoformat()
 
 
 def get_weekly_range(
     weeks_ago: int = 0, *, now: datetime | None = None
 ) -> tuple[date, date, str, str]:
-    """Seven calendar dates including the report date."""
+    """Seven complete calendar dates ending yesterday."""
     if type(weeks_ago) is not int or weeks_ago < 0:
         raise ValueError("weeks_ago must be a nonnegative integer")
     day = (now or datetime.now(REPORT_TIMEZONE)).astimezone(
         REPORT_TIMEZONE
-    ).date() - timedelta(days=7 * weeks_ago)
+    ).date() - timedelta(days=1 + 7 * weeks_ago)
     first = day - timedelta(days=6)
     return first, day, first.isoformat(), day.isoformat()
 

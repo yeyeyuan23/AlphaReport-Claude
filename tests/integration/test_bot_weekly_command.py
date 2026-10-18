@@ -22,7 +22,7 @@ def test_weekly_starts_private_background_job_and_shares_report_lock(monkeypatch
     assert "私聊" in (bot.handle_cmd("/weekly", "test-chat", "group") or "")
     thread.assert_not_called()
     reply = bot.handle_cmd("/weekly", "test-chat", "p2p")
-    assert reply is not None and "开始" in reply and "含今天在内最近七个日期" in reply
+    assert reply is not None and "开始" in reply and "截至昨天的七天" in reply
     thread.assert_called_once_with(
         target=bot.run_weekly_job, args=("test-chat",), daemon=True
     )

@@ -162,7 +162,7 @@ def test_candidate_cli_only_reads_metadata_and_writes_requested_output(
     assert len(receipt["candidates"]) == 17
     assert receipt["publication_window"] == {
         "start": "2026-10-16",
-        "end": "2026-10-17",
+        "end": "2026-10-16",
         "end_exclusive": False,
     }
     assert json.loads(capsys.readouterr().out)["candidate_count"] == 17

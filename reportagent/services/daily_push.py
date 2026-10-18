@@ -184,7 +184,7 @@ def get_todays_papers(
 ) -> tuple[list[dict], str, str]:
     """Get precisely dated publications in the inclusive source calendar-date range.
 
-    按来源日期取报告昨天至今天的资料，在线资料必须有来源日期证据。
+    按来源日期取报告前一天的资料，在线资料必须有来源日期证据。
     发送历史不参与筛选；显式指定论文仅跳过相关性过滤，不能绕过报告时间窗口。
 
     Returns:
@@ -517,7 +517,7 @@ def _prepare_and_deliver(options: DailyPushOptions, run: dict) -> dict:
             publication_window=format_publication_window(period_start, period_end),
         )
         if ids:
-            text += "\n\n本次展示指定论文的已保存评估，仍须符合昨天至今天的来源日期范围，并有来源日期证据。"
+            text += "\n\n本次展示指定论文的已保存评估，仍须符合昨天的来源日期范围，并有来源日期证据。"
         if not papers:
             text += "\n\n本期日期范围内暂无有来源日期证据、且通过当前相关性筛选的论文。"
         if run["warnings"]:

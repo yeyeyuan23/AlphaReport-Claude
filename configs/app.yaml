@@ -107,7 +107,7 @@ daily_collection:
   schedule_cron: "08:00"  # 每天，含周末；采集、筛选、下载入库和全文质量评估
   max_reviews: null  # 新全文评估预算；null 或省略表示不限，失败项在后续采集时重试
   sources: [arxiv, eastmoney, bigquant]
-  # 自动采集与日报固定使用昨天至今天的来源日期（含起止日期），不设候选数量上限。
+  # 自动采集与日报固定使用昨天的来源日期，不设候选数量上限。
 
 daily_report:
   enabled: true  # Web 运行时，每天从论文库生成并发送日报

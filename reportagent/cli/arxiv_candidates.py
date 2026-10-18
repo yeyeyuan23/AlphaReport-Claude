@@ -63,7 +63,7 @@ def main():
     )
     parser.add_argument(
         "--report-date",
-        help="北京时间报告日期 YYYY-MM-DD，默认今天；查询昨天至今天，包含起止日期",
+        help="北京时间报告日期 YYYY-MM-DD，默认今天；只查询昨天",
     )
     parser.add_argument("--output", help="保存完整候选和计时 JSON")
     args = parser.parse_args()

@@ -47,6 +47,10 @@ def test_scheduled_collection_saves_source_results_without_generating_reports(
         assert kwargs == {"no_analysis": True, "broad": True}
         assert options.max_results_per_source is None
         assert options.date_basis == "announcement"
+        from reportagent.services.report_periods import get_daily_range
+
+        start, end, *_ = get_daily_range()
+        assert options.date_from == options.date_to == start == end
         if outcome == "exception":
             raise RuntimeError("temporary source failure")
         return {"status": outcome, "source_statuses": statuses, "storage": {"added": 0}}
@@ -58,6 +62,7 @@ def test_scheduled_collection_saves_source_results_without_generating_reports(
     assert result["status"] == ("failed" if outcome == "exception" else outcome)
     assert result["completed_at"] and result["run_id"]
     assert result["elapsed_ms"] >= 0
+    assert result["publication_window"]["start"] == result["publication_window"]["end"]
     assert (
         "report_ids" not in result
     )  # This result is ingestion, not a report/send job.

@@ -112,7 +112,7 @@ def run_weekly_job(chat_id):
         if not get_weekly_papers(start, end):
             send_chat(
                 chat_id,
-                f"含今天在内最近七个日期（{first} 至 {last}）库中暂无符合来源日期范围的资料，可先采集后再试。\n\n"
+                f"截至昨天的七天（{first} 至 {last}）库中暂无符合来源日期范围的资料，可先采集后再试。\n\n"
                 f"[研报库首页]({get_library_url()})",
             )
             return
@@ -204,8 +204,8 @@ def handle_cmd(text, chat_id, chat_type):
         return (
             "📊 AlphaReport 指令\n\n"
             "/report <arXiv编号或链接>：分析单篇论文并推送到当前私聊\n"
-            "/daily：汇总昨天至今天（含起止日期）公开发布的论文\n"
-            "/weekly：汇总含今天在内最近七个日期的库中资料\n\n"
+            "/daily：汇总昨天公开发布的论文\n"
+            "/weekly：汇总库中截至昨天的七天资料\n\n"
             "/stats：查看研报库统计\n"
             "/search <关键词>：搜索研报，最多显示 5 篇\n"
             "/recent：查看最近入库的 5 篇研报\n"
@@ -219,7 +219,7 @@ def handle_cmd(text, chat_id, chat_type):
         if chat_type != "p2p":
             return "请在机器人私聊中使用 /weekly。"
         if text != "/weekly":
-            return "用法：/weekly（无需参数，汇总含今天在内最近七个日期）。"
+            return "用法：/weekly（无需参数，汇总截至昨天的七天）。"
         if not _report_lock.acquire(blocking=False):
             return "已有研报任务正在处理，请等待完成后再提交。"
         try:
@@ -229,7 +229,7 @@ def handle_cmd(text, chat_id, chat_type):
         except Exception:
             _report_lock.release()
             raise
-        return "开始生成含今天在内最近七个日期的周报：使用库中资料，读取采集时保存的筛选与全文评估结果，完成后推送到当前私聊。"
+        return "开始生成周报（截至昨天的七天）：使用库中资料，读取采集时保存的筛选与全文评估结果，完成后推送到当前私聊。"
 
     if command == "/daily":
         if chat_type != "p2p":
@@ -241,7 +241,7 @@ def handle_cmd(text, chat_id, chat_type):
         except Exception:
             _report_lock.release()
             raise
-        return "开始生成日报：使用库中昨天至今天（含起止日期）公开发布且有来源日期证据的资料，读取采集时保存的筛选与全文评估结果，完成后推送到当前私聊。"
+        return "开始生成日报：使用库中昨天公开发布且有来源日期证据的资料，读取采集时保存的筛选与全文评估结果，完成后推送到当前私聊。"
 
     if command == "/report":
         if chat_type != "p2p":

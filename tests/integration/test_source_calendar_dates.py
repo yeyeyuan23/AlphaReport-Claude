@@ -33,21 +33,21 @@ def test_yesterdays_date_at_midnight_is_not_lost_by_an_eight_oclock_cutoff():
     assert not is_daily_publication(item, report_date="2026-10-18")
 
 
-def test_daily_dates_are_inclusive_and_weekly_has_seven_calendar_dates():
+def test_daily_is_yesterday_and_weekly_has_seven_dates_ending_yesterday():
     start, end, *_ = get_daily_range("2026-10-19")
-    assert (start, end) == (date(2026, 10, 18), date(2026, 10, 19))
+    assert (start, end) == (date(2026, 10, 18), date(2026, 10, 18))
     start, end, *_ = get_weekly_range(
         now=datetime.fromisoformat("2026-10-19T12:00:00+08:00")
     )
-    assert (start, end) == (date(2026, 10, 13), date(2026, 10, 19))
+    assert (start, end) == (date(2026, 10, 12), date(2026, 10, 18))
 
 
-def test_monday_batch_is_requested_on_monday_without_estimating_release_time():
-    start, end, *_ = get_daily_range("2026-10-19")
+def test_yesterdays_batch_is_requested_without_estimating_release_time():
+    start, end, *_ = get_daily_range("2026-10-20")
     criteria = UserCriteria(
         topics=["q-fin"], date_from=start, date_to=end, date_basis="announcement"
     )
-    assert date(2026, 10, 19) in requested_days(criteria)
+    assert list(requested_days(criteria)) == [date(2026, 10, 19)]
 
 
 def test_only_one_business_date_field_is_exposed():
