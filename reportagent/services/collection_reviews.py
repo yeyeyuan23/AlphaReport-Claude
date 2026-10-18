@@ -27,7 +27,7 @@ def _review_candidates(force_review):
             .all()
         )
         threshold = _configured_threshold(_load_scoring_config())
-        candidates = []
+        candidates, cached_ids = [], []
         for row in rows:
             if (
                 not screening_is_current(row)
@@ -43,9 +43,10 @@ def _review_candidates(force_review):
             if not force_review and cached_review_is_current(
                 snapshot, cached, get_llm_model()
             ):
+                cached_ids.append(row.id)
                 continue  # Saved reviews remain visible without consuming new-review budget.
             candidates.append(snapshot)
-    return candidates
+    return candidates, cached_ids
 
 
 async def prepare_collection_reviews(
@@ -59,7 +60,7 @@ async def prepare_collection_reviews(
         "review_ids": [],
         "failures": [],
     }
-    candidates = _review_candidates(force_review)
+    candidates, cached_ids = _review_candidates(force_review)
     audit["unreviewed_candidates"] = len(candidates)
     selected = select_candidates(candidates, max_reviews=len(candidates))
     review_audit = {}
@@ -74,7 +75,13 @@ async def prepare_collection_reviews(
         else {}
     )
     audit.update(review_audit)
+    audit["cached_ids"] = list(dict.fromkeys(cached_ids + audit.get("cached_ids", [])))
     audit["review_ids"] = review_audit.get("review_ids", list(reviewed))
+    audit["completed_ids"] = [
+        rid
+        for rid, result in reviewed.items()
+        if result.get("status") == "reviewed" and rid not in audit["cached_ids"]
+    ]
     audit["review_tiers"] = {
         str(rid): result.get("tier") for rid, result in reviewed.items()
     }

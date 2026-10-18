@@ -139,10 +139,14 @@ def test_collection_review_budget_defaults_to_all_and_resumes(queue_library, bud
     expected = 25 if budget is None else budget
     assert len(model.requests) == expected
     assert len(result["review_ids"]) == expected
+    assert len(result["completed_ids"]) == expected
+    assert result["cached_ids"] == [13]
     assert len(result["deferred_ids"]) == 25 - expected
     if budget is None:
-        asyncio.run(collection_reviews.prepare_collection_reviews())
+        repeated = asyncio.run(collection_reviews.prepare_collection_reviews())
         assert len(model.requests) == 25
+        assert repeated["review_ids"] == repeated["completed_ids"] == []
+        assert set(repeated["cached_ids"]) == set(range(13, 39))
 
 
 @pytest.mark.parametrize("flow", ["weekly", "daily"])
