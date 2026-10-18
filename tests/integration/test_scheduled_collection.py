@@ -6,8 +6,9 @@ import pytest
 
 
 @pytest.mark.parametrize("outcome", ["ok", "partial", "failed", "exception"])
+@pytest.mark.parametrize("report_date", [None, "2026-10-17"])
 def test_scheduled_collection_saves_source_results_without_generating_reports(
-    tmp_path, monkeypatch, outcome
+    tmp_path, monkeypatch, outcome, report_date
 ):
     from reportagent.services import scheduled_collection as jobs
     from reportagent.services import collection, collection_reviews
@@ -49,20 +50,23 @@ def test_scheduled_collection_saves_source_results_without_generating_reports(
         assert options.date_basis == "announcement"
         from reportagent.services.report_periods import get_daily_range
 
-        start, end, *_ = get_daily_range()
+        start, end, *_ = get_daily_range(report_date)
         assert options.date_from == options.date_to == start == end
         if outcome == "exception":
             raise RuntimeError("temporary source failure")
         return {"status": outcome, "source_statuses": statuses, "storage": {"added": 0}}
 
     monkeypatch.setattr(collection, "collect_reports", collect)
-    result = jobs.run_scheduled_collection()
+    result = jobs.run_scheduled_collection(report_date=report_date)
     saved = jobs.read_latest_collection()
     assert saved == result
     assert result["status"] == ("failed" if outcome == "exception" else outcome)
     assert result["completed_at"] and result["run_id"]
     assert result["elapsed_ms"] >= 0
     assert result["publication_window"]["start"] == result["publication_window"]["end"]
+    if report_date:
+        assert result["report_date"] == report_date
+        assert result["publication_window"]["start"] == "2026-10-16"
     assert (
         "report_ids" not in result
     )  # This result is ingestion, not a report/send job.

@@ -27,7 +27,7 @@ def main():
     )
     parser.add_argument(
         "--published-date",
-        help="Score source publications dated yesterday through this report date (YYYY-MM-DD)",
+        help="Score source publications dated the day before this report date (YYYY-MM-DD)",
     )
     parser.add_argument(
         "--created-date",

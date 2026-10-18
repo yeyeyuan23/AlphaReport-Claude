@@ -166,7 +166,7 @@ async def _collect_and_review(criteria, config, result):
         result["status"] = "partial"
 
 
-def run_scheduled_collection() -> dict:
+def run_scheduled_collection(report_date: str | None = None) -> dict:
     from reportagent.models.schemas import UserCriteria, SourceType
     from reportagent.services.report_periods import get_daily_range
 
@@ -187,13 +187,13 @@ def run_scheduled_collection() -> dict:
         started = monotonic()
         try:
             sources = config.get("sources", ["arxiv", "eastmoney", "bigquant"])
-            start, end, report_date, _ = get_daily_range()
+            start, end, date_label, _ = get_daily_range(report_date)
             result["publication_window"] = {
                 "start": start.isoformat(),
                 "end": end.isoformat(),
                 "end_exclusive": False,
             }
-            result["report_date"] = report_date
+            result["report_date"] = date_label
             criteria = UserCriteria(
                 topics=[
                     topic.strip()

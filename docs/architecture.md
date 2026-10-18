@@ -148,7 +148,9 @@ Web 中三项定时任务独立配置：`daily_collection` 默认每天北京时
 调用与手动 `/daily` 相同的报告服务，两项每天含周末执行；`weekly_report` 默认每周五 09:00
 在线程中调用与手动 `/weekly` 相同的周报服务。三项均由 `configs/app.yaml` 的 `enabled`、
 `schedule_cron`、`timezone` 配置，周报另用 `day_of_week` 指定星期（`mon` 至 `sun`）。
-`cli.scheduled_collect` 可按配置补跑采集。手动 `/daily`、`/weekly` 不依赖定时开关。
+`cli.scheduled_collect` 可按配置补跑采集，`scripts/collect.py` 仅转发到同一 CLI。
+两者支持 `--report-date YYYY-MM-DD`，只覆盖本次报告日并采集其前一天；审计日志仍使用实际执行时间。
+手动 `/daily`、`/weekly` 不依赖定时开关。
 健康接口的 `schedule` 包含周报开关和下次执行时间；已有外部周报调度需移除或关闭内置任务以避免重复发送。
 
 ## 后台处理与维护工具

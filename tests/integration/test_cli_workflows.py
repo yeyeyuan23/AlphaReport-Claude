@@ -22,7 +22,7 @@ import pytest
         ("narrative_brief", "--force"),
         ("daily_feishu_push", "--dry-run"),
         ("weekly_report", "--dry-run"),
-        ("scheduled_collect", "--help"),
+        ("scheduled_collect", "--report-date"),
         ("reproduction", "--dry-run"),
         ("parse_pdf", "--save"),
         ("db_query", "--update-knowledge-card"),
