@@ -136,7 +136,7 @@ def generate_weekly_report(
     publication_window: str = "",
     summarize: bool = False,
 ) -> str:
-    """Synthesize saved assessments without changing their quality judgments."""
+    """Shorten saved findings without changing their quality judgments."""
     checked = []
     for paper in papers:
         p = dict(paper)
@@ -168,8 +168,10 @@ def generate_weekly_report(
         try:
             summaries = asyncio.run(synthesize_weekly(checked))
         except Exception as error:
-            logger.warning("Weekly synthesis unavailable: %s", type(error).__name__)
-            notice = "模型总结未生成；以下逐篇展示已有研究发现与依据。"
+            logger.warning(
+                "Weekly synthesis unavailable (%s): %s", type(error).__name__, error
+            )
+            notice = "简短结论生成失败；以下展示已有发现，完整解读请点击论文标题。"
     return render_briefing(
         checked,
         f"{week_start} ~ {week_end}",

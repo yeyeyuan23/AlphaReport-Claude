@@ -1,4 +1,4 @@
-"""Synthesize current paper assessments, keeping paper references explicit."""
+"""Condense saved assessments into short conclusions with individual references."""
 
 import asyncio
 import json
@@ -26,8 +26,8 @@ def _validate_summaries(result, expected):
         ):
             raise ValueError("Unknown or repeated direction")
         updates = group.get("updates")
-        if not isinstance(updates, list) or len(updates) != 1:
-            raise ValueError("Each direction requires exactly one compact update")
+        if not isinstance(updates, list) or len(updates) != len(expected[direction]):
+            raise ValueError("Each paper requires exactly one short conclusion")
         covered = set()
         normalized = []
         for update in updates:
@@ -37,15 +37,13 @@ def _validate_summaries(result, expected):
             if not isinstance(text, str) or not text.strip():
                 raise ValueError("Empty summary")
             text = " ".join(text.split())
-            if len(text) > 300:
-                raise ValueError("Direction summary exceeds 300 characters")
             if (
                 not isinstance(ids, list)
-                or not ids
+                or len(ids) != 1
                 or any(type(rid) is not int for rid in ids)
             ):
-                raise ValueError("Missing paper references")
-            if not set(ids) <= expected[direction] or len(ids) != len(set(ids)):
+                raise ValueError("Each conclusion must reference one paper")
+            if not set(ids) <= expected[direction] or covered.intersection(ids):
                 raise ValueError("Unknown or repeated paper references")
             covered.update(ids)
             normalized.append({"text": text, "paper_ids": list(ids)})
@@ -98,7 +96,7 @@ async def synthesize_weekly(papers):
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
             temperature=0.2,
-            max_tokens=6000,
+            max_tokens=max(6000, sum(len(rows) for rows in grouped.values()) * 200),
         ),
         timeout=120,
     )

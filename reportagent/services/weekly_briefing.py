@@ -12,6 +12,8 @@ from reportagent.services.report_briefing import (
 from reportagent.services.report_quality import pending_review
 from reportagent.skills.registry import skill_resource
 
+SAVED_FINDING_MAX_CHARS = 160
+
 
 def _excerpt(value, limit=160):
     text = " ".join(str(value or "").split())
@@ -31,6 +33,16 @@ def research_papers(papers):
     ]
 
 
+def _saved_conclusion(paper):
+    findings = _evaluation(paper).get("findings") or []
+    text = " ".join(str(findings[0].get("claim") or "").split()) if findings else ""
+    if not text:
+        return "尚无已保存的研究结论，请查看论文解读。"
+    if len(text) > SAVED_FINDING_MAX_CHARS:
+        return "简短结论暂未生成，完整研究发现与适用条件请查看论文解读。"
+    return text
+
+
 def _updates(papers, summaries=None):
     directions = load_enabled_directions()
     grouped = defaultdict(list)
@@ -41,27 +53,17 @@ def _updates(papers, summaries=None):
         grouped.items(), key=lambda pair: (-len(pair[1]), pair[0])
     ):
         name = directions.get(direction, {}).get("name") or direction
-        by_id = {p["id"]: p for p in rows}
-        updates = (summaries or {}).get(direction)
-        if updates is None:
-            updates = [
-                {
-                    "text": (_evaluation(p).get("findings") or [{}])[0].get("claim")
-                    or "未记录研究发现。",
-                    "paper_ids": [p["id"]],
-                }
-                for p in rows
-            ]
-        paragraph = " ".join(" ".join(update["text"].split()) for update in updates)
-        paper_ids = dict.fromkeys(
-            rid for update in updates for rid in update["paper_ids"]
-        )
-        links = []
-        for rid in paper_ids:
-            paper = by_id[rid]
+        conclusions = {
+            update["paper_ids"][0]: update["text"]
+            for update in (summaries or {}).get(direction, [])
+        }
+        entries = []
+        for paper in rows:
+            conclusion = conclusions.get(paper["id"]) or _saved_conclusion(paper)
             url = paper.get("ui_url") or paper.get("source_url")
-            links.append(f"[依据：{paper['title']}]({url})" if url else paper["title"])
-        lines.append(f"**{name} · {len(rows)} 篇**\n{paragraph}\n" + " · ".join(links))
+            title = f"[{paper['title']}]({url})" if url else paper["title"]
+            entries.append(f"{conclusion}\n{title}")
+        lines.append(f"**{name} · {len(rows)} 篇**\n\n" + "\n\n".join(entries))
     return "\n\n".join(lines) or "本周尚无已完成全文评估的研究更新可归纳。"
 
 

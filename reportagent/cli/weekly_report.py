@@ -10,7 +10,7 @@ def main():
     parser.add_argument(
         "--with-summary",
         action="store_true",
-        help="预览时也调用配置的模型生成周报总结（消耗模型额度）",
+        help="预览时也调用配置的模型生成逐篇短结论（消耗模型额度）",
     )
     parser.add_argument(
         "--weeks-ago",

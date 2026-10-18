@@ -278,13 +278,13 @@ def test_weekly_direction_updates_include_every_paper_without_recommendation_lis
     assert portfolio.count(second_claim) == 1
     assert portfolio.count(third_claim) == 4
     for p in papers[:7]:
-        assert f"[依据：{p['title']}]({p['ui_url']})" in portfolio
+        assert f"[{p['title']}]({p['ui_url']})" in portfolio
         assert p["ui_url"] not in machine_learning
     assert "模型在分布漂移下需要重新校准。" not in portfolio
     assert "模型在分布漂移下需要重新校准。" in machine_learning
-    assert f"[依据：较早公告]({papers[7]['ui_url']})" in machine_learning
+    assert f"[较早公告]({papers[7]['ui_url']})" in machine_learning
     assert first_claim not in machine_learning
-    assert updates.count("[依据：") == 8
+    assert "依据：" not in updates
     assert "未经核验的发现" not in updates and "已排除的发现" not in updates
     assert papers[8]["ui_url"] not in updates and papers[9]["ui_url"] not in updates
     assert "重点推荐 8 篇" in text

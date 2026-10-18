@@ -10,18 +10,36 @@ import pytest
 from reportagent.services.weekly_synthesis import _validate_summaries
 
 
-@pytest.mark.parametrize("texts", [["文" * 301], ["一段", "另一段"]])
-def test_weekly_rejects_overlong_or_multiple_updates(texts):
+def test_weekly_rejects_duplicate_paper_conclusions():
     value = {
         "directions": [
             {
                 "direction": "risk",
-                "updates": [{"text": text, "paper_ids": [1]} for text in texts],
+                "updates": [
+                    {"text": text, "paper_ids": [1]} for text in ["一段", "另一段"]
+                ],
             }
         ]
     }
     with pytest.raises(ValueError):
         _validate_summaries(value, {"risk": {1}})
+
+
+def test_one_long_mixed_language_conclusion_does_not_discard_other_papers():
+    text = "在明确假设下，" + "English method name " * 10 + "给出有条件的理论结论。"
+    value = {
+        "directions": [
+            {
+                "direction": "risk",
+                "updates": [
+                    {"text": text, "paper_ids": [1]},
+                    {"text": "第二篇保留自己的结论。", "paper_ids": [2]},
+                ],
+            }
+        ]
+    }
+    updates = _validate_summaries(value, {"risk": {1, 2}})["risk"]
+    assert updates == value["directions"][0]["updates"]
 
 
 def test_weekly_normalizes_whitespace_without_modifying_model_output():

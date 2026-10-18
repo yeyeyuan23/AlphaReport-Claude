@@ -21,15 +21,18 @@ def sample_papers():
 
 
 def response():
+    conclusions = [
+        "在指定约束条件下，正则化可保持组合优化问题的凸性。",
+        "交易成本会改变最优组合的换手率。",
+        "连续价格路径假设下，估计方法可改善风险控制。",
+    ]
     return {
         "directions": [
             {
                 "direction": "portfolio_optimization",
                 "updates": [
-                    {
-                        "text": "三篇研究分别讨论约束与估计，结论均有适用条件。",
-                        "paper_ids": [1, 2, 3],
-                    }
+                    {"text": text, "paper_ids": [rid]}
+                    for rid, text in enumerate(conclusions, 1)
                 ],
             }
         ]
@@ -52,7 +55,9 @@ def inject_model(monkeypatch, value):
 
 
 def test_synthesis_uses_all_three_assessments_and_links_each_paper(monkeypatch):
-    requests = inject_model(monkeypatch, response())
+    value = response()
+    value["directions"][0]["updates"].reverse()
+    requests = inject_model(monkeypatch, value)
     papers = sample_papers()
     papers[2]["evaluation"]["findings"][0]["claim"] = "完整结论" * 100
     papers[2]["evaluation_json"] = json.dumps(papers[2]["evaluation"])
@@ -60,10 +65,14 @@ def test_synthesis_uses_all_three_assessments_and_links_each_paper(monkeypatch):
         papers, "2026-10-10", "2026-10-17", summarize=True
     )
     updates = text.split("## 本周研究更新", 1)[1].split("## 收录与评估说明", 1)[0]
-    assert "三篇研究分别讨论约束与估计" in updates
     assert "3 篇" in updates
-    for rid in (1, 2, 3):
-        assert f"http://localhost/library/{rid}" in updates
+    for update in value["directions"][0]["updates"]:
+        rid = update["paper_ids"][0]
+        assert (
+            f"{update['text']}\n[论文{rid}](http://localhost/library/{rid})" in updates
+        )
+    assert "依据：" not in updates
+    assert "完整结论" not in updates
     sent = requests[0]["directions"][0]["papers"]
     assert [p["id"] for p in sent] == [1, 2, 3]
     assert sent[2]["findings"][0]["claim"] == "完整结论" * 100
@@ -71,18 +80,24 @@ def test_synthesis_uses_all_three_assessments_and_links_each_paper(monkeypatch):
     assert "full_text" not in sent[0]
 
 
-@pytest.mark.parametrize("failure", ["omitted", "invented", "empty", "timeout"])
+@pytest.mark.parametrize(
+    "failure", ["omitted", "invented", "empty", "timeout", "duplicate", "merged"]
+)
 def test_failed_or_uncited_synthesis_falls_back_without_hiding_papers(
     monkeypatch, failure
 ):
     value = response()
     update = value["directions"][0]["updates"][0]
     if failure == "omitted":
-        update["paper_ids"] = [1, 2]
+        value["directions"][0]["updates"].pop()
     elif failure == "invented":
-        update["paper_ids"] = [1, 2, 3, 99]
+        update["paper_ids"] = [99]
     elif failure == "empty":
         update["text"] = ""
+    elif failure == "duplicate":
+        value["directions"][0]["updates"][1]["paper_ids"] = [1]
+    elif failure == "merged":
+        update["paper_ids"] = [1, 2]
     else:
         value = TimeoutError("model timeout")
     inject_model(monkeypatch, value)
@@ -90,8 +105,7 @@ def test_failed_or_uncited_synthesis_falls_back_without_hiding_papers(
         sample_papers(), "2026-10-10", "2026-10-17", summarize=True
     )
     updates = text.split("## 本周研究更新", 1)[1].split("## 收录与评估说明", 1)[0]
-    assert "总结未生成" in updates
-    assert "三篇研究分别" not in updates
+    assert "简短结论生成失败" in updates
     for rid in (1, 2, 3):
         assert f"论文{rid}的完整发现" in updates
         assert f"http://localhost/library/{rid}" in updates
@@ -100,7 +114,7 @@ def test_failed_or_uncited_synthesis_falls_back_without_hiding_papers(
 
 def test_stale_and_pending_assessments_are_not_sent_as_research_findings(monkeypatch):
     value = response()
-    value["directions"][0]["updates"][0]["paper_ids"] = [1]
+    value["directions"][0]["updates"] = value["directions"][0]["updates"][:1]
     requests = inject_model(monkeypatch, value)
     papers = sample_papers()
     papers[1]["full_text"] += " changed source"
@@ -136,6 +150,8 @@ def test_direction_summaries_cannot_borrow_another_directions_citations(monkeypa
     papers = sample_papers()
     papers[2] = assessed(paper(rid=3, selection_direction="ml_quant"))
     value = response()
+    value["directions"][0]["updates"] = value["directions"][0]["updates"][:2]
+    value["directions"][0]["updates"][1]["paper_ids"] = [3]
     value["directions"].append(
         {
             "direction": "ml_quant",
@@ -146,7 +162,7 @@ def test_direction_summaries_cannot_borrow_another_directions_citations(monkeypa
     text = weekly.generate_weekly_report(
         papers, "2026-10-10", "2026-10-17", summarize=True
     )
-    assert "总结未生成" in text
+    assert "简短结论生成失败" in text
     assert "另一方向总结" not in text
 
 
@@ -157,7 +173,7 @@ def test_no_current_assessments_skips_paid_summary_call(monkeypatch):
     )
     assert not requests
     assert "待核验" in text
-    assert "总结未生成" not in text
+    assert "简短结论生成失败" not in text
 
 
 def test_dry_run_with_summary_generates_preview_without_delivery(monkeypatch, tmp_path):
@@ -174,7 +190,7 @@ def test_dry_run_with_summary_generates_preview_without_delivery(monkeypatch, tm
     )
     assert result["status"] == "preview"
     assert result["sent"] == 0
-    assert "三篇研究分别讨论约束与估计" in output.read_text()
+    assert response()["directions"][0]["updates"][0]["text"] in output.read_text()
 
 
 def test_weekly_only_shows_direction_updates_without_duplicate_paper_lists():
@@ -191,7 +207,7 @@ def test_weekly_only_shows_direction_updates_without_duplicate_paper_lists():
         assert f"论文{rid}的完整发现" in text
 
 
-def test_multiple_direction_updates_fall_back_without_losing_papers(monkeypatch):
+def test_merged_paper_conclusions_fall_back_without_losing_papers(monkeypatch):
     value = response()
     value["directions"][0]["updates"] = [
         {"text": "第一篇讨论约束。\n\n结论有条件。", "paper_ids": [1]},
@@ -203,14 +219,30 @@ def test_multiple_direction_updates_fall_back_without_losing_papers(monkeypatch)
     )
     updates = text.split("## 本周研究更新", 1)[1].split("## 收录与评估说明", 1)[0]
     assert "第一篇讨论约束" not in updates
-    assert "总结未生成" in updates
+    assert "简短结论生成失败" in updates
     for rid in (1, 2, 3):
         assert updates.count(f"http://localhost/library/{rid}") == 1
 
 
-def test_offline_direction_fallback_also_uses_one_paragraph():
+def test_offline_fallback_keeps_each_conclusion_next_to_its_title():
     text = weekly.generate_weekly_report(sample_papers(), "2026-10-10", "2026-10-17")
     updates = text.split("**投资组合优化 · 3 篇**", 1)[1].split("## 收录与评估说明", 1)[
         0
     ]
-    assert "论文1的完整发现。 论文2的完整发现。 论文3的完整发现。" in updates
+    for rid in (1, 2, 3):
+        assert (
+            f"论文{rid}的完整发现。\n[论文{rid}](http://localhost/library/{rid})\n\n"
+            in updates
+        )
+    assert "依据：" not in updates
+
+
+def test_overlong_saved_claim_is_not_cut_mid_condition_or_dumped_into_card():
+    papers = sample_papers()
+    claim = "在很多假设成立的条件下，" * 20 + "作者证明了该结论。"
+    papers[0]["evaluation"]["findings"] = [{"claim": claim}]
+    text = weekly.generate_weekly_report(papers, "2026-10-10", "2026-10-17")
+    assert claim not in text
+    assert "简短结论暂未生成" in text
+    assert "[论文1](http://localhost/library/1)" in text
+    assert papers[0]["evaluation"]["findings"][0]["claim"] == claim
