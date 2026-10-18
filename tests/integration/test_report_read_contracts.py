@@ -336,6 +336,15 @@ def test_stats_reuses_repository_implementation_and_preserves_envelope(
         "total_reports": 4,
         "with_full_text": 2,
         "without_full_text": 2,
+        "by_source": [
+            {
+                "source": "arxiv",
+                "count": 2,
+                "material_types": {"academic": 1, "unknown": 1},
+            },
+            {"source": "eastmoney", "count": 1, "material_types": {"unknown": 1}},
+            {"source": "local_pdf", "count": 1, "material_types": {"unknown": 1}},
+        ],
     }
     assert len(calls) == 1
     assert reader.commits == []

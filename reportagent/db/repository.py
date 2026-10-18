@@ -507,8 +507,25 @@ class ReportRepository:
         with_text = (
             self.session.query(Report).filter(Report.has_full_text.is_(True)).count()
         )
+        by_source = {}
+        for source, kind, count in (
+            self.session.query(
+                Report.source, Report.material_type, func.count(Report.id)
+            )
+            .group_by(Report.source, Report.material_type)
+            .order_by(Report.source, Report.material_type)
+            .all()
+        ):
+            item = by_source.setdefault(
+                source, {"source": source, "count": 0, "material_types": {}}
+            )
+            item["count"] += count
+            item["material_types"][kind or "unknown"] = (
+                item["material_types"].get(kind or "unknown", 0) + count
+            )
         return {
             "total_reports": total,
             "with_full_text": with_text,
             "without_full_text": total - with_text,
+            "by_source": list(by_source.values()),
         }
