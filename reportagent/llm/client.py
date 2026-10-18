@@ -34,6 +34,7 @@ class LLMClient:
             thinking if thinking is not None else get_config("llm", "thinking")
         )
         self.calls: list[dict] = []
+        self.diagnostic_context: dict = {}
 
         if self.provider == "anthropic":
             self._client = self._build_anthropic_client()
@@ -131,15 +132,43 @@ class LLMClient:
             else:
                 chars.append(c)
                 i += 1
-        try:
-            return json.loads("".join(chars))
-        except json.JSONDecodeError:
-            import logging
+        return json.loads("".join(chars))
 
-            logging.getLogger(__name__).warning(
-                "_safe_json_parse still failed after char-level fix. Raw (first 500): %s",
-                repr(cleaned[:500]),
+    def _parse_json_response(self, text: str) -> dict[str, Any]:
+        from reportagent.llm.diagnostics import save_response, save_parse_error
+
+        directory = None
+        call = self.calls[-1] if self.calls else {"model": self.model}
+        try:
+            directory = save_response(
+                text,
+                getattr(self, "_last_response", None),
+                provider=self.provider,
+                call=call,
+                context=getattr(self, "diagnostic_context", None),
             )
+            call["response_path"] = str(directory)
+        except (OSError, TypeError, ValueError):
+            logger.warning("Could not save model response diagnostics", exc_info=True)
+        try:
+            return self._safe_json_parse(text)
+        except json.JSONDecodeError as error:
+            if directory is not None:
+                try:
+                    save_parse_error(directory, error)
+                except OSError:
+                    logger.warning(
+                        "Could not save JSON parser diagnostics", exc_info=True
+                    )
+            logger.warning(
+                "Model JSON parse failed: %s line=%s column=%s position=%s response_path=%s",
+                error.msg,
+                error.lineno,
+                error.colno,
+                error.pos,
+                directory,
+            )
+            error.response_path = str(directory) if directory else None
             raise
 
     # --- OpenAI ---
@@ -176,7 +205,7 @@ class LLMClient:
                 "response_format": {"type": "json_object"},
             }
         )
-        return self._safe_json_parse(content)
+        return self._parse_json_response(content)
 
     async def _openai_text(self, kwargs: dict) -> str:
         try:
@@ -187,6 +216,7 @@ class LLMClient:
                 raise context_error from error
             raise
         choice = response.choices[0]
+        self._last_response = response
         content = choice.message.content or ""
         complete = choice.finish_reason == "stop" and bool(content.strip())
         self.calls.append(
@@ -254,6 +284,7 @@ class LLMClient:
                 raise context_error from error
             raise
         text = self._extract_text(response.content)
+        self._last_response = response
         complete = response.stop_reason in ("end_turn", "stop_sequence") and bool(
             text.strip()
         )
@@ -294,10 +325,7 @@ class LLMClient:
         if system:
             kwargs["system"] = system
         text = await self._anthropic_text(kwargs)
-        text = text.strip()
-        if text.startswith("```"):
-            text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
-        return self._safe_json_parse(text)
+        return self._parse_json_response(text)
 
     @staticmethod
     def _split_system_message(

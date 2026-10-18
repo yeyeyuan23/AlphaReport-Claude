@@ -254,6 +254,11 @@ Web 中三项定时任务独立配置：`daily_collection` 默认每天北京时
 
 ## 修改与验证
 
+Python JSON 模型响应保存在 `data/model_responses/<日期>/<调用ID>/`：
+`response.txt` 保留模型原始正文，`response.json` 保留完整 API 响应，`metadata.json` 记录模型与调用关联。
+解析失败时另存实际解析输入 `parse-input.txt` 和 `parse-error.json`，包含错误消息、行列、字符位置及邻近内容；
+日志指向该目录，不再只留下前500字符。诊断不记录请求头或模型密钥，所有文件均位于忽略提交的 `data/`。
+
 业务逻辑放共享服务，入口负责适配；应用代码不反向导入 `scripts/`。
 修改入口、文件位置或参数时，同步检查 Shell、Docker、技能说明与测试中的调用。
 维护阅读 API 地址、材料及分析的缓存指纹、内置任务资源与单篇投递回执的一致性。

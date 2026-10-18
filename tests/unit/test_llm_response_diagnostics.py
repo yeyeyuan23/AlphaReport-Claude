@@ -1,0 +1,88 @@
+"""JSON responses remain available for diagnosis without recording credentials."""
+
+import asyncio
+import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
+from reportagent.llm.client import LLMClient
+from reportagent.llm import diagnostics
+
+
+@pytest.mark.parametrize("provider", ["anthropic", "openai"])
+@pytest.mark.parametrize("valid", [True, False])
+def test_full_response_and_exact_parser_input_are_saved(
+    tmp_path, monkeypatch, provider, valid
+):
+    monkeypatch.setattr(diagnostics, "RESPONSE_ROOT", tmp_path / "data/model_responses")
+    content = json.dumps({"finding": "evidence " * 300, "value": 1})
+    if not valid:
+        content = content[:-1] + ", invalid}"
+    raw = "```json\n" + content + "\n```"
+    body = {"id": "model-response", "model": "fixture", "content": raw}
+    response = SimpleNamespace(
+        model="fixture",
+        stop_reason="end_turn",
+        content=[SimpleNamespace(type="text", text=raw)],
+        choices=[
+            SimpleNamespace(finish_reason="stop", message=SimpleNamespace(content=raw))
+        ],
+        usage=SimpleNamespace(
+            input_tokens=1, output_tokens=2, prompt_tokens=1, completion_tokens=2
+        ),
+        model_dump=lambda **kwargs: body,
+    )
+    create = AsyncMock(return_value=response)
+    client = LLMClient.__new__(LLMClient)
+    client.provider, client.model, client.thinking = provider, "fixture", None
+    client._api_key = "must-not-appear-in-diagnostics"
+    client.calls = []
+    client.diagnostic_context = {"task": "full_text_review", "report_id": 108}
+    client._client = SimpleNamespace(
+        messages=SimpleNamespace(create=create),
+        chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+    )
+    if valid:
+        result = asyncio.run(
+            client.chat_json([{"role": "user", "content": "Read the paper"}])
+        )
+        assert result["value"] == 1
+    else:
+        with pytest.raises(json.JSONDecodeError) as caught:
+            asyncio.run(
+                client.chat_json([{"role": "user", "content": "Read the paper"}])
+            )
+    files = list((tmp_path / "data/model_responses").rglob("response.txt"))
+    assert len(files) == 1
+    folder = files[0].parent
+    assert files[0].read_text() == raw
+    assert json.loads((folder / "response.json").read_text()) == body
+    metadata = json.loads((folder / "metadata.json").read_text())
+    assert metadata["report_id"] == 108 and metadata["task"] == "full_text_review"
+    if not valid:
+        error = json.loads((folder / "parse-error.json").read_text())
+        assert error["message"] == caught.value.msg
+        assert (error["line"], error["column"], error["position"]) == (
+            caught.value.lineno,
+            caught.value.colno,
+            caught.value.pos,
+        )
+        assert (folder / "parse-input.txt").read_text() == caught.value.doc
+        assert client.calls[-1]["response_path"] == str(folder)
+    for file in folder.iterdir():
+        assert client._api_key not in file.read_text()
+    create.assert_awaited_once()
+
+
+def test_diagnostic_write_failure_does_not_hide_the_parser_error(monkeypatch):
+    def cannot_write(*args, **kwargs):
+        raise OSError("offline read-only diagnostics directory")
+
+    monkeypatch.setattr(diagnostics, "save_response", cannot_write)
+    client = LLMClient.__new__(LLMClient)
+    client.provider, client.model, client.calls = "anthropic", "fixture", []
+    with pytest.raises(json.JSONDecodeError) as caught:
+        client._parse_json_response('{"broken": }')
+    assert caught.value.msg == "Expecting value"

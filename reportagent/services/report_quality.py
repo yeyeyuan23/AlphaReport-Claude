@@ -422,13 +422,30 @@ async def review_report_ids(
                 else:
                     if llm is None:
                         llm = LLMClient(thinking="disabled")
+                    llm.diagnostic_context = {
+                        "task": "full_text_review",
+                        "report_id": rid,
+                    }
                     audit["review_ids"].append(rid)
                     result = await asyncio.wait_for(
                         evaluate_paper(paper, llm), timeout=240
                     )
             except Exception as exc:
                 review_failed = True
-                logger.warning("Report %s review failed: %s", rid, type(exc).__name__)
+                if isinstance(exc, json.JSONDecodeError):
+                    logger.warning(
+                        "Report %s review failed: JSONDecodeError: %s line=%s column=%s position=%s response_path=%s",
+                        rid,
+                        exc.msg,
+                        exc.lineno,
+                        exc.colno,
+                        exc.pos,
+                        getattr(exc, "response_path", None),
+                    )
+                else:
+                    logger.warning(
+                        "Report %s review failed: %s", rid, type(exc).__name__
+                    )
                 result = pending_review(
                     paper, f"全文评估未完成（{type(exc).__name__}），可重试。"
                 )
