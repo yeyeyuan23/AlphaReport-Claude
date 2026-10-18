@@ -97,20 +97,6 @@ def init_db():
             "CREATE INDEX IF NOT EXISTS ix_reports_published_date ON reports (published_date)"
         )
 
-        # Backfill only known typed adapters; a PDF's transport says nothing about its content.
-        from reportagent.services.document_metadata import TYPED_FEEDS
-        import json
+        from reportagent.db.material_type_migration import migrate_material_types
 
-        report_columns = {
-            row[1] for row in conn.exec_driver_sql("PRAGMA table_info(reports)")
-        }
-        for source, kind in TYPED_FEEDS.items() if "source" in report_columns else ():
-            conn.exec_driver_sql(
-                "UPDATE reports SET material_type = ?, material_type_info_json = ? "
-                "WHERE source = ? AND (material_type IS NULL OR material_type = '' OR material_type = 'unknown')",
-                (
-                    kind,
-                    json.dumps({"source": "typed_feed", "evidence": source}),
-                    source,
-                ),
-            )
+        migrate_material_types(conn)

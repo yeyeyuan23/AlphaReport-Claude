@@ -3,20 +3,44 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime
 
 from reportagent.utils.publication_dates import is_cited_conference_prose
 
 METADATA_VERSION = 2
 MATERIAL_TYPES = {"academic", "broker", "community", "other", "unknown"}
-# These adapters are typed feeds. local_pdf intentionally has no default.
-TYPED_FEEDS = {
-    "arxiv": "academic",
-    "ssrn": "academic",
-    "eastmoney": "broker",
-    "broker": "broker",
-    "bigquant": "community",
-}
+
+
+def infer_material_type(paper: dict) -> tuple[str, dict]:
+    """Use document evidence or explicit metadata, never its distribution channel."""
+    from reportagent.processors.metadata_extractor import MetadataExtractor
+
+    raw = paper.get("raw_metadata") or {}
+    value = raw.get("material_type")
+    info = metadata_dict(raw.get("material_type_info"))
+    if value in MATERIAL_TYPES - {"unknown"} and info.get("source") != "typed_feed":
+        return value, info or {"source": "explicit_metadata", "evidence": value}
+    extractor = MetadataExtractor()
+    for text in (paper.get("full_text"), paper.get("abstract")):
+        if text:
+            value, info = extractor.extract_material_type(text[:8000])
+            if value != "unknown":
+                return value, info
+    arxiv_id = paper.get("arxiv_id") or ""
+    if re.fullmatch(r"(?:\d{4}\.\d{4,5}|[A-Za-z.-]+/\d{7})(?:v\d+)?", arxiv_id):
+        return "academic", {
+            "source": "document_identifier",
+            "evidence": f"arXiv:{arxiv_id}",
+        }
+    title = paper.get("title") or ""
+    if re.match(
+        r"^[【\[]?[\u4e00-\u9fff]{2,12}(?:证券|期货)[】\]]?\s*[-—–:：|｜]", title
+    ) and re.search(
+        r"(?:研究报告|专题报告|深度报告|策略报告|系列(?:研究|专题|之))", title
+    ):
+        return "broker", {"source": "document_title", "evidence": title}
+    return "unknown", {"source": "unknown"}
 
 
 def metadata_dict(value) -> dict:
@@ -166,17 +190,24 @@ def merge_document_metadata(row, search_result) -> None:
             row.publication_date_info_json = (
                 json.dumps(new, ensure_ascii=False) if new else None
             )
-    value = raw.get("material_type")
-    type_info = raw.get("material_type_info") or {}
-    if not value and search_result.source.value in TYPED_FEEDS:
-        value = TYPED_FEEDS[search_result.source.value]
-        type_info = {"source": "typed_feed", "evidence": search_result.source.value}
+    value, type_info = infer_material_type(
+        {
+            "title": search_result.title,
+            "full_text": search_result.full_text,
+            "abstract": search_result.abstract,
+            "arxiv_id": search_result.arxiv_id,
+            "raw_metadata": raw,
+        }
+    )
+    old_type_info = metadata_dict(row.material_type_info_json)
+    legacy_type = old_type_info.get("source") == "typed_feed"
     if (
         value in MATERIAL_TYPES
         and value != "unknown"
-        and row.material_type in {None, "", "unknown"}
+        and (row.material_type in {None, "", "unknown"} or legacy_type)
     ):
         row.material_type = value
         row.material_type_info_json = json.dumps(type_info, ensure_ascii=False)
-    elif not row.material_type:
+    elif not row.material_type or legacy_type:
         row.material_type = "unknown"
+        row.material_type_info_json = json.dumps({"source": "unknown"})

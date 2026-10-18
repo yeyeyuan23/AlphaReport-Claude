@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
-from reportagent.processors.pdf_extractor import PDFContent
+if TYPE_CHECKING:
+    from reportagent.processors.pdf_extractor import PDFContent
 from reportagent.utils.publication_dates import conference_edition_year
 
 
@@ -54,7 +55,7 @@ class MetadataExtractor:
         date, date_source = self._publication_date(meta, first_page)
         date_info = self._publication_info(meta, first_page, date, date_source)
 
-        material_type, material_info = self._material_type(first_page)
+        material_type, material_info = self.extract_material_type(first_page)
         result = {
             "title": title,
             "authors": authors,
@@ -71,6 +72,8 @@ class MetadataExtractor:
             "material_type_info": material_info,
         }
         if fallback_text.strip() and fallback_text.strip() != first_page.strip():
+            from reportagent.processors.pdf_extractor import PDFContent
+
             fallback = self.extract(PDFContent(text=fallback_text, page_count=1))
             result = self._merge_metadata(result, fallback)
         return result
@@ -135,17 +138,25 @@ class MetadataExtractor:
             }
         return result
 
-    def _material_type(self, first_page: str) -> tuple[str, dict]:
+    def extract_material_type(self, first_page: str) -> tuple[str, dict]:
         # Header labels only: ordinary prose and references are not document type evidence.
         front = self._FRONTMATTER_END.split(first_page, maxsplit=1)[0]
         rules = (
             (
                 "broker",
-                r"^(?:证券研究报告|券商研究报告|证券公司研究报告|securities research report)(?:\s|$|[|｜:：])",
+                r"^(?:[^\n|｜]{1,24}[|｜]\s*)?(?:证券研究报告|券商研究报告|证券公司研究报告|securities research report)(?:\s|$|[|｜:：·•—–-])",
+            ),
+            (
+                "broker",
+                r"^(?:本文|本篇|本报告)(?:来自|转载自|摘自)[^\n]{2,40}(?:证券|期货)(?:研究所|研究院)?[^\n]{0,60}(?:发布的报告|研究报告)",
             ),
             (
                 "community",
                 r"^(?:BigQuant|聚宽|JoinQuant)\s*(?:社区研究|community research)(?:\s|$|[|｜:：])",
+            ),
+            (
+                "broker",
+                r"^[\u4e00-\u9fff]{2,12}(?:证券|期货)(?:研究所|研究院)基于(?:策略|研究)?报告",
             ),
             (
                 "academic",
@@ -157,6 +168,16 @@ class MetadataExtractor:
                 line = re.sub(r"^\s*#{1,6}\s+", "", line).strip()
                 if re.search(pattern, line, re.I):
                     return kind, {"source": "document_header", "evidence": line}
+        if "分析师" in front and re.search(r"投资咨询号|执业资格|从业资格", front):
+            for line in front.splitlines():
+                line = line.strip()
+                if re.fullmatch(
+                    r"[\u4e00-\u9fff]{2,12}(?:证券|期货)(?:研究所|研究院)", line
+                ):
+                    return "broker", {
+                        "source": "document_header",
+                        "evidence": front.strip()[:800],
+                    }
         # Rotated standalone arXiv stamps may be extracted below the abstract.
         imprint = self._REFERENCES_START.split(first_page, maxsplit=1)[0]
         stamp = self._ARXIV_REVISION_STAMP.search(imprint)

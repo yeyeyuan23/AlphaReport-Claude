@@ -306,14 +306,14 @@ def test_daily_refresh_removes_candidate_whose_date_became_unknown(factory):
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
-        (SourceType.ARXIV, "academic"),
-        (SourceType.SSRN, "academic"),
-        (SourceType.BROKER, "broker"),
-        (SourceType.EASTMONEY, "broker"),
-        (SourceType.BIGQUANT, "community"),
+        (SourceType.ARXIV, "unknown"),
+        (SourceType.SSRN, "unknown"),
+        (SourceType.BROKER, "unknown"),
+        (SourceType.EASTMONEY, "unknown"),
+        (SourceType.BIGQUANT, "unknown"),
     ],
 )
-def test_typed_online_feeds_persist_type_at_ingest(factory, source, expected):
+def test_online_sources_without_document_evidence_stay_unknown(factory, source, expected):
     with factory() as session:
         _, rid = ReportRepository(session).upsert_report(
             incoming(source=source, raw_metadata={})
@@ -344,7 +344,7 @@ def test_schema_upgrade_is_idempotent_and_does_not_guess_local_type(
         rows = conn.exec_driver_sql(
             "SELECT material_type,published_date FROM reports ORDER BY id"
         ).all()
-        assert rows == [("unknown", "2024-02-03"), ("academic", "2024-03-04")]
+        assert rows == [("unknown", "2024-02-03"), ("unknown", "2024-03-04")]
         assert "metadata_version" in {
             r[1] for r in conn.exec_driver_sql("PRAGMA table_info(local_pdf_imports)")
         }
